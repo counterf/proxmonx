@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface SuccessToastProps {
   message: string;
@@ -8,14 +8,18 @@ interface SuccessToastProps {
 
 export default function SuccessToast({ message, onDismiss, duration = 4000 }: SuccessToastProps) {
   const [visible, setVisible] = useState(true);
+  // Keep a ref so the timer effect doesn't re-run when the parent re-renders
+  // with a new inline onDismiss function reference.
+  const onDismissRef = useRef(onDismiss);
+  useEffect(() => { onDismissRef.current = onDismiss; });
 
   useEffect(() => {
     const timer = setTimeout(() => {
       setVisible(false);
-      onDismiss();
+      onDismissRef.current();
     }, duration);
     return () => clearTimeout(timer);
-  }, [duration, onDismiss]);
+  }, [duration]); // intentionally omits onDismiss — captured via ref above
 
   if (!visible) return null;
 

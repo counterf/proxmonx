@@ -94,18 +94,6 @@ export default function Settings() {
       .finally(() => setLoading(false));
   }, []);
 
-  // beforeunload warning
-  useEffect(() => {
-    const isDirty = form && savedForm && JSON.stringify(form) !== JSON.stringify(savedForm);
-    const handler = (e: BeforeUnloadEvent) => {
-      if (isDirty) {
-        e.preventDefault();
-      }
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [form, savedForm]);
-
   const setField = useCallback(<K extends keyof FormData>(key: K, value: FormData[K]) => {
     setForm((prev) => prev ? { ...prev, [key]: value } : prev);
     setErrors((prev) => ({ ...prev, [key]: undefined }));
@@ -114,7 +102,22 @@ export default function Settings() {
     }
   }, []);
 
-  const isDirty = form && savedForm && JSON.stringify(form) !== JSON.stringify(savedForm);
+  // tokenSecretChanged must be ORed in: typing "***" back after changing it would
+  // produce equal JSON strings, hiding a real change from the dirty check.
+  const isDirty =
+    tokenSecretChanged.current ||
+    (form !== null && savedForm !== null && JSON.stringify(form) !== JSON.stringify(savedForm));
+
+  // beforeunload warning
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDirty]);
 
   const validate = (): boolean => {
     if (!form) return false;

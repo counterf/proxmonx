@@ -7,12 +7,16 @@ interface ToggleProps {
 }
 
 export default function Toggle({ id, label, checked, onChange, hint }: ToggleProps) {
+  const labelId = `${id}-label`;
   return (
     <div className="flex items-center justify-between">
       <div>
-        <label htmlFor={id} className="text-xs text-gray-400">
+        {/* span + aria-labelledby rather than label[htmlFor] on a <button>: the
+            HTML spec only links <label> to labelable elements (input, select, etc.),
+            not <button>. Using aria-labelledby avoids double-activation on AT. */}
+        <span id={labelId} className="text-xs text-gray-400">
           {label}
-        </label>
+        </span>
         {hint && <p className="text-xs text-gray-600 mt-0.5">{hint}</p>}
       </div>
       <button
@@ -20,6 +24,7 @@ export default function Toggle({ id, label, checked, onChange, hint }: TogglePro
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-labelledby={labelId}
         onClick={() => onChange(!checked)}
         className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none ${
           checked ? 'bg-blue-600' : 'bg-gray-700'

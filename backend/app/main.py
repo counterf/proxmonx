@@ -32,18 +32,6 @@ def _configure_logging(level: str) -> None:
     )
 
 
-def _merge_config_into_settings(settings: Settings, config_data: dict[str, str | int | bool | None]) -> Settings:
-    """Create a new Settings instance with config file values taking priority."""
-    # Build a dict of current settings
-    current = settings.model_dump()
-    # Config file values override env/defaults
-    for key, value in config_data.items():
-        if key in current and value is not None:
-            current[key] = value
-    # Create new Settings without reading env file (values already merged)
-    return Settings(**current)
-
-
 # Global references for dependency injection
 _scheduler: Scheduler | None = None
 _settings: Settings | None = None
@@ -58,9 +46,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Load config file and merge (config file takes priority over env vars)
     config_store = ConfigStore(settings.config_file_path)
-    config_data = config_store.load()
-    if config_data:
-        settings = _merge_config_into_settings(settings, config_data)
+    settings = config_store.merge_into_settings(settings)
 
     _settings = settings
     app.state.config_store = config_store

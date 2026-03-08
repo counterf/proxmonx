@@ -11,10 +11,17 @@ import type {
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 
+export class HttpError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = 'HttpError';
+  }
+}
+
 async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, options);
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    throw new HttpError(response.status, `HTTP ${response.status}: ${response.statusText}`);
   }
   return response.json() as Promise<T>;
 }

@@ -68,6 +68,12 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [transitioning, setTransitioning] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -193,26 +199,23 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
       await saveSettings(payload);
       // Transition to discovery screen
       setTransitioning(true);
-      // Poll health until guests found or 30s timeout
+      // Poll health until guests are found or 30s timeout; await so finally clears saving state
       const startTime = Date.now();
-      const poll = async () => {
-        while (Date.now() - startTime < 30000) {
-          try {
-            const h = await fetchHealth();
-            if (h.guest_count > 0) {
-              onComplete();
-              return;
-            }
-          } catch {
-            // ignore
-          }
-          await new Promise((r) => setTimeout(r, 2000));
+      while (mountedRef.current && Date.now() - startTime < 30_000) {
+        try {
+          const h = await fetchHealth();
+          if (h.guest_count > 0) break;
+        } catch {
+          // network hiccup — keep polling
         }
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+      if (mountedRef.current) {
         onComplete();
-      };
-      poll();
+      }
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save settings');
+    } finally {
       setSaving(false);
     }
   };
@@ -379,7 +382,7 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
           </div>
 
           {authMethod === 'key' && (
-            <FormField label="Private Key Path" error={errors.ssh_key_path} htmlFor="ssh_key_path">
+            <FormField label="Private Key Path" required error={errors.ssh_key_path} htmlFor="ssh_key_path">
               <input
                 id="ssh_key_path"
                 type="text"

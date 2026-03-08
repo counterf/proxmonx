@@ -298,39 +298,32 @@ async def save_settings(
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    # Reload settings from merged config + env
-    new_settings = Settings()
-    file_data = config_store.load()
-    current_dict = new_settings.model_dump()
-    for key, value in file_data.items():
-        if key in current_dict and value is not None:
-            current_dict[key] = value
-    new_settings = Settings(**current_dict)
-
-    # Update the dependency overrides with new settings
-    request.app.dependency_overrides[_get_settings] = lambda: new_settings
+    # Reload settings: config file values take priority over env/defaults
+    new_settings = config_store.merge_into_settings(Settings())
 
     # Stop existing scheduler if running
     if scheduler is not None:
         await scheduler.stop()
 
-    # Start new scheduler with new settings
-    http_client = httpx.AsyncClient(timeout=10.0, verify=new_settings.verify_ssl)
-    # Replace http_client on app state (close old one if exists)
-    old_client = getattr(request.app.state, "http_client", None)
-    request.app.state.http_client = http_client
-
-    proxmox = ProxmoxClient(new_settings, http_client=http_client)
-    github = GitHubClient(new_settings, http_client=http_client)
-    ssh = SSHClient(new_settings)
-    engine = DiscoveryEngine(proxmox, github, ssh, http_client=http_client)
-    new_scheduler = Scheduler(new_settings, engine)
-
-    request.app.dependency_overrides[_get_scheduler] = lambda: new_scheduler
-    new_scheduler.start()
-
-    # Close old http client after new one is set up
-    if old_client is not None:
-        await old_client.aclose()
+    old_client: httpx.AsyncClient | None = getattr(request.app.state, "http_client", None)
+    new_client = httpx.AsyncClient(timeout=10.0, verify=new_settings.verify_ssl)
+    try:
+        proxmox = ProxmoxClient(new_settings, http_client=new_client)
+        github = GitHubClient(new_settings, http_client=new_client)
+        ssh = SSHClient(new_settings)
+        engine = DiscoveryEngine(proxmox, github, ssh, http_client=new_client)
+        new_scheduler = Scheduler(new_settings, engine)
+        new_scheduler.start()
+        # Only update app state after successful start
+        request.app.state.http_client = new_client
+        request.app.dependency_overrides[_get_scheduler] = lambda: new_scheduler
+        request.app.dependency_overrides[_get_settings] = lambda: new_settings
+    except Exception as exc:
+        await new_client.aclose()
+        raise HTTPException(status_code=500, detail=f"Failed to start scheduler: {exc}") from exc
+    finally:
+        # Close old client regardless of success/failure
+        if old_client is not None:
+            await old_client.aclose()
 
     return {"success": True, "message": "Settings saved"}

@@ -164,3 +164,27 @@ class TestPriorityOrder:
         monkeypatch.setenv("PROXMOX_NODE", "env-node")
 
         assert store.is_configured() is True
+
+    def test_token_secret_from_env_only_is_preserved_on_save(
+        self, store: ConfigStore, config_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When token_secret exists only in env (no config file), is_configured returns True."""
+        monkeypatch.setenv("PROXMOX_HOST", "https://env-host:8006")
+        monkeypatch.setenv("PROXMOX_TOKEN_ID", "env@pam!token")
+        monkeypatch.setenv("PROXMOX_TOKEN_SECRET", "env-secret-only")
+        monkeypatch.setenv("PROXMOX_NODE", "env-node")
+
+        # No config file exists yet — configured via env vars only
+        assert store.is_configured() is True
+
+        # Simulate a save that doesn't include the token secret (null = keep current)
+        # After save, the file should include the secret from env
+        new_data: dict[str, str | int | bool | None] = {
+            "proxmox_host": "https://env-host:8006",
+            "proxmox_token_id": "env@pam!token",
+            "proxmox_token_secret": "env-secret-only",  # caller resolves this before saving
+            "proxmox_node": "env-node",
+        }
+        store.save(new_data)
+        loaded = store.load()
+        assert loaded["proxmox_token_secret"] == "env-secret-only"

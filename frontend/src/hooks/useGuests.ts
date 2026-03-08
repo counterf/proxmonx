@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { GuestSummary } from '../types';
-import { fetchGuests, triggerRefresh } from '../api/client';
+import { fetchGuests, triggerRefresh, HttpError } from '../api/client';
 
 interface UseGuestsResult {
   guests: GuestSummary[];
@@ -28,7 +28,7 @@ export function useGuests(): UseGuestsResult {
       setLastRefreshed(new Date());
       setError(null);
     } catch (err) {
-      if (err instanceof Error && err.message.includes('503')) {
+      if (err instanceof HttpError && err.status === 503) {
         setError('not_configured');
       } else {
         const message = err instanceof Error ? err.message : 'Failed to load guests';

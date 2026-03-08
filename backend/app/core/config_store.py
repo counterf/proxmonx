@@ -1,9 +1,15 @@
 """Config file persistence layer for UI-driven settings."""
 
+from __future__ import annotations
+
 import json
 import logging
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -66,3 +72,16 @@ class ConfigStore:
             if not value:
                 missing.append(field)
         return missing
+
+    def merge_into_settings(self, settings: Settings) -> Settings:
+        """Return a new Settings instance with config file values taking priority over env/defaults."""
+        from app.config import Settings as SettingsCls  # local import avoids circular dep at module level
+
+        config_data = self.load()
+        if not config_data:
+            return settings
+        current = settings.model_dump()
+        for key, value in config_data.items():
+            if key in current and value is not None:
+                current[key] = value
+        return SettingsCls(**current)

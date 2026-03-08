@@ -84,7 +84,6 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/guest/:id" element={<GuestDetail />} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="/setup" element={<Settings />} />
         </Routes>
       </main>
     </div>
