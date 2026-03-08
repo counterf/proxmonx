@@ -28,8 +28,12 @@ export function useGuests(): UseGuestsResult {
       setLastRefreshed(new Date());
       setError(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load guests';
-      setError(message);
+      if (err instanceof Error && err.message.includes('503')) {
+        setError('not_configured');
+      } else {
+        const message = err instanceof Error ? err.message : 'Failed to load guests';
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }

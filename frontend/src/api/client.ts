@@ -1,4 +1,13 @@
-import type { GuestSummary, GuestDetail, HealthStatus, AppSettings } from '../types';
+import type {
+  GuestSummary,
+  GuestDetail,
+  HealthStatus,
+  AppSettings,
+  SetupStatus,
+  FullSettings,
+  SettingsSaveRequest,
+  ConnectionTestResult,
+} from '../types';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 
@@ -28,4 +37,38 @@ export async function fetchSettings(): Promise<AppSettings> {
 
 export async function fetchHealth(): Promise<HealthStatus> {
   return fetchJson<HealthStatus>('/health');
+}
+
+export async function fetchSetupStatus(): Promise<SetupStatus> {
+  return fetchJson<SetupStatus>('/api/setup/status');
+}
+
+export async function fetchFullSettings(): Promise<FullSettings> {
+  return fetchJson<FullSettings>('/api/settings/full');
+}
+
+export async function testConnection(
+  data: {
+    proxmox_host: string;
+    proxmox_token_id: string;
+    proxmox_token_secret: string;
+    proxmox_node: string;
+    verify_ssl: boolean;
+  },
+): Promise<ConnectionTestResult> {
+  return fetchJson<ConnectionTestResult>('/api/settings/test-connection', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function saveSettings(
+  data: SettingsSaveRequest,
+): Promise<{ success: boolean; message: string }> {
+  return fetchJson<{ success: boolean; message: string }>('/api/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
 }

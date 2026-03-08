@@ -11,8 +11,9 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import router, _get_scheduler, _get_settings
+from app.api.routes import router, _get_scheduler, _get_settings, _get_config_store
 from app.config import Settings
+from app.core.config_store import ConfigStore
 from app.core.discovery import DiscoveryEngine
 from app.core.github import GitHubClient
 from app.core.proxmox import ProxmoxClient
@@ -31,6 +32,18 @@ def _configure_logging(level: str) -> None:
     )
 
 
+def _merge_config_into_settings(settings: Settings, config_data: dict[str, str | int | bool | None]) -> Settings:
+    """Create a new Settings instance with config file values taking priority."""
+    # Build a dict of current settings
+    current = settings.model_dump()
+    # Config file values override env/defaults
+    for key, value in config_data.items():
+        if key in current and value is not None:
+            current[key] = value
+    # Create new Settings without reading env file (values already merged)
+    return Settings(**current)
+
+
 # Global references for dependency injection
 _scheduler: Scheduler | None = None
 _settings: Settings | None = None
@@ -42,11 +55,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _scheduler, _settings
 
     settings = Settings()
+
+    # Load config file and merge (config file takes priority over env vars)
+    config_store = ConfigStore(settings.config_file_path)
+    config_data = config_store.load()
+    if config_data:
+        settings = _merge_config_into_settings(settings, config_data)
+
     _settings = settings
+    app.state.config_store = config_store
     _configure_logging(settings.log_level)
 
     logger = logging.getLogger(__name__)
     logger.info("Starting proxmon")
+
+    configured = config_store.is_configured()
+
+    if not configured:
+        logger.warning("proxmon starting in unconfigured mode -- visit the UI to configure")
+        # Store empty scheduler reference and settings
+        app.dependency_overrides[_get_scheduler] = lambda: None
+        app.dependency_overrides[_get_settings] = lambda: settings
+        app.dependency_overrides[_get_config_store] = lambda: config_store
+        yield
+        logger.info("proxmon stopped")
+        return
 
     if not settings.verify_ssl:
         logger.warning("SSL verification is disabled (VERIFY_SSL=false)")
@@ -69,6 +102,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Override dependency getters
     app.dependency_overrides[_get_scheduler] = lambda: scheduler
     app.dependency_overrides[_get_settings] = lambda: settings
+    app.dependency_overrides[_get_config_store] = lambda: config_store
 
     scheduler.start()
 

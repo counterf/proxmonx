@@ -1,9 +1,64 @@
-import { Routes, Route, Link } from 'react-router-dom';
+import { useState, useEffect, useCallback } from 'react';
+import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import Dashboard from './components/Dashboard';
 import GuestDetail from './components/GuestDetail';
 import Settings from './components/Settings';
+import SetupWizard from './components/setup/SetupWizard';
+import LoadingSpinner from './components/LoadingSpinner';
+import { fetchSetupStatus } from './api/client';
 
 function App() {
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [checkError, setCheckError] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const checkSetup = useCallback(async () => {
+    try {
+      const status = await fetchSetupStatus();
+      setConfigured(status.configured);
+      setCheckError(false);
+      if (!status.configured && location.pathname !== '/setup') {
+        navigate('/setup', { replace: true });
+      }
+    } catch {
+      // If backend is unreachable, show setup anyway
+      setCheckError(true);
+      setConfigured(false);
+    }
+  }, [navigate, location.pathname]);
+
+  useEffect(() => {
+    checkSetup();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleWizardComplete = useCallback(() => {
+    setConfigured(true);
+    navigate('/', { replace: true });
+  }, [navigate]);
+
+  // Loading state
+  if (configured === null && !checkError) {
+    return (
+      <div className="min-h-screen bg-background text-gray-100 flex items-center justify-center">
+        <LoadingSpinner text="Connecting to proxmon..." />
+      </div>
+    );
+  }
+
+  // Unconfigured: show wizard
+  if (configured === false) {
+    return (
+      <div className="min-h-screen bg-background text-gray-100">
+        <nav className="sticky top-0 z-50 flex items-center h-12 px-4 bg-surface border-b border-gray-800">
+          <span className="text-lg font-bold tracking-tight text-white">proxmon</span>
+        </nav>
+        <SetupWizard onComplete={handleWizardComplete} />
+      </div>
+    );
+  }
+
+  // Configured: normal app
   return (
     <div className="min-h-screen bg-background text-gray-100">
       {/* Navbar */}
@@ -29,6 +84,7 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/guest/:id" element={<GuestDetail />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/setup" element={<Settings />} />
         </Routes>
       </main>
     </div>

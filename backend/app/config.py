@@ -1,16 +1,16 @@
-"""Application configuration via environment variables."""
+"""Application configuration via environment variables and config file."""
 
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """All settings configurable via environment variables."""
+    """All settings configurable via environment variables or config file."""
 
-    # Proxmox connection (required)
-    proxmox_host: str
-    proxmox_token_id: str
-    proxmox_token_secret: str
-    proxmox_node: str
+    # Proxmox connection (optional so app can start unconfigured)
+    proxmox_host: str | None = None
+    proxmox_token_id: str | None = None
+    proxmox_token_secret: str | None = None
+    proxmox_node: str | None = None
 
     # Discovery
     poll_interval_seconds: int = 300
@@ -33,10 +33,15 @@ class Settings(BaseSettings):
     proxmon_enabled: bool = True
     ssh_enabled: bool = True
 
+    # Config file path
+    config_file_path: str = "/app/data/config.json"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
     def masked_token_id(self) -> str:
         """Return token ID with secret portion masked."""
+        if not self.proxmox_token_id:
+            return ""
         parts = self.proxmox_token_id.split("!")
         if len(parts) == 2:
             return f"{parts[0]}!****"
@@ -45,9 +50,9 @@ class Settings(BaseSettings):
     def masked_settings(self) -> dict[str, str | int | bool | None]:
         """Return settings dict with secrets masked."""
         return {
-            "proxmox_host": self.proxmox_host,
+            "proxmox_host": self.proxmox_host or "",
             "proxmox_token_id": self.masked_token_id(),
-            "proxmox_node": self.proxmox_node,
+            "proxmox_node": self.proxmox_node or "",
             "poll_interval_seconds": self.poll_interval_seconds,
             "discover_vms": self.discover_vms,
             "verify_ssl": self.verify_ssl,
