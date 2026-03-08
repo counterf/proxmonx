@@ -21,8 +21,11 @@ COMMAND_WHITELIST = frozenset({
     "rpm -q",
 })
 
-# Reject commands containing shell metacharacters to prevent injection
-SHELL_METACHARACTERS = re.compile(r'[;&|`$<>\n\\]')
+# Reject commands containing shell metacharacters to prevent injection.
+# Covers: statement separators (;), logical ops (&& ||), pipes (|), command
+# substitution (` $ ( )), brace expansion ({), redirects (< >), history (!),
+# comments (#), newlines and backslash escapes.
+SHELL_METACHARACTERS = re.compile(r'[;&|`$<>()\{\}!\n\\#]')
 
 
 class SSHClient:

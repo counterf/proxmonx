@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "SSH_KNOWN_HOSTS_PATH not set; using WarningPolicy (no strict host key verification)"
         )
 
-    http_client = httpx.AsyncClient(timeout=10.0)
+    http_client = httpx.AsyncClient(timeout=10.0, verify=settings.verify_ssl)
     app.state.http_client = http_client
 
     proxmox = ProxmoxClient(settings, http_client=http_client)
@@ -86,7 +86,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — origins configured via CORS_ORIGINS env var (JSON list or comma-separated)
+# CORS — origins configured via CORS_ORIGINS env var (JSON list or comma-separated).
+# Read directly from os.environ rather than pydantic-settings because CORSMiddleware
+# must be registered at module import time (before the ASGI lifespan runs). Docker
+# Compose env_file injects values into the container's environment, so os.environ
+# correctly picks up .env values in production.
 _DEFAULT_CORS_ORIGINS = ["http://localhost:3000", "http://frontend"]
 
 
@@ -101,6 +105,7 @@ def _parse_cors_origins() -> list[str]:
     except (ValueError, TypeError):
         pass
     return [o.strip() for o in raw.split(",") if o.strip()]
+
 
 app.add_middleware(
     CORSMiddleware,

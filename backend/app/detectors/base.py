@@ -18,7 +18,11 @@ class BaseDetector(ABC):
     aliases: list[str]  # alternative name matches
     default_port: int
     docker_images: list[str]  # Docker image name patterns
-    http_client: httpx.AsyncClient | None = None
+
+    def __init__(self) -> None:
+        # Instance-level attribute (not class-level) so injecting a shared
+        # httpx client on one instance does not mutate state for other instances.
+        self.http_client: httpx.AsyncClient | None = None
 
     def _name_matches(self, guest_name: str) -> bool:
         """Word-boundary/token matching to avoid substring false positives."""
