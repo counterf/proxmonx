@@ -11,7 +11,7 @@ class RadarrDetector(BaseDetector):
     name = "radarr"
     display_name = "Radarr"
     github_repo = "Radarr/Radarr"
-    aliases = ["radarr"]
+    aliases: list[str] = []
     default_port = 7878
     docker_images = ["radarr", "linuxserver/radarr", "hotio/radarr"]
 

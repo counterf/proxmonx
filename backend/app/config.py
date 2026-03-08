@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     # GitHub
     github_token: str | None = None
 
+    # SSH host key verification
+    ssh_known_hosts_path: str = ""
+
+    # CORS
+    cors_origins: list[str] = ["http://localhost:3000", "http://frontend"]
+
     # Application
     log_level: str = "info"
     proxmon_enabled: bool = True

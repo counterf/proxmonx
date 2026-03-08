@@ -1,5 +1,6 @@
 """GitHub Releases API client with in-memory TTL cache."""
 
+import contextlib
 import logging
 import time
 
@@ -16,9 +17,10 @@ CACHE_TTL_SECONDS = 3600
 class GitHubClient:
     """Fetch latest release versions from GitHub with caching."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, http_client: httpx.AsyncClient | None = None) -> None:
         self._token = settings.github_token
         self._cache: dict[str, tuple[str, float]] = {}  # repo -> (version, timestamp)
+        self._http_client = http_client
 
     async def get_latest_version(self, repo: str) -> str | None:
         """Get the latest release version for a GitHub repo.
@@ -57,8 +59,9 @@ class GitHubClient:
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(url, headers=headers)
+        ctx = contextlib.nullcontext(self._http_client) if self._http_client else httpx.AsyncClient(timeout=10.0)
+        async with ctx as c:
+            response = await c.get(url, headers=headers)
 
             if response.status_code == 404:
                 logger.debug("No releases found for %s", repo)

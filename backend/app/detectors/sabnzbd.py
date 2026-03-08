@@ -11,7 +11,7 @@ class SABnzbdDetector(BaseDetector):
     name = "sabnzbd"
     display_name = "SABnzbd"
     github_repo = "sabnzbd/sabnzbd"
-    aliases = ["sabnzbd", "sab"]
+    aliases = ["sab"]
     default_port = 8085
     docker_images = ["sabnzbd", "linuxserver/sabnzbd"]
 

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 
 import paramiko
@@ -20,6 +21,9 @@ COMMAND_WHITELIST = frozenset({
     "rpm -q",
 })
 
+# Reject commands containing shell metacharacters to prevent injection
+SHELL_METACHARACTERS = re.compile(r'[;&|`$<>\n\\]')
+
 
 class SSHClient:
     """Execute read-only commands on Proxmox guests via SSH."""
@@ -29,9 +33,13 @@ class SSHClient:
         self._key_path = settings.ssh_key_path
         self._password = settings.ssh_password
         self._enabled = settings.ssh_enabled
+        self._known_hosts_path = settings.ssh_known_hosts_path
 
     def _is_command_allowed(self, command: str) -> bool:
-        """Check command against whitelist."""
+        """Check command against whitelist, rejecting shell metacharacters."""
+        if SHELL_METACHARACTERS.search(command):
+            logger.warning("Command contains shell metacharacters, refusing: %s", command)
+            return False
         return any(command.startswith(prefix) for prefix in COMMAND_WHITELIST)
 
     async def execute(self, host: str, command: str, timeout: int = 10) -> str | None:
@@ -58,7 +66,13 @@ class SSHClient:
     def _execute_sync(self, host: str, command: str, timeout: int) -> str | None:
         """Blocking SSH execution (run in thread)."""
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        if self._known_hosts_path and Path(self._known_hosts_path).is_file():
+            client.load_host_keys(self._known_hosts_path)
+            client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        else:
+            # WarningPolicy logs unknown host keys instead of silently accepting.
+            # Set SSH_KNOWN_HOSTS_PATH for strict host key verification.
+            client.set_missing_host_key_policy(paramiko.WarningPolicy())
         try:
             connect_kwargs: dict[str, str | int | Path | None] = {
                 "hostname": host,

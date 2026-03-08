@@ -1,5 +1,7 @@
 """Base detector abstract class."""
 
+import contextlib
+import re
 from abc import ABC, abstractmethod
 
 import httpx
@@ -16,14 +18,18 @@ class BaseDetector(ABC):
     aliases: list[str]  # alternative name matches
     default_port: int
     docker_images: list[str]  # Docker image name patterns
+    http_client: httpx.AsyncClient | None = None
+
+    def _name_matches(self, guest_name: str) -> bool:
+        """Word-boundary/token matching to avoid substring false positives."""
+        name_tokens = set(re.split(r'[-_.\s]+', guest_name.lower()))
+        return self.name in name_tokens or any(alias in name_tokens for alias in self.aliases)
 
     def detect(self, guest: GuestInfo) -> str | None:
         """Check if this detector matches a guest by name or tags.
 
         Returns the detection method string or None.
         """
-        guest_name_lower = guest.name.lower()
-
         # Check tags first (higher priority per PRD)
         for tag in guest.tags:
             tag_lower = tag.lower()
@@ -33,12 +39,9 @@ class BaseDetector(ABC):
                 if tag_lower == alias or tag_lower == f"app:{alias}":
                     return "tag_match"
 
-        # Check guest name
-        if self.name in guest_name_lower:
+        # Check guest name using token matching
+        if self._name_matches(guest.name):
             return "name_match"
-        for alias in self.aliases:
-            if alias in guest_name_lower:
-                return "name_match"
 
         return None
 
@@ -62,5 +65,6 @@ class BaseDetector(ABC):
 
     async def _http_get(self, url: str, timeout: float = 5.0) -> httpx.Response:
         """Helper for making HTTP GET requests to guest apps."""
-        async with httpx.AsyncClient(timeout=timeout, verify=False) as client:
+        ctx = contextlib.nullcontext(self.http_client) if self.http_client else httpx.AsyncClient(timeout=timeout, verify=False)
+        async with ctx as client:
             return await client.get(url)

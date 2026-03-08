@@ -11,7 +11,7 @@ class ImmichDetector(BaseDetector):
     name = "immich"
     display_name = "Immich"
     github_repo = "immich-app/immich"
-    aliases = ["immich"]
+    aliases: list[str] = []
     default_port = 2283
     docker_images = ["immich", "ghcr.io/immich-app/immich-server"]
 

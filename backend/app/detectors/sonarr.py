@@ -11,7 +11,7 @@ class SonarrDetector(BaseDetector):
     name = "sonarr"
     display_name = "Sonarr"
     github_repo = "Sonarr/Sonarr"
-    aliases = ["sonarr"]
+    aliases: list[str] = []
     default_port = 8989
     docker_images = ["sonarr", "linuxserver/sonarr", "hotio/sonarr"]
 

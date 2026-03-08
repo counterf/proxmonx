@@ -11,7 +11,7 @@ class ProwlarrDetector(BaseDetector):
     name = "prowlarr"
     display_name = "Prowlarr"
     github_repo = "Prowlarr/Prowlarr"
-    aliases = ["prowlarr"]
+    aliases: list[str] = []
     default_port = 9696
     docker_images = ["prowlarr", "linuxserver/prowlarr", "hotio/prowlarr"]
 

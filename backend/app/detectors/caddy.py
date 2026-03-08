@@ -11,7 +11,7 @@ class CaddyDetector(BaseDetector):
     name = "caddy"
     display_name = "Caddy"
     github_repo = "caddyserver/caddy"
-    aliases = ["caddy"]
+    aliases: list[str] = []
     default_port = 2019
     docker_images = ["caddy", "caddy/caddy"]
 

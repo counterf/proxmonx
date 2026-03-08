@@ -11,7 +11,7 @@ class QBittorrentDetector(BaseDetector):
     name = "qbittorrent"
     display_name = "qBittorrent"
     github_repo = "qbittorrent/qBittorrent"
-    aliases = ["qbittorrent", "qbt"]
+    aliases = ["qbt"]
     default_port = 8080
     docker_images = ["qbittorrent", "linuxserver/qbittorrent"]
 

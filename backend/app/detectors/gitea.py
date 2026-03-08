@@ -11,7 +11,7 @@ class GiteaDetector(BaseDetector):
     name = "gitea"
     display_name = "Gitea"
     github_repo = "go-gitea/gitea"
-    aliases = ["gitea"]
+    aliases: list[str] = []
     default_port = 3000
     docker_images = ["gitea", "gitea/gitea"]
 

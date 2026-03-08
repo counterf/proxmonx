@@ -12,7 +12,7 @@ class PlexDetector(BaseDetector):
     name = "plex"
     display_name = "Plex"
     github_repo = "plexinc/pms-docker"
-    aliases = ["plex", "plexmediaserver", "pms"]
+    aliases = ["plexmediaserver", "pms"]
     default_port = 32400
     docker_images = ["plex", "linuxserver/plex", "plexinc/pms-docker"]
 

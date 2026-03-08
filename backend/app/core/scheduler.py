@@ -27,7 +27,7 @@ class Scheduler:
 
     @property
     def guests(self) -> dict[str, GuestInfo]:
-        return self._guests
+        return dict(self._guests)
 
     @property
     def last_poll(self) -> datetime | None:

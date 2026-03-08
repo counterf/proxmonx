@@ -11,7 +11,7 @@ class BazarrDetector(BaseDetector):
     name = "bazarr"
     display_name = "Bazarr"
     github_repo = "morpheus65535/bazarr"
-    aliases = ["bazarr"]
+    aliases: list[str] = []
     default_port = 6767
     docker_images = ["bazarr", "linuxserver/bazarr", "hotio/bazarr"]
 

@@ -16,7 +16,7 @@ class ProxmoxClient:
     # Safety: only GET requests are allowed
     ALLOWED_METHODS = frozenset({"GET"})
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, http_client: httpx.AsyncClient | None = None) -> None:
         self._base_url = f"{settings.proxmox_host}/api2/json"
         self._node = settings.proxmox_node
         self._headers = {
@@ -24,10 +24,15 @@ class ProxmoxClient:
         }
         self._verify_ssl = settings.verify_ssl
         self._discover_vms = settings.discover_vms
+        self._http_client = http_client
 
     async def _get(self, path: str) -> dict[str, list[dict[str, str | int | float | bool | None]] | dict[str, str | int | float | bool | None]]:
         """Execute a GET request against the Proxmox API."""
         url = f"{self._base_url}{path}"
+        if self._http_client:
+            response = await self._http_client.get(url, headers=self._headers)
+            response.raise_for_status()
+            return response.json()
         async with httpx.AsyncClient(verify=self._verify_ssl, timeout=10.0) as client:
             response = await client.get(url, headers=self._headers)
             response.raise_for_status()

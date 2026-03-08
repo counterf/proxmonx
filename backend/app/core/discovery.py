@@ -4,6 +4,8 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+import httpx
+
 from app.core.github import GitHubClient
 from app.core.proxmox import ProxmoxClient
 from app.core.ssh import SSHClient
@@ -16,6 +18,9 @@ logger = logging.getLogger(__name__)
 # Limit concurrent probes to avoid overwhelming the network
 MAX_CONCURRENT_PROBES = 10
 
+# Maximum number of version history entries to retain per guest
+MAX_VERSION_HISTORY = 10
+
 
 class DiscoveryEngine:
     """Orchestrates guest discovery, app detection, and version checking."""
@@ -25,11 +30,17 @@ class DiscoveryEngine:
         proxmox: ProxmoxClient,
         github: GitHubClient,
         ssh: SSHClient,
+        http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._proxmox = proxmox
         self._github = github
         self._ssh = ssh
+        self._http_client = http_client
         self._semaphore = asyncio.Semaphore(MAX_CONCURRENT_PROBES)
+        # Share the HTTP client with all detectors
+        if http_client:
+            for detector in ALL_DETECTORS:
+                detector.http_client = http_client
 
     async def run_full_cycle(
         self,
@@ -86,7 +97,16 @@ class DiscoveryEngine:
                     guest.update_status = "unknown"
                     guest.last_checked = datetime.now(timezone.utc)
                     if previous:
-                        guest.version_history = previous.version_history[-9:]
+                        guest.version_history = list(previous.version_history)
+                    guest.version_history.append(
+                        VersionCheck(
+                            timestamp=guest.last_checked,
+                            installed_version=None,
+                            latest_version=None,
+                            update_status="unknown",
+                        )
+                    )
+                    guest.version_history = guest.version_history[-MAX_VERSION_HISTORY:]
                     return guest
 
                 # Detect app
@@ -98,9 +118,9 @@ class DiscoveryEngine:
 
                 # Preserve version history from previous checks
                 if previous:
-                    guest.version_history = previous.version_history[-9:]
+                    guest.version_history = list(previous.version_history)
 
-                # Record this check
+                # Record this check, then truncate
                 guest.last_checked = datetime.now(timezone.utc)
                 guest.version_history.append(
                     VersionCheck(
@@ -110,6 +130,7 @@ class DiscoveryEngine:
                         update_status=guest.update_status,
                     )
                 )
+                guest.version_history = guest.version_history[-MAX_VERSION_HISTORY:]
 
                 return guest
             except Exception:
@@ -214,9 +235,34 @@ class DiscoveryEngine:
                 )
 
         # Determine update status
-        if guest.installed_version and guest.latest_version:
-            installed = guest.installed_version.lstrip("v")
-            latest = guest.latest_version.lstrip("v")
-            guest.update_status = "up-to-date" if installed == latest else "outdated"
-        else:
-            guest.update_status = "unknown"
+        guest.update_status = _determine_update_status(
+            guest.installed_version, guest.latest_version
+        )
+
+
+def _normalize_version_string(version: str) -> str:
+    """Strip v prefix and build-hash suffixes (e.g. '1.40.0.7998-c29d4c0c8' -> '1.40.0.7998')."""
+    version = version.lstrip("v")
+    # Strip everything after a hyphen (build hashes like -c29d4c0c8)
+    if "-" in version:
+        version = version.split("-")[0]
+    return version
+
+
+def _determine_update_status(
+    installed: str | None, latest: str | None
+) -> str:
+    """Compare installed vs latest version, handling build-hash suffixes."""
+    if not installed or not latest:
+        return "unknown"
+
+    from packaging.version import Version, InvalidVersion
+
+    norm_installed = _normalize_version_string(installed)
+    norm_latest = _normalize_version_string(latest)
+
+    try:
+        return "up-to-date" if Version(norm_installed) >= Version(norm_latest) else "outdated"
+    except InvalidVersion:
+        # Fall back to normalized string equality
+        return "up-to-date" if norm_installed == norm_latest else "outdated"

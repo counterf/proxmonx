@@ -11,7 +11,7 @@ class NtfyDetector(BaseDetector):
     name = "ntfy"
     display_name = "ntfy"
     github_repo = "binwiederhier/ntfy"
-    aliases = ["ntfy"]
+    aliases: list[str] = []
     default_port = 80
     docker_images = ["ntfy", "binwiederhier/ntfy"]
 

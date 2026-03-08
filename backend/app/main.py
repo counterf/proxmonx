@@ -1,10 +1,13 @@
 """FastAPI application entry point."""
 
+import json
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -45,10 +48,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger = logging.getLogger(__name__)
     logger.info("Starting proxmon")
 
-    proxmox = ProxmoxClient(settings)
-    github = GitHubClient(settings)
+    if not settings.verify_ssl:
+        logger.warning("SSL verification is disabled (VERIFY_SSL=false)")
+
+    if not settings.ssh_known_hosts_path:
+        logger.warning(
+            "SSH_KNOWN_HOSTS_PATH not set; using WarningPolicy (no strict host key verification)"
+        )
+
+    http_client = httpx.AsyncClient(timeout=10.0)
+    app.state.http_client = http_client
+
+    proxmox = ProxmoxClient(settings, http_client=http_client)
+    github = GitHubClient(settings, http_client=http_client)
     ssh = SSHClient(settings)
-    engine = DiscoveryEngine(proxmox, github, ssh)
+    engine = DiscoveryEngine(proxmox, github, ssh, http_client=http_client)
     scheduler = Scheduler(settings, engine)
     _scheduler = scheduler
 
@@ -61,6 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     await scheduler.stop()
+    await http_client.aclose()
     logger.info("proxmon stopped")
 
 
@@ -71,10 +86,25 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS for frontend dev server
+# CORS — origins configured via CORS_ORIGINS env var (JSON list or comma-separated)
+_DEFAULT_CORS_ORIGINS = ["http://localhost:3000", "http://frontend"]
+
+
+def _parse_cors_origins() -> list[str]:
+    raw = os.environ.get("CORS_ORIGINS", "")
+    if not raw:
+        return _DEFAULT_CORS_ORIGINS
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(o) for o in parsed]
+    except (ValueError, TypeError):
+        pass
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_parse_cors_origins(),
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],

@@ -11,7 +11,7 @@ class TraefikDetector(BaseDetector):
     name = "traefik"
     display_name = "Traefik"
     github_repo = "traefik/traefik"
-    aliases = ["traefik"]
+    aliases: list[str] = []
     default_port = 8080
     docker_images = ["traefik", "traefik/traefik"]
 
