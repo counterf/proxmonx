@@ -1,0 +1,22 @@
+# Development overrides
+# Copy to docker-compose.override.yml to use
+
+services:
+  backend:
+    build:
+      context: ./backend
+    volumes:
+      - ./backend/app:/app/app
+    environment:
+      - LOG_LEVEL=debug
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      target: build
+    volumes:
+      - ./frontend/src:/app/src
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - "3000:3000"

@@ -1,0 +1,87 @@
+"""SSH command executor with safety whitelist."""
+
+import asyncio
+import logging
+from pathlib import Path
+
+import paramiko
+
+from app.config import Settings
+
+logger = logging.getLogger(__name__)
+
+# Only these command prefixes are allowed over SSH
+COMMAND_WHITELIST = frozenset({
+    "docker ps",
+    "docker inspect",
+    "cat ",
+    "which ",
+    "dpkg -l",
+    "rpm -q",
+})
+
+
+class SSHClient:
+    """Execute read-only commands on Proxmox guests via SSH."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._username = settings.ssh_username
+        self._key_path = settings.ssh_key_path
+        self._password = settings.ssh_password
+        self._enabled = settings.ssh_enabled
+
+    def _is_command_allowed(self, command: str) -> bool:
+        """Check command against whitelist."""
+        return any(command.startswith(prefix) for prefix in COMMAND_WHITELIST)
+
+    async def execute(self, host: str, command: str, timeout: int = 10) -> str | None:
+        """Execute a read-only command on a remote host.
+
+        Returns stdout on success, None on failure.
+        """
+        if not self._enabled:
+            logger.debug("SSH disabled, skipping command on %s", host)
+            return None
+
+        if not self._is_command_allowed(command):
+            logger.warning("Command not in whitelist, refusing: %s", command)
+            return None
+
+        try:
+            return await asyncio.to_thread(
+                self._execute_sync, host, command, timeout
+            )
+        except Exception:
+            logger.debug("SSH command failed on %s: %s", host, command)
+            return None
+
+    def _execute_sync(self, host: str, command: str, timeout: int) -> str | None:
+        """Blocking SSH execution (run in thread)."""
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            connect_kwargs: dict[str, str | int | Path | None] = {
+                "hostname": host,
+                "username": self._username,
+                "timeout": timeout,
+            }
+            if self._key_path:
+                connect_kwargs["key_filename"] = self._key_path
+            elif self._password:
+                connect_kwargs["password"] = self._password
+            else:
+                logger.debug("No SSH credentials configured")
+                return None
+
+            client.connect(**connect_kwargs)  # type: ignore[arg-type]
+            _, stdout, stderr = client.exec_command(command, timeout=timeout)
+            output = stdout.read().decode("utf-8", errors="replace").strip()
+            err = stderr.read().decode("utf-8", errors="replace").strip()
+            if err:
+                logger.debug("SSH stderr on %s: %s", host, err)
+            return output if output else None
+        except Exception:
+            logger.debug("SSH connection failed to %s", host)
+            return None
+        finally:
+            client.close()
