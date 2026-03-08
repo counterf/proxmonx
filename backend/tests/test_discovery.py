@@ -1,0 +1,164 @@
+"""Tests for discovery orchestration."""
+
+import pytest
+import httpx
+import respx
+
+from app.config import Settings
+from app.core.discovery import DiscoveryEngine
+from app.core.github import GitHubClient
+from app.core.proxmox import ProxmoxClient
+from app.core.ssh import SSHClient
+
+
+def _make_settings(**overrides: str | int | bool | None) -> Settings:
+    defaults = {
+        "proxmox_host": "https://pve.local:8006",
+        "proxmox_token_id": "test@pve!token",
+        "proxmox_token_secret": "secret",
+        "proxmox_node": "pve",
+        "ssh_enabled": False,
+    }
+    defaults.update(overrides)
+    return Settings(**defaults)  # type: ignore[arg-type]
+
+
+class TestProxmoxClient:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_list_lxc_guests(self) -> None:
+        respx.get("https://pve.local:8006/api2/json/nodes/pve/lxc").mock(
+            return_value=httpx.Response(200, json={
+                "data": [
+                    {"vmid": 100, "name": "sonarr", "status": "running", "tags": "media"},
+                    {"vmid": 101, "name": "radarr", "status": "running", "tags": "media;arr"},
+                    {"vmid": 102, "name": "db-server", "status": "stopped", "tags": ""},
+                ]
+            })
+        )
+        client = ProxmoxClient(_make_settings())
+        guests = await client.list_guests()
+        assert len(guests) == 3
+        assert guests[0].id == "100"
+        assert guests[0].name == "sonarr"
+        assert guests[0].status == "running"
+        assert guests[0].tags == ["media"]
+        assert guests[1].tags == ["media", "arr"]
+        assert guests[2].status == "stopped"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_list_includes_vms(self) -> None:
+        respx.get("https://pve.local:8006/api2/json/nodes/pve/lxc").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+        respx.get("https://pve.local:8006/api2/json/nodes/pve/qemu").mock(
+            return_value=httpx.Response(200, json={
+                "data": [
+                    {"vmid": 200, "name": "plex-vm", "status": "running", "tags": ""},
+                ]
+            })
+        )
+        client = ProxmoxClient(_make_settings(discover_vms=True))
+        guests = await client.list_guests()
+        assert len(guests) == 1
+        assert guests[0].type == "vm"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_connection_check(self) -> None:
+        respx.get("https://pve.local:8006/api2/json/version").mock(
+            return_value=httpx.Response(200, json={"data": {"version": "8.1.4"}})
+        )
+        client = ProxmoxClient(_make_settings())
+        assert await client.check_connection() is True
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_connection_check_failure(self) -> None:
+        respx.get("https://pve.local:8006/api2/json/version").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+        client = ProxmoxClient(_make_settings())
+        assert await client.check_connection() is False
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_ip_resolution(self) -> None:
+        respx.get("https://pve.local:8006/api2/json/nodes/pve/lxc/100/config").mock(
+            return_value=httpx.Response(200, json={
+                "data": {
+                    "net0": "name=eth0,bridge=vmbr0,hwaddr=AA:BB:CC:DD:EE:FF,ip=10.0.0.100/24,type=veth"
+                }
+            })
+        )
+        client = ProxmoxClient(_make_settings())
+        ip = await client.get_guest_network("100", "lxc")
+        assert ip == "10.0.0.100"
+
+
+class TestDiscoveryEngine:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_full_cycle_detects_apps(self) -> None:
+        # Mock Proxmox API
+        respx.get("https://pve.local:8006/api2/json/nodes/pve/lxc").mock(
+            return_value=httpx.Response(200, json={
+                "data": [
+                    {"vmid": 100, "name": "sonarr", "status": "running", "tags": ""},
+                ]
+            })
+        )
+        # Mock IP resolution
+        respx.get("https://pve.local:8006/api2/json/nodes/pve/lxc/100/config").mock(
+            return_value=httpx.Response(200, json={
+                "data": {"net0": "ip=10.0.0.100/24"}
+            })
+        )
+        # Mock Sonarr API
+        respx.get("http://10.0.0.100:8989/api/v3/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "4.0.14.2939"})
+        )
+        # Mock GitHub API
+        respx.get("https://api.github.com/repos/Sonarr/Sonarr/releases/latest").mock(
+            return_value=httpx.Response(200, json={"tag_name": "v4.0.15.3012"})
+        )
+
+        settings = _make_settings()
+        engine = DiscoveryEngine(
+            ProxmoxClient(settings),
+            GitHubClient(settings),
+            SSHClient(settings),
+        )
+        guests = await engine.run_full_cycle({})
+
+        assert "100" in guests
+        guest = guests["100"]
+        assert guest.app_name == "Sonarr"
+        assert guest.installed_version == "4.0.14.2939"
+        assert guest.latest_version == "4.0.15.3012"
+        assert guest.update_status == "outdated"
+        assert guest.detection_method == "name_match"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_stopped_guest_skips_detection(self) -> None:
+        respx.get("https://pve.local:8006/api2/json/nodes/pve/lxc").mock(
+            return_value=httpx.Response(200, json={
+                "data": [
+                    {"vmid": 101, "name": "sonarr-backup", "status": "stopped", "tags": ""},
+                ]
+            })
+        )
+
+        settings = _make_settings()
+        engine = DiscoveryEngine(
+            ProxmoxClient(settings),
+            GitHubClient(settings),
+            SSHClient(settings),
+        )
+        guests = await engine.run_full_cycle({})
+
+        assert "101" in guests
+        assert guests["101"].update_status == "unknown"
+        assert guests["101"].app_name is None

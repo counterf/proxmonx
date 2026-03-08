@@ -1,0 +1,87 @@
+import type { UpdateStatus, GuestType } from '../types';
+
+interface FilterBarProps {
+  search: string;
+  onSearchChange: (value: string) => void;
+  statusFilter: UpdateStatus | 'all';
+  onStatusChange: (value: UpdateStatus | 'all') => void;
+  typeFilter: GuestType | 'all';
+  onTypeChange: (value: GuestType | 'all') => void;
+  resultCount: number;
+  totalCount: number;
+}
+
+export default function FilterBar({
+  search,
+  onSearchChange,
+  statusFilter,
+  onStatusChange,
+  typeFilter,
+  onTypeChange,
+  resultCount,
+  totalCount,
+}: FilterBarProps) {
+  const hasActiveFilters = search !== '' || statusFilter !== 'all' || typeFilter !== 'all';
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Search apps or guests..."
+          aria-label="Filter guests"
+          className="flex-1 min-w-[200px] px-3 py-1.5 text-sm rounded bg-gray-800 border border-gray-700 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+        />
+        <select
+          value={statusFilter}
+          onChange={(e) => onStatusChange(e.target.value as UpdateStatus | 'all')}
+          aria-label="Filter by status"
+          className="px-3 py-1.5 text-sm rounded bg-gray-800 border border-gray-700 text-gray-200 focus:outline-none focus:border-blue-500"
+        >
+          <option value="all">All statuses</option>
+          <option value="outdated">Outdated</option>
+          <option value="up-to-date">Up to date</option>
+          <option value="unknown">Unknown</option>
+        </select>
+        <select
+          value={typeFilter}
+          onChange={(e) => onTypeChange(e.target.value as GuestType | 'all')}
+          aria-label="Filter by type"
+          className="px-3 py-1.5 text-sm rounded bg-gray-800 border border-gray-700 text-gray-200 focus:outline-none focus:border-blue-500"
+        >
+          <option value="all">All types</option>
+          <option value="lxc">LXC</option>
+          <option value="vm">VM</option>
+        </select>
+      </div>
+
+      {hasActiveFilters && (
+        <div className="flex items-center gap-2" aria-live="polite">
+          <span className="text-xs text-gray-500">
+            Showing {resultCount} of {totalCount} guests
+          </span>
+          {search && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300">
+              Search: {search}
+              <button onClick={() => onSearchChange('')} className="text-gray-500 hover:text-white" aria-label="Clear search">x</button>
+            </span>
+          )}
+          {statusFilter !== 'all' && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300">
+              Status: {statusFilter}
+              <button onClick={() => onStatusChange('all')} className="text-gray-500 hover:text-white" aria-label="Clear status filter">x</button>
+            </span>
+          )}
+          {typeFilter !== 'all' && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300">
+              Type: {typeFilter}
+              <button onClick={() => onTypeChange('all')} className="text-gray-500 hover:text-white" aria-label="Clear type filter">x</button>
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
