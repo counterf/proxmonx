@@ -16,7 +16,9 @@ class PlexDetector(BaseDetector):
     default_port = 32400
     docker_images = ["plex", "linuxserver/plex", "plexinc/pms-docker"]
 
-    async def get_installed_version(self, host: str, port: int | None = None) -> str | None:
+    async def get_installed_version(
+        self, host: str, port: int | None = None, api_key: str | None = None,
+    ) -> str | None:
         port = port or self.default_port
         try:
             resp = await self._http_get(f"http://{host}:{port}/identity")

@@ -1,18 +1,20 @@
 """Tests for discovery orchestration."""
 
+from typing import Any
+
 import pytest
 import httpx
 import respx
 
-from app.config import Settings
+from app.config import AppConfig, Settings
 from app.core.discovery import DiscoveryEngine
 from app.core.github import GitHubClient
 from app.core.proxmox import ProxmoxClient
 from app.core.ssh import SSHClient
 
 
-def _make_settings(**overrides: str | int | bool | None) -> Settings:
-    defaults = {
+def _make_settings(**overrides: Any) -> Settings:
+    defaults: dict[str, Any] = {
         "proxmox_host": "https://pve.local:8006",
         "proxmox_token_id": "test@pve!token",
         "proxmox_token_secret": "secret",
@@ -20,7 +22,7 @@ def _make_settings(**overrides: str | int | bool | None) -> Settings:
         "ssh_enabled": False,
     }
     defaults.update(overrides)
-    return Settings(**defaults)  # type: ignore[arg-type]
+    return Settings(**defaults)
 
 
 class TestProxmoxClient:
@@ -162,3 +164,43 @@ class TestDiscoveryEngine:
         assert "101" in guests
         assert guests["101"].update_status == "unknown"
         assert guests["101"].app_name is None
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_app_config_port_and_api_key_override(self) -> None:
+        """Discovery uses port and api_key from app_config."""
+        respx.get("https://pve.local:8006/api2/json/nodes/pve/lxc").mock(
+            return_value=httpx.Response(200, json={
+                "data": [
+                    {"vmid": 100, "name": "sonarr", "status": "running", "tags": ""},
+                ]
+            })
+        )
+        respx.get("https://pve.local:8006/api2/json/nodes/pve/lxc/100/config").mock(
+            return_value=httpx.Response(200, json={
+                "data": {"net0": "ip=10.0.0.100/24"}
+            })
+        )
+        # Expect the overridden port (9999) to be used
+        route = respx.get("http://10.0.0.100:9999/api/v3/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "4.0.14.2939"})
+        )
+        respx.get("https://api.github.com/repos/Sonarr/Sonarr/releases/latest").mock(
+            return_value=httpx.Response(200, json={"tag_name": "v4.0.14.2939"})
+        )
+
+        settings = _make_settings(
+            app_config={"sonarr": AppConfig(port=9999, api_key="my-key")},
+        )
+        engine = DiscoveryEngine(
+            ProxmoxClient(settings),
+            GitHubClient(settings),
+            SSHClient(settings),
+            settings=settings,
+        )
+        guests = await engine.run_full_cycle({})
+
+        assert "100" in guests
+        assert guests["100"].installed_version == "4.0.14.2939"
+        # Verify API key was sent as X-Api-Key header
+        assert route.calls[0].request.headers["x-api-key"] == "my-key"

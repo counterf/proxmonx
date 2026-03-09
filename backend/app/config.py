@@ -1,6 +1,16 @@
 """Application configuration via environment variables and config file."""
 
+from __future__ import annotations
+
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings
+
+
+class AppConfig(BaseModel):
+    """Per-app configuration override (port and/or API key)."""
+
+    port: int | None = None
+    api_key: str | None = None
 
 
 class Settings(BaseSettings):
@@ -35,6 +45,9 @@ class Settings(BaseSettings):
 
     # Config file path
     config_file_path: str = "/app/data/config.json"
+
+    # Per-app overrides (port and API key)
+    app_config: dict[str, AppConfig] = {}
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

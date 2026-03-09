@@ -58,6 +58,18 @@ export interface SetupStatus {
   missing_fields: string[];
 }
 
+export interface AppConfigEntry {
+  port?: number | null;
+  api_key?: string | null;
+}
+
+export interface AppConfigDefault {
+  name: string;
+  display_name: string;
+  default_port: number;
+  accepts_api_key: boolean;
+}
+
 export interface FullSettings {
   proxmox_host: string | null;
   proxmox_token_id: string | null;
@@ -72,6 +84,7 @@ export interface FullSettings {
   ssh_password: string | null;
   github_token: string | null;
   log_level: string;
+  app_config?: Record<string, AppConfigEntry>;
 }
 
 export interface SettingsSaveRequest {
@@ -88,6 +101,7 @@ export interface SettingsSaveRequest {
   ssh_password: string | null;
   github_token: string | null;
   log_level: string;
+  app_config?: Record<string, AppConfigEntry>;
 }
 
 export interface ConnectionTestResult {

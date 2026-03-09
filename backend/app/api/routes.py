@@ -2,17 +2,19 @@
 
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
-from app.config import Settings
+from app.config import AppConfig, Settings
 from app.core.discovery import DiscoveryEngine
 from app.core.github import GitHubClient
 from app.core.proxmox import ProxmoxClient
 from app.core.scheduler import Scheduler
 from app.core.ssh import SSHClient
+from app.detectors.registry import ALL_DETECTORS, DETECTOR_MAP
 from app.models.guest import GuestDetail, GuestSummary
 
 logger = logging.getLogger(__name__)
@@ -21,6 +23,11 @@ router = APIRouter()
 
 
 # --- Request/Response models ---
+
+
+class AppConfigEntry(BaseModel):
+    port: int | None = None
+    api_key: str | None = None
 
 
 class SettingsSaveRequest(BaseModel):
@@ -37,6 +44,7 @@ class SettingsSaveRequest(BaseModel):
     ssh_password: str | None = None
     github_token: str | None = None
     log_level: str = "info"
+    app_config: dict[str, AppConfigEntry] | None = None
 
     @field_validator("proxmox_host")
     @classmethod
@@ -64,6 +72,20 @@ class SettingsSaveRequest(BaseModel):
     def validate_poll_interval(cls, v: int) -> int:
         if v < 30 or v > 3600:
             raise ValueError("Poll interval must be between 30 and 3600 seconds")
+        return v
+
+    @field_validator("app_config")
+    @classmethod
+    def validate_app_config(
+        cls, v: dict[str, AppConfigEntry] | None,
+    ) -> dict[str, AppConfigEntry] | None:
+        if v is None:
+            return v
+        for key, entry in v.items():
+            if key not in DETECTOR_MAP:
+                raise ValueError(f"Unknown app: {key}")
+            if entry.port is not None and (entry.port < 1 or entry.port > 65535):
+                raise ValueError(f"Port for {key} must be between 1 and 65535")
         return v
 
 
@@ -177,8 +199,15 @@ async def setup_status(
 @router.get("/api/settings/full")
 async def get_full_settings(
     settings=Depends(_get_settings),
-) -> dict[str, str | int | bool | None]:
+) -> dict[str, Any]:
     """Return all settings with secrets masked."""
+    # Mask API keys in app_config
+    masked_app_config: dict[str, dict[str, Any]] = {}
+    for app_name, cfg in settings.app_config.items():
+        masked_app_config[app_name] = {
+            "port": cfg.port,
+            "api_key": "***" if cfg.api_key else None,
+        }
     return {
         "proxmox_host": settings.proxmox_host,
         "proxmox_token_id": settings.proxmox_token_id,
@@ -193,6 +222,7 @@ async def get_full_settings(
         "ssh_password": "***" if settings.ssh_password else None,
         "github_token": "***" if settings.github_token else None,
         "log_level": settings.log_level,
+        "app_config": masked_app_config,
     }
 
 
@@ -255,6 +285,20 @@ async def test_connection(
         return {"success": False, "message": msg, "node_info": None}
 
 
+@router.get("/api/app-config/defaults")
+async def get_app_config_defaults() -> list[dict[str, str | int | bool]]:
+    """Return the list of supported apps with default ports and API key support."""
+    return [
+        {
+            "name": d.name,
+            "display_name": d.display_name,
+            "default_port": d.default_port,
+            "accepts_api_key": d.accepts_api_key,
+        }
+        for d in ALL_DETECTORS
+    ]
+
+
 @router.post("/api/settings")
 async def save_settings(
     body: SettingsSaveRequest,
@@ -264,11 +308,13 @@ async def save_settings(
     scheduler=Depends(_get_scheduler),
 ) -> dict[str, bool | str]:
     """Save settings to config file, reload, and restart scheduler."""
+    # Read existing config once to avoid TOCTOU and preserve values
+    current_file = config_store.load()
+
     # If token_secret is None, keep current value
     token_secret = body.proxmox_token_secret
     if token_secret is None:
-        current_data = config_store.load()
-        token_secret = current_data.get("proxmox_token_secret") or settings.proxmox_token_secret
+        token_secret = current_file.get("proxmox_token_secret") or settings.proxmox_token_secret
         if not token_secret:
             raise HTTPException(
                 status_code=422,
@@ -276,7 +322,7 @@ async def save_settings(
             )
 
     # Build config data to persist
-    config_data: dict[str, str | int | bool | None] = {
+    config_data: dict[str, Any] = {
         "proxmox_host": body.proxmox_host,
         "proxmox_token_id": body.proxmox_token_id,
         "proxmox_token_secret": token_secret,
@@ -291,6 +337,38 @@ async def save_settings(
         "github_token": body.github_token,
         "log_level": body.log_level,
     }
+
+    # Merge app_config: preserve existing API keys when client sends "***" or null
+    if body.app_config is not None:
+        existing_app_config: dict[str, dict[str, Any]] = current_file.get("app_config", {})
+        merged_app_config: dict[str, dict[str, Any]] = dict(existing_app_config)
+        for app_name, entry in body.app_config.items():
+            prev = existing_app_config.get(app_name, {})
+            merged_entry: dict[str, Any] = {}
+            # Port: None means "use default" (omit)
+            if entry.port is not None:
+                merged_entry["port"] = entry.port
+            # API key: None means "keep current", "" means "clear", "***" means "keep"
+            if entry.api_key is None or entry.api_key == "***":
+                # Keep existing
+                if prev.get("api_key"):
+                    merged_entry["api_key"] = prev["api_key"]
+            elif entry.api_key == "":
+                # Explicit clear -- do not include api_key
+                pass
+            else:
+                merged_entry["api_key"] = entry.api_key
+            if merged_entry:
+                merged_app_config[app_name] = merged_entry
+            elif app_name in merged_app_config:
+                del merged_app_config[app_name]
+        config_data["app_config"] = merged_app_config
+        changed_apps = [a for a in body.app_config]
+        if changed_apps:
+            logger.info("App config updated for: %s", ", ".join(changed_apps))
+    else:
+        # Preserve existing app_config when payload omits it
+        config_data["app_config"] = current_file.get("app_config", {})
 
     # Write to config file
     try:
@@ -311,7 +389,7 @@ async def save_settings(
         proxmox = ProxmoxClient(new_settings, http_client=new_client)
         github = GitHubClient(new_settings, http_client=new_client)
         ssh = SSHClient(new_settings)
-        engine = DiscoveryEngine(proxmox, github, ssh, http_client=new_client)
+        engine = DiscoveryEngine(proxmox, github, ssh, http_client=new_client, settings=new_settings)
         new_scheduler = Scheduler(new_settings, engine)
         new_scheduler.start()
         # Only update app state after successful start

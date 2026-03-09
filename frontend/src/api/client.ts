@@ -7,6 +7,7 @@ import type {
   FullSettings,
   SettingsSaveRequest,
   ConnectionTestResult,
+  AppConfigDefault,
 } from '../types';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -78,4 +79,8 @@ export async function saveSettings(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
+}
+
+export async function fetchAppConfigDefaults(): Promise<AppConfigDefault[]> {
+  return fetchJson<AppConfigDefault[]>('/api/app-config/defaults');
 }

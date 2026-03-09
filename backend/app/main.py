@@ -81,7 +81,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     proxmox = ProxmoxClient(settings, http_client=http_client)
     github = GitHubClient(settings, http_client=http_client)
     ssh = SSHClient(settings)
-    engine = DiscoveryEngine(proxmox, github, ssh, http_client=http_client)
+    engine = DiscoveryEngine(proxmox, github, ssh, http_client=http_client, settings=settings)
     scheduler = Scheduler(settings, engine)
     _scheduler = scheduler
 

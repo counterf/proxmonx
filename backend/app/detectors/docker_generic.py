@@ -19,7 +19,9 @@ class DockerGenericDetector(BaseDetector):
     default_port = 0
     docker_images = []
 
-    async def get_installed_version(self, host: str, port: int | None = None) -> str | None:
+    async def get_installed_version(
+        self, host: str, port: int | None = None, api_key: str | None = None,
+    ) -> str | None:
         # Generic Docker detector does not query a version endpoint.
         # Version is parsed from the image tag during Docker inspection.
         return None
