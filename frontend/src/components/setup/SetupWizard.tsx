@@ -576,12 +576,12 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
       </div>
 
       {/* Navigation */}
-      <div className="w-full max-w-lg flex justify-between mt-4">
+      <div className="w-full max-w-lg flex flex-col-reverse sm:flex-row sm:justify-between gap-2 mt-4">
         {step > 1 ? (
           <button
             type="button"
             onClick={handleBack}
-            className="text-sm text-gray-400 hover:text-white"
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-1.5 text-sm text-gray-400 hover:text-white text-center"
           >
             Back
           </button>
@@ -592,7 +592,7 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
           <button
             type="button"
             onClick={handleNext}
-            className="px-4 py-1.5 text-sm font-medium rounded bg-blue-600 hover:bg-blue-500 text-white"
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-1.5 text-sm font-medium rounded bg-blue-600 hover:bg-blue-500 text-white"
           >
             {step === 4 ? 'Review' : 'Next'}
           </button>
