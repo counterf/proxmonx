@@ -1,5 +1,6 @@
 services:
   backend:
+    image: ghcr.io/counterf/proxmonx-backend:latest
     build: ./backend
     env_file: .env
     volumes:
@@ -12,6 +13,7 @@ services:
       retries: 3
 
   frontend:
+    image: ghcr.io/counterf/proxmonx-frontend:latest
     build: ./frontend
     ports:
       - "3000:80"
