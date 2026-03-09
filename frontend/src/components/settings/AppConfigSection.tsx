@@ -26,7 +26,7 @@ export default function AppConfigSection({
       .catch(() => setFetchError(true));
   }, []);
 
-  const updateApp = (name: string, field: 'port' | 'api_key' | 'scheme', value: string) => {
+  const updateApp = (name: string, field: 'port' | 'api_key' | 'scheme' | 'github_repo', value: string) => {
     const current = appConfigs[name] || {};
     const updated = { ...current };
 
@@ -35,6 +35,9 @@ export default function AppConfigSection({
       updated.port = value === '' || isNaN(num) ? null : num;
     } else if (field === 'scheme') {
       updated.scheme = value === 'http' ? null : value;
+      changedKeys.current.add(name);
+    } else if (field === 'github_repo') {
+      updated.github_repo = value;
       changedKeys.current.add(name);
     } else {
       updated.api_key = value;
@@ -98,10 +101,11 @@ export default function AppConfigSection({
             <table className="w-full" aria-label="Per-app configuration overrides">
               <thead>
                 <tr className="text-xs text-gray-500 uppercase border-b border-gray-800">
-                  <th scope="col" className="text-left py-2 w-1/5">App</th>
-                  <th scope="col" className="text-left py-2 w-[15%]">Scheme</th>
-                  <th scope="col" className="text-left py-2 w-[25%]">Port override</th>
-                  <th scope="col" className="text-left py-2 w-[40%]">API Key</th>
+                  <th scope="col" className="text-left py-2 w-[15%]">App</th>
+                  <th scope="col" className="text-left py-2 w-[10%]">Scheme</th>
+                  <th scope="col" className="text-left py-2 w-[15%]">Port override</th>
+                  <th scope="col" className="text-left py-2 w-[25%]">GitHub Repo</th>
+                  <th scope="col" className="text-left py-2 w-[35%]">API Key</th>
                 </tr>
               </thead>
               <tbody>
@@ -143,6 +147,23 @@ export default function AppConfigSection({
                           aria-label={`Port override for ${app.display_name}`}
                           className="w-full px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
                         />
+                      </td>
+                      <td className="py-2 pr-3">
+                        <div>
+                          <input
+                            id={`app-github-repo-${app.name}`}
+                            type="text"
+                            value={cfg.github_repo ?? ''}
+                            placeholder={app.github_repo || 'owner/repo'}
+                            onChange={(e) => updateApp(app.name, 'github_repo', e.target.value)}
+                            disabled={disabled}
+                            aria-label={`GitHub repo for ${app.display_name}`}
+                            className="w-full px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                          {app.github_repo && (
+                            <p className="text-xs text-gray-600 mt-0.5">Default: {app.github_repo}</p>
+                          )}
+                        </div>
                       </td>
                       <td className="py-2">
                         {app.accepts_api_key ? (
@@ -238,6 +259,24 @@ export default function AppConfigSection({
                         aria-label={`Port override for ${app.display_name}`}
                         className="w-full px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
                       />
+                    </div>
+                    <div>
+                      <label htmlFor={`m-app-github-repo-${app.name}`} className="text-xs text-gray-500">
+                        GitHub Repo
+                      </label>
+                      <input
+                        id={`m-app-github-repo-${app.name}`}
+                        type="text"
+                        value={cfg.github_repo ?? ''}
+                        placeholder={app.github_repo || 'owner/repo'}
+                        onChange={(e) => updateApp(app.name, 'github_repo', e.target.value)}
+                        disabled={disabled}
+                        aria-label={`GitHub repo for ${app.display_name}`}
+                        className="w-full px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                      {app.github_repo && (
+                        <p className="text-xs text-gray-600 mt-0.5">Default: {app.github_repo}</p>
+                      )}
                     </div>
                     {app.accepts_api_key && (
                       <div>

@@ -204,3 +204,91 @@ class TestDiscoveryEngine:
         assert guests["100"].installed_version == "4.0.14.2939"
         # Verify API key was sent as X-Api-Key header
         assert route.calls[0].request.headers["x-api-key"] == "my-key"
+
+
+class TestGithubRepoOverride:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_override_uses_custom_repo(self) -> None:
+        """Discovery uses github_repo from app_config when set."""
+        respx.get("https://pve.local:8006/api2/json/nodes/pve/lxc").mock(
+            return_value=httpx.Response(200, json={
+                "data": [
+                    {"vmid": 100, "name": "sonarr", "status": "running", "tags": ""},
+                ]
+            })
+        )
+        respx.get("https://pve.local:8006/api2/json/nodes/pve/lxc/100/config").mock(
+            return_value=httpx.Response(200, json={
+                "data": {"net0": "ip=10.0.0.100/24"}
+            })
+        )
+        respx.get("http://10.0.0.100:8989/api/v3/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "4.0.14.2939"})
+        )
+        # The override repo should be called, NOT the default Sonarr/Sonarr
+        custom_route = respx.get(
+            "https://api.github.com/repos/MyFork/Sonarr/releases/latest"
+        ).mock(
+            return_value=httpx.Response(200, json={"tag_name": "v4.1.0.0"})
+        )
+        # Ensure the default repo is NOT called
+        default_route = respx.get(
+            "https://api.github.com/repos/Sonarr/Sonarr/releases/latest"
+        ).mock(
+            return_value=httpx.Response(200, json={"tag_name": "v4.0.15.3012"})
+        )
+
+        settings = _make_settings(
+            app_config={"sonarr": AppConfig(github_repo="MyFork/Sonarr")},
+        )
+        engine = DiscoveryEngine(
+            ProxmoxClient(settings),
+            GitHubClient(settings),
+            SSHClient(settings),
+            settings=settings,
+        )
+        guests = await engine.run_full_cycle({})
+
+        assert "100" in guests
+        assert guests["100"].latest_version == "4.1.0.0"
+        assert custom_route.called
+        assert not default_route.called
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_fallback_to_detector_default_repo(self) -> None:
+        """Discovery falls back to detector.github_repo when no override is set."""
+        respx.get("https://pve.local:8006/api2/json/nodes/pve/lxc").mock(
+            return_value=httpx.Response(200, json={
+                "data": [
+                    {"vmid": 100, "name": "sonarr", "status": "running", "tags": ""},
+                ]
+            })
+        )
+        respx.get("https://pve.local:8006/api2/json/nodes/pve/lxc/100/config").mock(
+            return_value=httpx.Response(200, json={
+                "data": {"net0": "ip=10.0.0.100/24"}
+            })
+        )
+        respx.get("http://10.0.0.100:8989/api/v3/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "4.0.14.2939"})
+        )
+        default_route = respx.get(
+            "https://api.github.com/repos/Sonarr/Sonarr/releases/latest"
+        ).mock(
+            return_value=httpx.Response(200, json={"tag_name": "v4.0.15.3012"})
+        )
+
+        settings = _make_settings()
+        engine = DiscoveryEngine(
+            ProxmoxClient(settings),
+            GitHubClient(settings),
+            SSHClient(settings),
+            settings=settings,
+        )
+        guests = await engine.run_full_cycle({})
+
+        assert "100" in guests
+        assert guests["100"].latest_version == "4.0.15.3012"
+        assert default_route.called

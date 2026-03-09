@@ -1,6 +1,7 @@
 """API route definitions."""
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -29,12 +30,24 @@ class AppConfigEntry(BaseModel):
     port: int | None = None
     api_key: str | None = None
     scheme: str | None = None
+    github_repo: str | None = None
 
     @field_validator("scheme")
     @classmethod
     def validate_scheme(cls, v: str | None) -> str | None:
         if v is not None and v not in ("http", "https"):
             raise ValueError("scheme must be 'http' or 'https'")
+        return v
+
+    @field_validator("github_repo")
+    @classmethod
+    def validate_github_repo(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return v
+        if "github.com" in v or v.startswith("http"):
+            raise ValueError("github_repo must be 'owner/repo' format, not a URL")
+        if not re.match(r"^[^\s/]+/[^\s/]+$", v):
+            raise ValueError("github_repo must match 'owner/repo' format")
         return v
 
 
@@ -216,6 +229,7 @@ async def get_full_settings(
             "port": cfg.port,
             "api_key": "***" if cfg.api_key else None,
             "scheme": cfg.scheme,
+            "github_repo": cfg.github_repo,
         }
     return {
         "proxmox_host": settings.proxmox_host,
@@ -304,6 +318,7 @@ async def get_app_config_defaults() -> list[dict[str, str | int | bool]]:
             "default_port": d.default_port,
             "accepts_api_key": d.accepts_api_key,
             "default_scheme": "http",
+            "github_repo": d.github_repo,
         }
         for d in ALL_DETECTORS
     ]
@@ -373,6 +388,14 @@ async def save_settings(
                 merged_entry["scheme"] = entry.scheme
             elif prev.get("scheme"):
                 merged_entry["scheme"] = prev["scheme"]
+            # GitHub repo: None means "keep current", "" means "clear", value means "set"
+            if entry.github_repo is None:
+                if prev.get("github_repo"):
+                    merged_entry["github_repo"] = prev["github_repo"]
+            elif entry.github_repo == "":
+                pass  # Explicit clear
+            else:
+                merged_entry["github_repo"] = entry.github_repo
             if merged_entry:
                 merged_app_config[app_name] = merged_entry
             elif app_name in merged_app_config:
