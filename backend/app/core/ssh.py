@@ -27,6 +27,10 @@ COMMAND_WHITELIST = frozenset({
 # comments (#), newlines and backslash escapes.
 SHELL_METACHARACTERS = re.compile(r'[;&|`$<>()\{\}!\n\\#]')
 
+# For user-configured version commands: only reject the most dangerous
+# injection patterns.  Pipes (|) are allowed for e.g. "myapp --version | head -1".
+_VERSION_CMD_DANGEROUS = re.compile(r';|`|\$\(|&&|\|\|')
+
 
 class SSHClient:
     """Execute read-only commands on Proxmox guests via SSH."""
@@ -44,6 +48,24 @@ class SSHClient:
             logger.warning("Command contains shell metacharacters, refusing: %s", command)
             return False
         return any(command.startswith(prefix) for prefix in COMMAND_WHITELIST)
+
+    @staticmethod
+    def _is_version_cmd_safe(command: str) -> bool:
+        """Validate a user-configured version command.
+
+        Rejects empty commands, commands over 512 chars, and commands
+        containing dangerous injection patterns (;  `  $()  &&  ||).
+        Pipes (|) are allowed.  Newlines and null bytes are rejected.
+        """
+        if not command or not command.strip():
+            return False
+        if len(command) > 512:
+            return False
+        if '\n' in command or '\0' in command:
+            return False
+        if _VERSION_CMD_DANGEROUS.search(command):
+            return False
+        return True
 
     async def execute(self, host: str, command: str, timeout: int = 10) -> str | None:
         """Execute a read-only command on a remote host.
@@ -66,8 +88,61 @@ class SSHClient:
             logger.debug("SSH command failed on %s: %s", host, command)
             return None
 
-    def _execute_sync(self, host: str, command: str, timeout: int) -> str | None:
-        """Blocking SSH execution (run in thread)."""
+    async def execute_version_cmd(
+        self,
+        host: str,
+        command: str,
+        username: str | None = None,
+        key_path: str | None = None,
+        password: str | None = None,
+        timeout: int = 10,
+    ) -> str | None:
+        """Execute a user-configured version command on a remote host.
+
+        Bypasses COMMAND_WHITELIST (user-configured, trusted input) but
+        still validates against dangerous injection metacharacters.
+        """
+        if not self._enabled:
+            logger.debug("SSH disabled, skipping version cmd on %s", host)
+            return None
+
+        if not self._is_version_cmd_safe(command):
+            logger.warning(
+                "SSH version cmd rejected for %s: %.80s", host, command
+            )
+            return None
+
+        try:
+            return await asyncio.to_thread(
+                self._execute_sync,
+                host,
+                command,
+                timeout,
+                username=username,
+                key_path=key_path,
+                password=password,
+            )
+        except Exception:
+            logger.debug("SSH version cmd failed on %s: %s", host, command)
+            return None
+
+    def _execute_sync(
+        self,
+        host: str,
+        command: str,
+        timeout: int,
+        username: str | None = None,
+        key_path: str | None = None,
+        password: str | None = None,
+    ) -> str | None:
+        """Blocking SSH execution (run in thread).
+
+        Optional credential overrides take priority over instance defaults.
+        """
+        effective_username = username or self._username
+        effective_key_path = key_path or self._key_path
+        effective_password = password or self._password
+
         client = paramiko.SSHClient()
         if self._known_hosts_path and Path(self._known_hosts_path).is_file():
             client.load_host_keys(self._known_hosts_path)
@@ -79,13 +154,13 @@ class SSHClient:
         try:
             connect_kwargs: dict[str, str | int | Path | None] = {
                 "hostname": host,
-                "username": self._username,
+                "username": effective_username,
                 "timeout": timeout,
             }
-            if self._key_path:
-                connect_kwargs["key_filename"] = self._key_path
-            elif self._password:
-                connect_kwargs["password"] = self._password
+            if effective_key_path:
+                connect_kwargs["key_filename"] = effective_key_path
+            elif effective_password:
+                connect_kwargs["password"] = effective_password
             else:
                 logger.debug("No SSH credentials configured")
                 return None

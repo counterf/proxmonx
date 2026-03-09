@@ -31,6 +31,21 @@ class AppConfigEntry(BaseModel):
     api_key: str | None = None
     scheme: str | None = None
     github_repo: str | None = None
+    ssh_version_cmd: str | None = None
+    ssh_username: str | None = None
+    ssh_key_path: str | None = None
+    ssh_password: str | None = None
+
+    @field_validator("ssh_version_cmd")
+    @classmethod
+    def validate_ssh_version_cmd(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return v
+        if len(v) > 512:
+            raise ValueError("ssh_version_cmd must not exceed 512 characters")
+        if '\n' in v or '\0' in v:
+            raise ValueError("ssh_version_cmd must not contain newlines or null bytes")
+        return v
 
     @field_validator("scheme")
     @classmethod
@@ -230,6 +245,10 @@ async def get_full_settings(
             "api_key": "***" if cfg.api_key else None,
             "scheme": cfg.scheme,
             "github_repo": cfg.github_repo,
+            "ssh_version_cmd": cfg.ssh_version_cmd,
+            "ssh_username": cfg.ssh_username,
+            "ssh_key_path": cfg.ssh_key_path,
+            "ssh_password": "***" if cfg.ssh_password else None,
         }
     return {
         "proxmox_host": settings.proxmox_host,
@@ -403,6 +422,38 @@ async def save_settings(
                 pass  # Explicit clear
             else:
                 merged_entry["github_repo"] = entry.github_repo
+            # ssh_version_cmd: plain value, None = keep, empty = clear
+            if entry.ssh_version_cmd is None:
+                if prev.get("ssh_version_cmd"):
+                    merged_entry["ssh_version_cmd"] = prev["ssh_version_cmd"]
+            elif entry.ssh_version_cmd == "":
+                pass  # clear
+            else:
+                merged_entry["ssh_version_cmd"] = entry.ssh_version_cmd
+            # ssh_username: plain value
+            if entry.ssh_username is None:
+                if prev.get("ssh_username"):
+                    merged_entry["ssh_username"] = prev["ssh_username"]
+            elif entry.ssh_username == "":
+                pass  # clear
+            else:
+                merged_entry["ssh_username"] = entry.ssh_username
+            # ssh_key_path: plain value
+            if entry.ssh_key_path is None:
+                if prev.get("ssh_key_path"):
+                    merged_entry["ssh_key_path"] = prev["ssh_key_path"]
+            elif entry.ssh_key_path == "":
+                pass  # clear
+            else:
+                merged_entry["ssh_key_path"] = entry.ssh_key_path
+            # ssh_password: treat like api_key (masked)
+            if entry.ssh_password is None or entry.ssh_password == "***":
+                if prev.get("ssh_password"):
+                    merged_entry["ssh_password"] = prev["ssh_password"]
+            elif entry.ssh_password == "":
+                pass  # clear
+            else:
+                merged_entry["ssh_password"] = entry.ssh_password
             if merged_entry:
                 merged_app_config[app_name] = merged_entry
             elif app_name in merged_app_config:

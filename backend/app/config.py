@@ -13,6 +13,10 @@ class AppConfig(BaseModel):
     api_key: str | None = None
     scheme: str | None = None
     github_repo: str | None = None
+    ssh_version_cmd: str | None = None
+    ssh_username: str | None = None
+    ssh_key_path: str | None = None
+    ssh_password: str | None = None
 
 
 class Settings(BaseSettings):

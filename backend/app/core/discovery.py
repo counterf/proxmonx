@@ -223,6 +223,10 @@ class DiscoveryEngine:
         api_key: str | None = None
         scheme: str = "http"
         github_repo_override: str | None = None
+        ssh_version_cmd: str | None = None
+        ssh_username: str | None = None
+        ssh_key_path: str | None = None
+        ssh_password: str | None = None
         if self._settings and self._settings.app_config:
             app_cfg = self._settings.app_config.get(detector.name)
             if app_cfg:
@@ -231,6 +235,10 @@ class DiscoveryEngine:
                 if app_cfg.scheme:
                     scheme = app_cfg.scheme
                 github_repo_override = app_cfg.github_repo
+                ssh_version_cmd = app_cfg.ssh_version_cmd
+                ssh_username = app_cfg.ssh_username
+                ssh_key_path = app_cfg.ssh_key_path
+                ssh_password = app_cfg.ssh_password
                 logger.debug(
                     "Using overrides for %s: port=%s, api_key=%s, scheme=%s, github_repo=%s",
                     detector.name,
@@ -244,7 +252,7 @@ class DiscoveryEngine:
         # build the correct URL including scheme and port.
         guest.effective_port = port_override or detector.default_port
 
-        # Get installed version
+        # Get installed version via HTTP probe
         try:
             guest.installed_version = await detector.get_installed_version(
                 guest.ip, port=port_override, api_key=api_key, scheme=scheme,
@@ -253,6 +261,25 @@ class DiscoveryEngine:
             logger.warning(
                 "Version probe failed for %s on %s", detector.name, guest.name
             )
+
+        # SSH version command takes priority over HTTP probe if configured
+        if ssh_version_cmd and guest.ip:
+            try:
+                ssh_output = await self._ssh.execute_version_cmd(
+                    guest.ip,
+                    ssh_version_cmd,
+                    username=ssh_username,
+                    key_path=ssh_key_path,
+                    password=ssh_password,
+                )
+                if ssh_output:
+                    guest.installed_version = ssh_output.strip().splitlines()[0]
+            except Exception:
+                logger.warning(
+                    "SSH version cmd failed for %s on %s",
+                    detector.name,
+                    guest.name,
+                )
 
         # Get latest version from GitHub
         effective_repo = github_repo_override or detector.github_repo
