@@ -463,7 +463,7 @@ export default function Settings() {
             onClick={handleSave}
             disabled={!isDirty || saving}
             aria-disabled={!isDirty || saving}
-            className="px-6 py-2 text-sm font-medium rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full sm:w-auto px-6 py-2 text-sm font-medium rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? (
               <span className="flex items-center gap-2">

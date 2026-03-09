@@ -57,17 +57,17 @@ export default function GuestDetail() {
       <nav aria-label="Breadcrumb" className="text-sm text-gray-500">
         <Link to="/" className="hover:text-white">Dashboard</Link>
         <span className="mx-2">&gt;</span>
-        <span aria-current="page" className="text-gray-300">{guest.name}</span>
+        <span aria-current="page" className="text-gray-300 truncate max-w-[160px] sm:max-w-none inline-block align-bottom">{guest.name}</span>
       </nav>
 
       {/* Title + status */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-white">{guest.name}</h1>
+      <div className="flex items-center justify-between min-w-0">
+        <h1 className="text-xl font-bold text-white truncate mr-2">{guest.name}</h1>
         <StatusBadge status={guest.update_status} />
       </div>
 
       {/* Metadata row */}
-      <div className="flex items-center gap-3 text-sm text-gray-400">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-gray-400">
         <span className={`inline-block px-1.5 py-0.5 text-[11px] font-semibold rounded border ${typeBadgeClass}`}>
           {guest.type.toUpperCase()}
         </span>
@@ -93,6 +93,26 @@ export default function GuestDetail() {
             <div><span className="text-gray-500">App:</span> <span className="text-gray-200">{guest.app_name}</span></div>
             <div><span className="text-gray-500">Detection method:</span> <span className="text-gray-200">{guest.detection_method || '\u2014'}</span></div>
             <div><span className="text-gray-500">Plugin:</span> <span className="text-gray-200">{guest.detector_used || '\u2014'}</span></div>
+            <div className="pt-2">
+              {guest.web_url ? (
+                <a
+                  href={guest.web_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={guest.web_url}
+                  aria-label={`Open ${guest.app_name} at ${guest.web_url} (opens in new tab)`}
+                  className="inline-flex items-center gap-1.5 py-2.5 px-4 sm:py-1.5 sm:px-3 text-sm rounded border border-blue-500/50 text-blue-400 hover:bg-blue-500/10 hover:border-blue-400 transition-colors focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-2"
+                  data-testid="app-link"
+                >
+                  Open {guest.app_name}
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </a>
+              ) : (
+                <span className="text-sm text-gray-500">No web address detected.</span>
+              )}
+            </div>
           </div>
         ) : (
           <p className="text-sm text-gray-500">
@@ -107,11 +127,11 @@ export default function GuestDetail() {
         <div className="space-y-1 text-sm">
           <div>
             <span className="text-gray-500">Installed:</span>{' '}
-            <span className="text-lg font-mono text-gray-200">{guest.installed_version || '\u2014'}</span>
+            <span className="text-base sm:text-lg font-mono text-gray-200">{guest.installed_version || '\u2014'}</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-gray-500">Latest:</span>{' '}
-            <span className={`text-lg font-mono ${guest.update_status === 'outdated' ? 'text-green-400' : 'text-gray-200'}`}>
+            <span className={`text-base sm:text-lg font-mono ${guest.update_status === 'outdated' ? 'text-green-400' : 'text-gray-200'}`}>
               {guest.latest_version || '\u2014'}
             </span>
             {releaseUrl && (
@@ -187,7 +207,7 @@ export default function GuestDetail() {
           {rawExpanded && (
             <pre
               id="raw-output"
-              className="mt-3 p-3 rounded bg-gray-900 text-xs text-gray-400 overflow-y-auto max-h-[300px] font-mono"
+              className="mt-3 p-3 rounded bg-gray-900 text-xs text-gray-400 overflow-y-auto max-h-[200px] sm:max-h-[300px] font-mono"
             >
               {JSON.stringify(guest.raw_detection_output, null, 2)}
             </pre>

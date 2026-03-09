@@ -32,13 +32,13 @@ export default function FilterBar({
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Search apps or guests..."
           aria-label="Filter guests"
-          className="flex-1 min-w-[200px] px-3 py-1.5 text-sm rounded bg-gray-800 border border-gray-700 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+          className="w-full sm:w-auto sm:flex-1 sm:min-w-[200px] px-3 py-1.5 text-sm rounded bg-gray-800 border border-gray-700 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500"
         />
         <select
           value={statusFilter}
           onChange={(e) => onStatusChange(e.target.value as UpdateStatus | 'all')}
           aria-label="Filter by status"
-          className="px-3 py-1.5 text-sm rounded bg-gray-800 border border-gray-700 text-gray-200 focus:outline-none focus:border-blue-500"
+          className="flex-1 sm:flex-none px-3 py-1.5 text-sm rounded bg-gray-800 border border-gray-700 text-gray-200 focus:outline-none focus:border-blue-500"
         >
           <option value="all">All statuses</option>
           <option value="outdated">Outdated</option>
@@ -49,7 +49,7 @@ export default function FilterBar({
           value={typeFilter}
           onChange={(e) => onTypeChange(e.target.value as GuestType | 'all')}
           aria-label="Filter by type"
-          className="px-3 py-1.5 text-sm rounded bg-gray-800 border border-gray-700 text-gray-200 focus:outline-none focus:border-blue-500"
+          className="flex-1 sm:flex-none px-3 py-1.5 text-sm rounded bg-gray-800 border border-gray-700 text-gray-200 focus:outline-none focus:border-blue-500"
         >
           <option value="all">All types</option>
           <option value="lxc">LXC</option>

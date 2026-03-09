@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useGuests } from '../hooks/useGuests';
 import type { UpdateStatus, GuestType } from '../types';
 import FilterBar from './FilterBar';
-import GuestRow from './GuestRow';
+import { GuestTableRow, GuestCard } from './GuestRow';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorBanner from './ErrorBanner';
 
@@ -74,13 +74,13 @@ export default function Dashboard() {
           Last refreshed:{' '}
           {lastRefreshed ? lastRefreshed.toLocaleString() : '\u2014'}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={refresh}
             disabled={refreshing}
             aria-disabled={refreshing}
             aria-label={refreshing ? 'Refreshing...' : 'Refresh'}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-2.5 sm:py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors"
           >
             {refreshing && (
               <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
@@ -122,7 +122,7 @@ export default function Dashboard() {
         totalCount={guests.length}
       />
 
-      {/* Guest table */}
+      {/* Guest list */}
       {guests.length === 0 ? (
         <div className="text-center py-16 text-gray-500">
           <p className="text-lg font-medium mb-2">No guests found.</p>
@@ -155,28 +155,38 @@ export default function Dashboard() {
           </button>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded border border-gray-800">
-          <table className="w-full text-left">
-            <caption className="sr-only">Proxmox guests</caption>
-            <thead className="bg-surface border-b border-gray-800">
-              <tr>
-                <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '20%' }}>Guest Name</th>
-                <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '6%' }}>Type</th>
-                <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '16%' }}>App</th>
-                <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '12%' }}>Installed</th>
-                <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '12%' }}>Latest</th>
-                <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '10%' }}>Status</th>
-                <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '14%' }}>Last Checked</th>
-                <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '10%' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((guest) => (
-                <GuestRow key={guest.id} guest={guest} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          {/* Desktop table (>= md) */}
+          <div className="hidden md:block overflow-x-auto rounded border border-gray-800">
+            <table className="w-full text-left">
+              <caption className="sr-only">Proxmox guests</caption>
+              <thead className="bg-surface border-b border-gray-800">
+                <tr>
+                  <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '20%' }}>Guest Name</th>
+                  <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '6%' }}>Type</th>
+                  <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '16%' }}>App</th>
+                  <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '12%' }}>Installed</th>
+                  <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '12%' }}>Latest</th>
+                  <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '10%' }}>Status</th>
+                  <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '14%' }}>Last Checked</th>
+                  <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '10%' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((guest) => (
+                  <GuestTableRow key={guest.id} guest={guest} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile card list (< md) */}
+          <div className="md:hidden" data-testid="guest-card-list">
+            {filtered.map((guest) => (
+              <GuestCard key={guest.id} guest={guest} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

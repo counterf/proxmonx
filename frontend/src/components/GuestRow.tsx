@@ -22,7 +22,35 @@ function formatRelativeTime(dateStr: string | null): string {
   return `${diffDays}d ago`;
 }
 
-export default function GuestRow({ guest }: GuestRowProps) {
+function AppNameCell({ guest }: { guest: GuestSummary }) {
+  if (!guest.app_name) {
+    return <span className="text-gray-500">{'\u2014'}</span>;
+  }
+  if (guest.web_url) {
+    return (
+      <a
+        href={guest.web_url}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={guest.web_url}
+        aria-label={`Open ${guest.app_name} at ${guest.web_url} (opens in new tab)`}
+        className="inline-flex items-center text-blue-400 hover:text-blue-300 hover:underline focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-2 focus-visible:rounded py-2 -my-2 px-1 -mx-1"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.stopPropagation(); }}
+        data-testid="app-link"
+      >
+        {guest.app_name}
+        <svg className="w-3 h-3 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </a>
+    );
+  }
+  return <span className="text-gray-300">{guest.app_name}</span>;
+}
+
+/** Table row for desktop (>= md) */
+export function GuestTableRow({ guest }: GuestRowProps) {
   const navigate = useNavigate();
 
   const typeBadgeClass = guest.type === 'lxc'
@@ -49,8 +77,8 @@ export default function GuestRow({ guest }: GuestRowProps) {
           {guest.type.toUpperCase()}
         </span>
       </td>
-      <td className="px-3 py-2 text-sm text-gray-300">
-        {guest.app_name || '\u2014'}
+      <td className="px-3 py-2 text-sm">
+        <AppNameCell guest={guest} />
       </td>
       <td className="px-3 py-2 text-sm text-gray-300 font-mono">
         {guest.installed_version || '\u2014'}
@@ -77,4 +105,56 @@ export default function GuestRow({ guest }: GuestRowProps) {
       </td>
     </tr>
   );
+}
+
+/** Card layout for mobile (< md) */
+export function GuestCard({ guest }: GuestRowProps) {
+  const navigate = useNavigate();
+
+  const typeBadgeClass = guest.type === 'lxc'
+    ? 'border-blue-500 text-blue-400'
+    : 'border-purple-500 text-purple-400';
+
+  const versionStr = guest.installed_version
+    ? guest.update_status === 'outdated' && guest.latest_version
+      ? `${guest.installed_version} -> ${guest.latest_version}`
+      : guest.installed_version
+    : null;
+
+  return (
+    <div
+      tabIndex={0}
+      role="button"
+      className="border border-gray-800 rounded px-4 py-3 mb-2 hover:bg-gray-800/50 cursor-pointer transition-colors"
+      onClick={() => navigate(`/guest/${guest.id}`)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') navigate(`/guest/${guest.id}`);
+      }}
+      data-testid="guest-card"
+    >
+      {/* Row 1: name + status */}
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-sm font-medium text-gray-200 truncate mr-2">{guest.name}</span>
+        <StatusBadge status={guest.update_status} />
+      </div>
+      {/* Row 2: type + app */}
+      <div className="flex items-center gap-2 text-sm text-gray-300 mb-1">
+        <span className={`inline-block px-1.5 py-0.5 text-[11px] font-semibold rounded border ${typeBadgeClass}`}>
+          {guest.type.toUpperCase()}
+        </span>
+        <span className="text-gray-600">{'\u00B7'}</span>
+        <AppNameCell guest={guest} />
+      </div>
+      {/* Row 3: version + last checked */}
+      <div className="flex items-center justify-between text-xs text-gray-500">
+        <span className="font-mono truncate max-w-[200px]">{versionStr || '\u2014'}</span>
+        <span>{formatRelativeTime(guest.last_checked)}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Default export for backward compatibility */
+export default function GuestRow({ guest }: GuestRowProps) {
+  return <GuestTableRow guest={guest} />;
 }

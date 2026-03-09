@@ -13,6 +13,7 @@ export interface GuestSummary {
   update_status: UpdateStatus;
   last_checked: string | null;
   tags: string[];
+  web_url: string | null;
 }
 
 export interface VersionCheck {

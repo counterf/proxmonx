@@ -233,6 +233,9 @@ class DiscoveryEngine:
                     "set" if api_key else "none",
                 )
 
+        # Store the effective port for web_url construction
+        guest.effective_port = port_override or detector.default_port
+
         # Get installed version
         try:
             guest.installed_version = await detector.get_installed_version(

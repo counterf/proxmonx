@@ -5,6 +5,7 @@ import GuestDetail from './components/GuestDetail';
 import Settings from './components/Settings';
 import SetupWizard from './components/setup/SetupWizard';
 import LoadingSpinner from './components/LoadingSpinner';
+import ProxmonIcon from './components/icons/ProxmonIcon';
 import { fetchSetupStatus } from './api/client';
 
 function App() {
@@ -51,7 +52,10 @@ function App() {
     return (
       <div className="min-h-screen bg-background text-gray-100">
         <nav className="sticky top-0 z-50 flex items-center h-12 px-4 bg-surface border-b border-gray-800">
-          <span className="text-lg font-bold tracking-tight text-white">proxmon</span>
+          <span className="flex items-center gap-2 text-white" aria-label="proxmon">
+            <ProxmonIcon className="w-5 h-5" />
+            <span className="text-lg font-bold tracking-tight">proxmon</span>
+          </span>
         </nav>
         <SetupWizard onComplete={handleWizardComplete} />
       </div>
@@ -63,8 +67,13 @@ function App() {
     <div className="min-h-screen bg-background text-gray-100">
       {/* Navbar */}
       <nav className="sticky top-0 z-50 flex items-center justify-between h-12 px-4 bg-surface border-b border-gray-800">
-        <Link to="/" className="text-lg font-bold tracking-tight text-white hover:text-blue-400">
-          proxmon
+        <Link
+          to="/"
+          className="flex items-center gap-2 text-white hover:text-blue-400 transition-colors"
+          aria-label="proxmon — go to dashboard"
+        >
+          <ProxmonIcon className="w-5 h-5" />
+          <span className="text-lg font-bold tracking-tight">proxmon</span>
         </Link>
         <Link
           to="/settings"
@@ -74,7 +83,7 @@ function App() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-          Settings
+          <span className="hidden sm:inline">Settings</span>
         </Link>
       </nav>
 
