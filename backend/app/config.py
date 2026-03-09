@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     ssh_enabled: bool = True
 
     # Config file path
-    config_file_path: str = "/app/data/config.json"
+    config_db_path: str = "/app/data/proxmon.db"
 
     # Per-app overrides (port and API key)
     app_config: dict[str, AppConfig] = {}

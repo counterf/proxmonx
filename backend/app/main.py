@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = Settings()
 
     # Load config file and merge (config file takes priority over env vars)
-    config_store = ConfigStore(settings.config_file_path)
+    config_store = ConfigStore(settings.config_db_path)
     settings = config_store.merge_into_settings(settings)
 
     _settings = settings
