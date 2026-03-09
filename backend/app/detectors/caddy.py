@@ -17,10 +17,11 @@ class CaddyDetector(BaseDetector):
 
     async def get_installed_version(
         self, host: str, port: int | None = None, api_key: str | None = None,
+        scheme: str = "http",
     ) -> str | None:
         port = port or self.default_port
         try:
-            resp = await self._http_get(f"http://{host}:{port}/config/")
+            resp = await self._http_get(f"{scheme}://{host}:{port}/config/")
             if resp.status_code == 200:
                 # Caddy admin API returns config; version is in Server header
                 server_header = resp.headers.get("Server", "")

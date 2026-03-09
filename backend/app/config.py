@@ -11,6 +11,7 @@ class AppConfig(BaseModel):
 
     port: int | None = None
     api_key: str | None = None
+    scheme: str | None = None
 
 
 class Settings(BaseSettings):

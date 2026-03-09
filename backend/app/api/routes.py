@@ -28,6 +28,14 @@ router = APIRouter()
 class AppConfigEntry(BaseModel):
     port: int | None = None
     api_key: str | None = None
+    scheme: str | None = None
+
+    @field_validator("scheme")
+    @classmethod
+    def validate_scheme(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("http", "https"):
+            raise ValueError("scheme must be 'http' or 'https'")
+        return v
 
 
 class SettingsSaveRequest(BaseModel):
@@ -207,6 +215,7 @@ async def get_full_settings(
         masked_app_config[app_name] = {
             "port": cfg.port,
             "api_key": "***" if cfg.api_key else None,
+            "scheme": cfg.scheme,
         }
     return {
         "proxmox_host": settings.proxmox_host,
@@ -294,6 +303,7 @@ async def get_app_config_defaults() -> list[dict[str, str | int | bool]]:
             "display_name": d.display_name,
             "default_port": d.default_port,
             "accepts_api_key": d.accepts_api_key,
+            "default_scheme": "http",
         }
         for d in ALL_DETECTORS
     ]
@@ -358,6 +368,11 @@ async def save_settings(
                 pass
             else:
                 merged_entry["api_key"] = entry.api_key
+            # Scheme: None means "keep current / use default"
+            if entry.scheme is not None:
+                merged_entry["scheme"] = entry.scheme
+            elif prev.get("scheme"):
+                merged_entry["scheme"] = prev["scheme"]
             if merged_entry:
                 merged_app_config[app_name] = merged_entry
             elif app_name in merged_app_config:
@@ -384,7 +399,7 @@ async def save_settings(
         await scheduler.stop()
 
     old_client: httpx.AsyncClient | None = getattr(request.app.state, "http_client", None)
-    new_client = httpx.AsyncClient(timeout=10.0, verify=new_settings.verify_ssl)
+    new_client = httpx.AsyncClient(timeout=10.0, verify=new_settings.verify_ssl, follow_redirects=True)
     try:
         proxmox = ProxmoxClient(new_settings, http_client=new_client)
         github = GitHubClient(new_settings, http_client=new_client)

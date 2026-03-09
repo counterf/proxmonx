@@ -26,13 +26,16 @@ export default function AppConfigSection({
       .catch(() => setFetchError(true));
   }, []);
 
-  const updateApp = (name: string, field: 'port' | 'api_key', value: string) => {
+  const updateApp = (name: string, field: 'port' | 'api_key' | 'scheme', value: string) => {
     const current = appConfigs[name] || {};
     const updated = { ...current };
 
     if (field === 'port') {
       const num = parseInt(value, 10);
       updated.port = value === '' || isNaN(num) ? null : num;
+    } else if (field === 'scheme') {
+      updated.scheme = value === 'http' ? null : value;
+      changedKeys.current.add(name);
     } else {
       updated.api_key = value;
       changedKeys.current.add(name);
@@ -95,9 +98,10 @@ export default function AppConfigSection({
             <table className="w-full" aria-label="Per-app configuration overrides">
               <thead>
                 <tr className="text-xs text-gray-500 uppercase border-b border-gray-800">
-                  <th scope="col" className="text-left py-2 w-1/4">App</th>
-                  <th scope="col" className="text-left py-2 w-[30%]">Port override</th>
-                  <th scope="col" className="text-left py-2 w-[45%]">API Key</th>
+                  <th scope="col" className="text-left py-2 w-1/5">App</th>
+                  <th scope="col" className="text-left py-2 w-[15%]">Scheme</th>
+                  <th scope="col" className="text-left py-2 w-[25%]">Port override</th>
+                  <th scope="col" className="text-left py-2 w-[40%]">API Key</th>
                 </tr>
               </thead>
               <tbody>
@@ -113,6 +117,19 @@ export default function AppConfigSection({
                       }
                     >
                       <td className="py-2 text-sm text-gray-300">{app.display_name}</td>
+                      <td className="py-2 pr-3">
+                        <select
+                          id={`app-scheme-${app.name}`}
+                          value={cfg.scheme || 'http'}
+                          onChange={(e) => updateApp(app.name, 'scheme', e.target.value)}
+                          disabled={disabled}
+                          aria-label={`Scheme for ${app.display_name}`}
+                          className="w-full px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        >
+                          <option value="http">HTTP</option>
+                          <option value="https">HTTPS</option>
+                        </select>
+                      </td>
                       <td className="py-2 pr-3">
                         <input
                           id={`app-port-${app.name}`}
@@ -189,6 +206,22 @@ export default function AppConfigSection({
                 >
                   <p className="text-sm text-gray-300 font-medium mb-2">{app.display_name}</p>
                   <div className="space-y-2">
+                    <div>
+                      <label htmlFor={`m-app-scheme-${app.name}`} className="text-xs text-gray-500">
+                        Scheme
+                      </label>
+                      <select
+                        id={`m-app-scheme-${app.name}`}
+                        value={cfg.scheme || 'http'}
+                        onChange={(e) => updateApp(app.name, 'scheme', e.target.value)}
+                        disabled={disabled}
+                        aria-label={`Scheme for ${app.display_name}`}
+                        className="w-full px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      >
+                        <option value="http">HTTP</option>
+                        <option value="https">HTTPS</option>
+                      </select>
+                    </div>
                     <div>
                       <label htmlFor={`m-app-port-${app.name}`} className="text-xs text-gray-500">
                         Port

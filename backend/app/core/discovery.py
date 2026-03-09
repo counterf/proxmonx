@@ -221,16 +221,20 @@ class DiscoveryEngine:
         # Look up per-app overrides from settings
         port_override: int | None = None
         api_key: str | None = None
+        scheme: str = "http"
         if self._settings and self._settings.app_config:
             app_cfg = self._settings.app_config.get(detector.name)
             if app_cfg:
                 port_override = app_cfg.port
                 api_key = app_cfg.api_key
+                if app_cfg.scheme:
+                    scheme = app_cfg.scheme
                 logger.debug(
-                    "Using overrides for %s: port=%s, api_key=%s",
+                    "Using overrides for %s: port=%s, api_key=%s, scheme=%s",
                     detector.name,
                     port_override or "default",
                     "set" if api_key else "none",
+                    scheme,
                 )
 
         # Store the effective port so GuestInfo._web_url() (in guest.py) can
@@ -240,10 +244,10 @@ class DiscoveryEngine:
         # Get installed version
         try:
             guest.installed_version = await detector.get_installed_version(
-                guest.ip, port=port_override, api_key=api_key,
+                guest.ip, port=port_override, api_key=api_key, scheme=scheme,
             )
         except Exception:
-            logger.debug(
+            logger.warning(
                 "Version probe failed for %s on %s", detector.name, guest.name
             )
 
@@ -254,7 +258,7 @@ class DiscoveryEngine:
                     detector.github_repo
                 )
             except Exception:
-                logger.debug(
+                logger.warning(
                     "GitHub version lookup failed for %s", detector.github_repo
                 )
 

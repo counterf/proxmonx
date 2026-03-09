@@ -62,6 +62,7 @@ export interface SetupStatus {
 export interface AppConfigEntry {
   port?: number | null;
   api_key?: string | null;
+  scheme?: string | null;
 }
 
 export interface AppConfigDefault {
@@ -69,6 +70,7 @@ export interface AppConfigDefault {
   display_name: string;
   default_port: number;
   accepts_api_key: boolean;
+  default_scheme: string;
 }
 
 export interface FullSettings {
