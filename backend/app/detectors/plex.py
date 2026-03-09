@@ -18,10 +18,11 @@ class PlexDetector(BaseDetector):
 
     async def get_installed_version(
         self, host: str, port: int | None = None, api_key: str | None = None,
+        scheme: str = "http",
     ) -> str | None:
         port = port or self.default_port
         try:
-            resp = await self._http_get(f"http://{host}:{port}/identity")
+            resp = await self._http_get(f"{scheme}://{host}:{port}/identity")
             if resp.status_code == 200:
                 root = ET.fromstring(resp.text)
                 version = root.get("version")

@@ -17,10 +17,11 @@ class QBittorrentDetector(BaseDetector):
 
     async def get_installed_version(
         self, host: str, port: int | None = None, api_key: str | None = None,
+        scheme: str = "http",
     ) -> str | None:
         port = port or self.default_port
         try:
-            resp = await self._http_get(f"http://{host}:{port}/api/v2/app/version")
+            resp = await self._http_get(f"{scheme}://{host}:{port}/api/v2/app/version")
             if resp.status_code == 200:
                 # Returns plain text like "v4.6.3"
                 version = resp.text.strip()

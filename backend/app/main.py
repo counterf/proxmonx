@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "SSH_KNOWN_HOSTS_PATH not set; using WarningPolicy (no strict host key verification)"
         )
 
-    http_client = httpx.AsyncClient(timeout=10.0, verify=settings.verify_ssl)
+    http_client = httpx.AsyncClient(timeout=10.0, verify=settings.verify_ssl, follow_redirects=True)
     app.state.http_client = http_client
 
     proxmox = ProxmoxClient(settings, http_client=http_client)

@@ -315,6 +315,28 @@ class TestApiKeySupport:
         assert version == "4.0.14.2939"
         assert route.calls[0].request.headers["x-api-key"] == "combo-key"
 
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_scheme_https_builds_correct_url(self) -> None:
+        route = respx.get("https://10.0.0.1:8989/api/v3/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "4.0.14.2939"})
+        )
+        d = SonarrDetector()
+        version = await d.get_installed_version("10.0.0.1", scheme="https")
+        assert version == "4.0.14.2939"
+        assert str(route.calls[0].request.url).startswith("https://")
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_scheme_https_with_port_override(self) -> None:
+        route = respx.get("https://10.0.0.2:7878/api/v3/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "5.6.0.8846"})
+        )
+        d = RadarrDetector()
+        version = await d.get_installed_version("10.0.0.2", port=7878, scheme="https")
+        assert version == "5.6.0.8846"
+        assert str(route.calls[0].request.url).startswith("https://")
+
 
 # -- Docker generic --
 

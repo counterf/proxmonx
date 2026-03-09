@@ -18,6 +18,7 @@ class ProwlarrDetector(BaseDetector):
 
     async def get_installed_version(
         self, host: str, port: int | None = None, api_key: str | None = None,
+        scheme: str = "http",
     ) -> str | None:
         port = port or self.default_port
         headers: dict[str, str] = {}
@@ -25,7 +26,7 @@ class ProwlarrDetector(BaseDetector):
             headers["X-Api-Key"] = api_key
         try:
             resp = await self._http_get(
-                f"http://{host}:{port}/api/v1/system/status", headers=headers,
+                f"{scheme}://{host}:{port}/api/v1/system/status", headers=headers,
             )
             if resp.status_code == 200:
                 data: dict[str, str] = resp.json()
