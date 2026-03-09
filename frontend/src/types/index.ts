@@ -64,6 +64,10 @@ export interface AppConfigEntry {
   api_key?: string | null;
   scheme?: string | null;
   github_repo?: string | null;
+  ssh_version_cmd?: string | null;
+  ssh_username?: string | null;
+  ssh_key_path?: string | null;
+  ssh_password?: string | null;
 }
 
 export interface AppConfigDefault {
