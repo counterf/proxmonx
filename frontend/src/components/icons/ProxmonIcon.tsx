@@ -17,7 +17,6 @@ export default function ProxmonIcon({ className = 'w-5 h-5' }: ProxmonIconProps)
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
-      focusable={false}
       data-testid="proxmon-logo"
     >
       {/* Server rack outline */}

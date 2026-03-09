@@ -233,7 +233,8 @@ class DiscoveryEngine:
                     "set" if api_key else "none",
                 )
 
-        # Store the effective port for web_url construction
+        # Store the effective port so GuestInfo._web_url() (in guest.py) can
+        # build the correct URL including scheme and port.
         guest.effective_port = port_override or detector.default_port
 
         # Get installed version

@@ -2,18 +2,31 @@
 
 from __future__ import annotations
 
-import re
+import ipaddress as _ipaddress
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
 
 
-# Strict IPv4/IPv6 pattern to prevent injection in constructed URLs
-_IP_RE = re.compile(
-    r"^(?:\d{1,3}\.){3}\d{1,3}$"  # IPv4
-    r"|^[0-9a-fA-F:]+$"  # IPv6 (simplified)
-)
+def _is_valid_ip(ip: str) -> bool:
+    """Validate an IP address using the stdlib ``ipaddress`` module."""
+    try:
+        _ipaddress.ip_address(ip)
+        return True
+    except ValueError:
+        return False
+
+
+def _format_host(ip: str) -> str:
+    """Return *ip* formatted for use in a URL.
+
+    IPv6 addresses are wrapped in brackets (RFC 2732).
+    """
+    addr = _ipaddress.ip_address(ip)
+    if isinstance(addr, _ipaddress.IPv6Address):
+        return f"[{ip}]"
+    return ip
 
 
 def _build_web_url(
@@ -22,22 +35,33 @@ def _build_web_url(
     status: str,
     detector_used: str | None,
     effective_port: int | None,
+    scheme: str = "http",
 ) -> str | None:
     """Construct web URL from guest IP and detected port.
 
     Returns None when IP is missing, no app detected, or guest is stopped.
+
+    The *scheme* parameter defaults to ``"http"``.  Callers (detectors) may
+    override it to ``"https"`` when they know the service uses TLS.  Note that
+    the correct scheme **cannot** be reliably inferred from the port number
+    alone -- only port 443 is assumed ``https`` by default.
     """
     if not ip or not app_name or status != "running":
         return None
-    if not _IP_RE.match(ip):
+    if not _is_valid_ip(ip):
         return None
     if effective_port is None:
         return None
-    if effective_port in (80,):
-        return f"http://{ip}"
-    if effective_port in (443,):
-        return f"https://{ip}"
-    return f"http://{ip}:{effective_port}"
+
+    host = _format_host(ip)
+
+    # Port 443 always implies https regardless of how the port was set.
+    if effective_port == 443:
+        return f"https://{host}"
+    if effective_port == 80:
+        return f"http://{host}"
+
+    return f"{scheme}://{host}:{effective_port}"
 
 
 class VersionCheck(BaseModel):
@@ -95,11 +119,16 @@ class GuestInfo(BaseModel):
     version_history: list[VersionCheck] = []
     # Effective port used during detection (detector default or user override)
     effective_port: int | None = None
+    # URL scheme for the web interface.  Defaults to "http"; detectors may set
+    # "https" when they know the service uses TLS.  The scheme cannot be
+    # reliably inferred from the port number alone.
+    scheme: str = "http"
 
     def _web_url(self) -> str | None:
         return _build_web_url(
             self.ip, self.app_name, self.status,
             self.detector_used, self.effective_port,
+            self.scheme,
         )
 
     def to_summary(self) -> GuestSummary:

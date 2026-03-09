@@ -41,7 +41,7 @@ function AppNameCell({ guest }: { guest: GuestSummary }) {
       >
         {guest.app_name}
         <svg className="w-3 h-3 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
         </svg>
       </a>
     );
@@ -63,7 +63,10 @@ export function GuestTableRow({ guest }: GuestRowProps) {
       className="border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer transition-colors"
       onClick={() => navigate(`/guest/${guest.id}`)}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') navigate(`/guest/${guest.id}`);
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          navigate(`/guest/${guest.id}`);
+        }
       }}
     >
       <td className="px-3 py-2 text-sm text-gray-200 truncate max-w-[200px]" title={guest.name}>
@@ -95,6 +98,7 @@ export function GuestTableRow({ guest }: GuestRowProps) {
       <td className="px-3 py-2">
         <button
           className="text-xs text-blue-400 hover:text-blue-300"
+          aria-label={`View details for ${guest.name}`}
           onClick={(e) => {
             e.stopPropagation();
             navigate(`/guest/${guest.id}`);
@@ -128,7 +132,10 @@ export function GuestCard({ guest }: GuestRowProps) {
       className="border border-gray-800 rounded px-4 py-3 mb-2 hover:bg-gray-800/50 cursor-pointer transition-colors"
       onClick={() => navigate(`/guest/${guest.id}`)}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') navigate(`/guest/${guest.id}`);
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          navigate(`/guest/${guest.id}`);
+        }
       }}
       data-testid="guest-card"
     >
