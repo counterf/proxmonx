@@ -57,18 +57,26 @@ class BaseDetector(ABC):
                 return True
         return False
 
+    # Whether this detector's app supports API key authentication
+    accepts_api_key: bool = False
+
     @abstractmethod
-    async def get_installed_version(self, host: str, port: int | None = None) -> str | None:
+    async def get_installed_version(
+        self, host: str, port: int | None = None, api_key: str | None = None,
+    ) -> str | None:
         """Query the app's local API for its version.
 
         Args:
             host: Guest IP address.
             port: Override port (uses default_port if None).
+            api_key: Optional API key for authenticated endpoints.
         """
         ...
 
-    async def _http_get(self, url: str, timeout: float = 5.0) -> httpx.Response:
+    async def _http_get(
+        self, url: str, timeout: float = 5.0, headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
         """Helper for making HTTP GET requests to guest apps."""
         ctx = contextlib.nullcontext(self.http_client) if self.http_client else httpx.AsyncClient(timeout=timeout, verify=False)
         async with ctx as client:
-            return await client.get(url)
+            return await client.get(url, headers=headers or {})

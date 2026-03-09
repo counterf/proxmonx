@@ -8,6 +8,7 @@ from app.detectors.sonarr import SonarrDetector
 from app.detectors.radarr import RadarrDetector
 from app.detectors.bazarr import BazarrDetector
 from app.detectors.prowlarr import ProwlarrDetector
+from app.detectors.overseerr import OverseerrDetector
 from app.detectors.plex import PlexDetector
 from app.detectors.immich import ImmichDetector
 from app.detectors.gitea import GiteaDetector
@@ -192,6 +193,127 @@ class TestInstalledVersion:
         d = SonarrDetector()
         version = await d.get_installed_version("10.0.0.99")
         assert version is None
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_overseerr_version(self) -> None:
+        respx.get("http://10.0.0.13:5055/api/v1/status").mock(
+            return_value=httpx.Response(200, json={"version": "1.33.2"})
+        )
+        d = OverseerrDetector()
+        version = await d.get_installed_version("10.0.0.13")
+        assert version == "1.33.2"
+
+
+# -- API key support --
+
+class TestApiKeySupport:
+    def test_accepts_api_key_flag(self) -> None:
+        assert SonarrDetector().accepts_api_key is True
+        assert RadarrDetector().accepts_api_key is True
+        assert ProwlarrDetector().accepts_api_key is True
+        assert BazarrDetector().accepts_api_key is True
+        assert OverseerrDetector().accepts_api_key is True
+        assert SABnzbdDetector().accepts_api_key is True
+        assert PlexDetector().accepts_api_key is False
+        assert ImmichDetector().accepts_api_key is False
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_sonarr_with_api_key(self) -> None:
+        route = respx.get("http://10.0.0.1:8989/api/v3/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "4.0.14.2939"})
+        )
+        d = SonarrDetector()
+        version = await d.get_installed_version("10.0.0.1", api_key="test-key")
+        assert version == "4.0.14.2939"
+        assert route.calls[0].request.headers["x-api-key"] == "test-key"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_sonarr_401_without_key(self) -> None:
+        respx.get("http://10.0.0.1:8989/api/v3/system/status").mock(
+            return_value=httpx.Response(401, json={"error": "Unauthorized"})
+        )
+        d = SonarrDetector()
+        version = await d.get_installed_version("10.0.0.1")
+        assert version is None
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_radarr_with_api_key(self) -> None:
+        route = respx.get("http://10.0.0.2:7878/api/v3/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "5.6.0.8846"})
+        )
+        d = RadarrDetector()
+        version = await d.get_installed_version("10.0.0.2", api_key="radarr-key")
+        assert version == "5.6.0.8846"
+        assert route.calls[0].request.headers["x-api-key"] == "radarr-key"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_prowlarr_with_api_key(self) -> None:
+        route = respx.get("http://10.0.0.12:9696/api/v1/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "1.12.2.4211"})
+        )
+        d = ProwlarrDetector()
+        version = await d.get_installed_version("10.0.0.12", api_key="prowlarr-key")
+        assert version == "1.12.2.4211"
+        assert route.calls[0].request.headers["x-api-key"] == "prowlarr-key"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_bazarr_with_api_key(self) -> None:
+        route = respx.get("http://10.0.0.11:6767/api/bazarr/api/v1/system/status").mock(
+            return_value=httpx.Response(200, json={"bazarr_version": "1.4.3"})
+        )
+        d = BazarrDetector()
+        version = await d.get_installed_version("10.0.0.11", api_key="bazarr-key")
+        assert version == "1.4.3"
+        assert route.calls[0].request.headers["x-api-key"] == "bazarr-key"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_sabnzbd_with_api_key(self) -> None:
+        route = respx.get("http://10.0.0.7:8085/api?mode=version&output=json").mock(
+            return_value=httpx.Response(200, json={"version": "4.2.1"})
+        )
+        d = SABnzbdDetector()
+        version = await d.get_installed_version("10.0.0.7", api_key="sab-key")
+        assert version == "4.2.1"
+        assert route.calls[0].request.headers["x-api-key"] == "sab-key"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_overseerr_with_api_key(self) -> None:
+        route = respx.get("http://10.0.0.13:5055/api/v1/status").mock(
+            return_value=httpx.Response(200, json={"version": "1.33.2"})
+        )
+        d = OverseerrDetector()
+        version = await d.get_installed_version("10.0.0.13", api_key="overseerr-key")
+        assert version == "1.33.2"
+        assert route.calls[0].request.headers["x-api-key"] == "overseerr-key"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_port_override(self) -> None:
+        respx.get("http://10.0.0.1:9999/api/v3/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "4.0.14.2939"})
+        )
+        d = SonarrDetector()
+        version = await d.get_installed_version("10.0.0.1", port=9999)
+        assert version == "4.0.14.2939"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_port_and_api_key_combined(self) -> None:
+        route = respx.get("http://10.0.0.1:9999/api/v3/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "4.0.14.2939"})
+        )
+        d = SonarrDetector()
+        version = await d.get_installed_version("10.0.0.1", port=9999, api_key="combo-key")
+        assert version == "4.0.14.2939"
+        assert route.calls[0].request.headers["x-api-key"] == "combo-key"
 
 
 # -- Docker generic --

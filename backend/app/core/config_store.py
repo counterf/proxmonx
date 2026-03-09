@@ -26,7 +26,7 @@ class ConfigStore:
     def path(self) -> Path:
         return self._path
 
-    def load(self) -> dict[str, str | int | bool | None]:
+    def load(self) -> dict:
         """Read config file if it exists, return its contents as a dict."""
         if not self._path.exists():
             return {}
@@ -41,7 +41,7 @@ class ConfigStore:
             logger.error("Failed to read config file %s: %s", self._path, exc)
             return {}
 
-    def save(self, data: dict[str, str | int | bool | None]) -> None:
+    def save(self, data: dict) -> None:
         """Atomic write: write to .tmp then rename. Sets 0o600 permissions."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = self._path.with_suffix(".tmp")
@@ -75,13 +75,20 @@ class ConfigStore:
 
     def merge_into_settings(self, settings: Settings) -> Settings:
         """Return a new Settings instance with config file values taking priority over env/defaults."""
-        from app.config import Settings as SettingsCls  # local import avoids circular dep at module level
+        from app.config import AppConfig, Settings as SettingsCls
 
         config_data = self.load()
         if not config_data:
             return settings
         current = settings.model_dump()
         for key, value in config_data.items():
-            if key in current and value is not None:
+            if key == "app_config":
+                # Deserialise nested app_config dicts into AppConfig objects
+                if isinstance(value, dict):
+                    current["app_config"] = {
+                        k: AppConfig(**v) if isinstance(v, dict) else v
+                        for k, v in value.items()
+                    }
+            elif key in current and value is not None:
                 current[key] = value
         return SettingsCls(**current)

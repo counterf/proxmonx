@@ -15,7 +15,9 @@ class QBittorrentDetector(BaseDetector):
     default_port = 8080
     docker_images = ["qbittorrent", "linuxserver/qbittorrent"]
 
-    async def get_installed_version(self, host: str, port: int | None = None) -> str | None:
+    async def get_installed_version(
+        self, host: str, port: int | None = None, api_key: str | None = None,
+    ) -> str | None:
         port = port or self.default_port
         try:
             resp = await self._http_get(f"http://{host}:{port}/api/v2/app/version")

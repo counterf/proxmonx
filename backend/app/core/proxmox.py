@@ -102,13 +102,16 @@ class ProxmoxClient:
             return None
 
     async def get_guest_network(self, vmid: str, guest_type: str) -> str | None:
-        """Attempt to resolve a guest's IP address from Proxmox API."""
+        """Attempt to resolve a guest's IP address from Proxmox API.
+
+        Strategy 1: parse static IP from LXC/VM config (net0 ip= field).
+        Strategy 2: query /interfaces endpoint for live IPs (works with DHCP).
+        """
+        endpoint = "lxc" if guest_type == "lxc" else "qemu"
         try:
-            endpoint = "lxc" if guest_type == "lxc" else "qemu"
             data = await self._get(f"/nodes/{self._node}/{endpoint}/{vmid}/config")
             config = data.get("data", {})
             if isinstance(config, dict):
-                # LXC: parse net0 field like "name=eth0,bridge=vmbr0,ip=10.0.0.101/24,..."
                 for key in ["net0", "net1", "ipconfig0", "ipconfig1"]:
                     net_str = str(config.get(key, ""))
                     if "ip=" in net_str:
@@ -118,7 +121,25 @@ class ProxmoxClient:
                                 if ip and ip != "dhcp":
                                     return ip
         except Exception:
-            logger.debug("Could not resolve IP for guest %s", vmid)
+            logger.debug("Could not resolve IP from config for guest %s", vmid)
+
+        # Fallback: live interface list (handles DHCP-assigned IPs)
+        try:
+            ifaces_data = await self._get(
+                f"/nodes/{self._node}/{endpoint}/{vmid}/interfaces"
+            )
+            ifaces = ifaces_data.get("data", [])
+            if isinstance(ifaces, list):
+                for iface in ifaces:
+                    name = str(iface.get("name", ""))
+                    inet = str(iface.get("inet", ""))
+                    if inet and name != "lo" and not inet.startswith("127."):
+                        ip = inet.split("/")[0]
+                        if ip:
+                            return ip
+        except Exception:
+            logger.debug("Could not resolve IP from interfaces for guest %s", vmid)
+
         return None
 
     async def check_connection(self) -> bool:

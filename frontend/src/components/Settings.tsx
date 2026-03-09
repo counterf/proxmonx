@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import type { FullSettings, SettingsSaveRequest, ConnectionTestResult } from '../types';
+import type { FullSettings, SettingsSaveRequest, ConnectionTestResult, AppConfigEntry } from '../types';
 import { fetchFullSettings, saveSettings, testConnection } from '../api/client';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorBanner from './ErrorBanner';
@@ -9,6 +9,7 @@ import PasswordField from './setup/PasswordField';
 import Toggle from './setup/Toggle';
 import ConnectionTestButton from './setup/ConnectionTestButton';
 import SuccessToast from './setup/SuccessToast';
+import AppConfigSection from './settings/AppConfigSection';
 
 const DETECTORS = [
   { name: 'sonarr', displayName: 'Sonarr' },
@@ -78,6 +79,10 @@ export default function Settings() {
   const [toast, setToast] = useState<string | null>(null);
   // Track whether token_secret was changed from the masked value
   const tokenSecretChanged = useRef(false);
+  // Per-app configuration
+  const [appConfigs, setAppConfigs] = useState<Record<string, AppConfigEntry>>({});
+  const [savedAppConfigs, setSavedAppConfigs] = useState<Record<string, AppConfigEntry>>({});
+  const changedApiKeys = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     fetchFullSettings()
@@ -85,6 +90,10 @@ export default function Settings() {
         const fd = settingsToFormData(s);
         setForm(fd);
         setSavedForm(fd);
+        // Load app config
+        const ac = s.app_config || {};
+        setAppConfigs(ac);
+        setSavedAppConfigs(ac);
         // Detect auth method from loaded data
         if (s.ssh_password && s.ssh_password !== '***') {
           setAuthMethod('password');
@@ -104,8 +113,12 @@ export default function Settings() {
 
   // tokenSecretChanged must be ORed in: typing "***" back after changing it would
   // produce equal JSON strings, hiding a real change from the dirty check.
+  const appConfigDirty =
+    changedApiKeys.current.size > 0 ||
+    JSON.stringify(appConfigs) !== JSON.stringify(savedAppConfigs);
   const isDirty =
     tokenSecretChanged.current ||
+    appConfigDirty ||
     (form !== null && savedForm !== null && JSON.stringify(form) !== JSON.stringify(savedForm));
 
   // beforeunload warning
@@ -138,6 +151,20 @@ export default function Settings() {
     setSaving(true);
     setSaveError(null);
     try {
+      // Build app_config payload: only include api_keys that were actually changed
+      const appConfigPayload: Record<string, AppConfigEntry> = {};
+      for (const [name, cfg] of Object.entries(appConfigs)) {
+        const entry: AppConfigEntry = {};
+        entry.port = cfg.port || null;
+        if (changedApiKeys.current.has(name)) {
+          entry.api_key = cfg.api_key ?? '';
+        }
+        // Only include entries that have actual overrides
+        if (entry.port || changedApiKeys.current.has(name)) {
+          appConfigPayload[name] = entry;
+        }
+      }
+
       const payload: SettingsSaveRequest = {
         proxmox_host: form.proxmox_host,
         proxmox_token_id: form.proxmox_token_id,
@@ -153,10 +180,13 @@ export default function Settings() {
         ssh_password: form.ssh_password || null,
         github_token: form.github_token || null,
         log_level: form.log_level,
+        app_config: Object.keys(appConfigPayload).length > 0 ? appConfigPayload : undefined,
       };
       await saveSettings(payload);
       setSavedForm({ ...form });
+      setSavedAppConfigs({ ...appConfigs });
       tokenSecretChanged.current = false;
+      changedApiKeys.current = new Set();
       setToast('Settings saved. Discovery restarting...');
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save settings');
@@ -401,6 +431,14 @@ export default function Settings() {
           hint="Optional"
         />
       </div>
+
+      {/* App Configuration */}
+      <AppConfigSection
+        appConfigs={appConfigs}
+        onChange={setAppConfigs}
+        changedKeys={changedApiKeys}
+        disabled={saving}
+      />
 
       {/* Plugins */}
       <div className="p-4 rounded bg-surface border border-gray-800">

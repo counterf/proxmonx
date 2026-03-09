@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 import httpx
 
+from app.config import Settings
 from app.core.github import GitHubClient
 from app.core.proxmox import ProxmoxClient
 from app.core.ssh import SSHClient
@@ -31,11 +32,13 @@ class DiscoveryEngine:
         github: GitHubClient,
         ssh: SSHClient,
         http_client: httpx.AsyncClient | None = None,
+        settings: Settings | None = None,
     ) -> None:
         self._proxmox = proxmox
         self._github = github
         self._ssh = ssh
         self._http_client = http_client
+        self._settings = settings
         self._semaphore = asyncio.Semaphore(MAX_CONCURRENT_PROBES)
         # Share the HTTP client with all detectors
         if http_client:
@@ -215,9 +218,26 @@ class DiscoveryEngine:
         if not detector or not guest.ip:
             return
 
+        # Look up per-app overrides from settings
+        port_override: int | None = None
+        api_key: str | None = None
+        if self._settings and self._settings.app_config:
+            app_cfg = self._settings.app_config.get(detector.name)
+            if app_cfg:
+                port_override = app_cfg.port
+                api_key = app_cfg.api_key
+                logger.debug(
+                    "Using overrides for %s: port=%s, api_key=%s",
+                    detector.name,
+                    port_override or "default",
+                    "set" if api_key else "none",
+                )
+
         # Get installed version
         try:
-            guest.installed_version = await detector.get_installed_version(guest.ip)
+            guest.installed_version = await detector.get_installed_version(
+                guest.ip, port=port_override, api_key=api_key,
+            )
         except Exception:
             logger.debug(
                 "Version probe failed for %s on %s", detector.name, guest.name
