@@ -222,6 +222,7 @@ class DiscoveryEngine:
         port_override: int | None = None
         api_key: str | None = None
         scheme: str = "http"
+        github_repo_override: str | None = None
         if self._settings and self._settings.app_config:
             app_cfg = self._settings.app_config.get(detector.name)
             if app_cfg:
@@ -229,12 +230,14 @@ class DiscoveryEngine:
                 api_key = app_cfg.api_key
                 if app_cfg.scheme:
                     scheme = app_cfg.scheme
+                github_repo_override = app_cfg.github_repo
                 logger.debug(
-                    "Using overrides for %s: port=%s, api_key=%s, scheme=%s",
+                    "Using overrides for %s: port=%s, api_key=%s, scheme=%s, github_repo=%s",
                     detector.name,
                     port_override or "default",
                     "set" if api_key else "none",
                     scheme,
+                    github_repo_override or "default",
                 )
 
         # Store the effective port so GuestInfo._web_url() (in guest.py) can
@@ -252,14 +255,15 @@ class DiscoveryEngine:
             )
 
         # Get latest version from GitHub
-        if detector.github_repo:
+        effective_repo = github_repo_override or detector.github_repo
+        if effective_repo:
             try:
                 guest.latest_version = await self._github.get_latest_version(
-                    detector.github_repo
+                    effective_repo
                 )
             except Exception:
                 logger.warning(
-                    "GitHub version lookup failed for %s", detector.github_repo
+                    "GitHub version lookup failed for %s", effective_repo
                 )
 
         # Determine update status
