@@ -2,7 +2,7 @@
 
 Self-hosted Proxmox monitoring dashboard that continuously discovers LXC containers and VMs, identifies the application running inside each guest, compares the installed version against the latest upstream release on GitHub, and shows a live update-status dashboard — with a built-in setup wizard so you never have to touch a config file.
 
-![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 54 passing](https://img.shields.io/badge/tests-54%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
+![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 70 passing](https://img.shields.io/badge/tests-70%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
 
 <!-- screenshot: dashboard showing guests table with version status badges -->
 
@@ -75,7 +75,7 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 │  ┌──────▼──────────────────────────────────────────────┐    │
 │  │  DiscoveryEngine                                      │    │
 │  │  • ProxmoxClient (async httpx, GET-only)             │    │
-│  │  • 13 Detector plugins (BaseDetector ABC)            │    │
+│  │  • 14 Detector plugins (BaseDetector ABC)            │    │
 │  │  • GitHubClient (releases API + 1h cache)            │    │
 │  │  • SSHClient (paramiko, command whitelist)           │    │
 │  └──────┬──────────────────┬────────────────────┬──────┘    │
@@ -98,7 +98,7 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 | **Detector plugins** | One class per app; matches guests by name/tag/Docker image; queries the app's local HTTP API for its version |
 | **GitHubClient** | Fetches the latest release tag from GitHub Releases API; caches results for 1 hour; handles rate limits gracefully |
 | **SSHClient** | Connects to guests via paramiko; runs `docker ps` to identify running containers; enforces a command whitelist and metacharacter guard |
-| **ConfigStore** | Reads/writes `/app/data/config.json`; atomic writes with `0o600` permissions; config file takes priority over environment variables |
+| **ConfigStore** | Reads/writes `/app/data/proxmon.db` (SQLite); single-row settings table with JSON blob; auto-migrates from `config.json`; database takes priority over environment variables |
 | **FastAPI routes** | REST API serving guests, settings, setup status, and connection test; dependency injection via `app.dependency_overrides` |
 | **React frontend** | Dashboard, per-guest detail, editable settings, 5-step setup wizard; polls `/api/guests` every 60 s |
 
@@ -140,7 +140,7 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
   - Proxmox tag matching (`sonarr`, `app:sonarr`)
   - Guest name token matching (`sonarr-lxc` → sonarr)
   - Docker container inspection via SSH (`docker ps`)
-- **13 built-in app detectors** — arr-stack, Plex, Immich, Gitea, and more
+- **14 built-in app detectors** — arr-stack, Plex, Immich, Gitea, and more
 - **Installed version detection** — queries each app's own HTTP API
 - **Latest version lookup** — GitHub Releases API with 1-hour cache
 - **Semantic version comparison** — `packaging.version.Version`, handles build hashes
@@ -150,7 +150,12 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 - **Manual refresh** — POST `/api/refresh` triggers an immediate cycle
 - **Setup wizard** — 5-step guided first-run configuration (no `.env` editing required)
 - **Editable settings page** — live connection test, dirty tracking, save without restart
-- **Config persistence** — settings saved to `/app/data/config.json` (Docker volume)
+- **Config persistence** — settings saved to SQLite at `/app/data/proxmon.db` (Docker volume)
+- **Per-app HTTPS scheme override** — configure `http` or `https` per app in Settings
+- **Per-app GitHub repo override** — custom `owner/repo` per app in Settings (e.g. fork or alternate release source)
+- **App logo in header** — clickable app names link to the app's web UI; responsive mobile layout
+- **SQLite-backed config store** — settings persisted in SQLite (`/app/data/proxmon.db`); auto-migrates from `config.json` on first start
+- **GitHub Actions CI** — auto-builds and pushes Docker images to `ghcr.io` on every push to main
 - **Backward compatible** — existing `.env` deployments continue to work
 
 ### Phase 2 — Planned
@@ -173,6 +178,7 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 | **Radarr** | `radarr` | `GET /api/v3/system/status` → `version` | Radarr/Radarr | 7878 |
 | **Bazarr** | `bazarr` | `GET /api/bazarr/api/v1/system/status` → `bazarr_version` | morpheus65535/bazarr | 6767 |
 | **Prowlarr** | `prowlarr` | `GET /api/v1/system/status` → `version` | Prowlarr/Prowlarr | 9696 |
+| **Overseerr** | `overseerr` | `GET /api/v1/status` → `version` | sct/overseerr | 5055 |
 | **Plex** | `plex`, `plexmediaserver`, `pms` | `GET /identity` (XML attr) | plexinc/pms-docker | 32400 |
 | **Immich** | `immich` | `GET /api/server/about` → `version` | immich-app/immich | 2283 |
 | **Gitea** | `gitea` | `GET /api/v1/version` → `version` | go-gitea/gitea | 3000 |
@@ -233,6 +239,18 @@ proxmon-backend   | Detected radarr on guest 102 (radarr-lxc) via name_match
 proxmon-backend   | Discovery cycle complete: 12 guests, 9 detected, 3 unknown
 ```
 
+### Updating
+
+```bash
+cd proxmon
+docker compose pull          # if using pre-built images from ghcr.io
+# or
+docker compose build         # if building from source
+docker compose up -d
+```
+
+Pre-built images are pushed to `ghcr.io/counterf/proxmonx-backend:latest` and `ghcr.io/counterf/proxmonx-frontend:latest` on every push to main via GitHub Actions.
+
 ---
 
 ## 6. Proxmox API Token Setup
@@ -281,12 +299,14 @@ curl -sk "https://<proxmox-host>:8006/api2/json/version" \
 proxmon reads configuration from two sources, in priority order:
 
 ```
-/app/data/config.json   ← highest priority (written by setup wizard / settings UI)
+/app/data/proxmon.db    ← highest priority (SQLite, written by setup wizard / settings UI)
 environment variables   ← fallback (from .env file or docker-compose env_file)
 built-in defaults       ← lowest priority
 ```
 
-When you configure proxmon via the UI, settings are saved to the config file. Environment variables continue to work for all fields — useful for secret management via Docker secrets or CI/CD pipelines.
+When you configure proxmon via the UI, settings are saved to the SQLite database. Environment variables continue to work for all fields — useful for secret management via Docker secrets or CI/CD pipelines.
+
+> **Migration from config.json**: If upgrading from an earlier version that used `config.json`, proxmon automatically imports it into SQLite on first start. No manual migration needed.
 
 ### All configuration variables
 
@@ -308,7 +328,7 @@ When you configure proxmon via the UI, settings are saved to the config file. En
 | `CORS_ORIGINS` | `http://localhost:3000,http://frontend` | No | Allowed CORS origins (comma-separated or JSON array) |
 | `LOG_LEVEL` | `info` | No | `debug` / `info` / `warning` / `error` |
 | `PROXMON_ENABLED` | `true` | No | Master switch; set `false` to pause all polling |
-| `CONFIG_FILE_PATH` | `/app/data/config.json` | No | Override path for UI-saved config file |
+| `CONFIG_DB_PATH` | `/app/data/proxmon.db` | No | Override path for SQLite config database |
 
 ### SSH key mount example
 
@@ -354,6 +374,17 @@ LOG_LEVEL=info
 PROXMON_ENABLED=true
 ```
 
+### Per-app configuration
+
+Per-app overrides are configured in the Settings UI under the **App Configuration** section. Each detected app can have the following overrides:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `port` | `int` | Detector default | Override the HTTP port used for version probing |
+| `api_key` | `string` | — | API key for authenticated endpoints (e.g. *arr apps) |
+| `scheme` | `string` | `http` | Protocol scheme: `http` or `https` |
+| `github_repo` | `string` | Detector default | Override the GitHub `owner/repo` for latest version lookup |
+
 ---
 
 ## 8. Setup Wizard & Settings UI
@@ -395,20 +426,22 @@ After saving, a transition screen polls `GET /health` until `guest_count > 0` (m
 
 ### Settings page
 
-The Settings page (`/settings`) is a fully editable form with the same four sections as the wizard. It pre-populates from `GET /api/settings/full` (with secrets shown as `***`).
+The Settings page (`/settings`) is a fully editable form with the same four sections as the wizard, plus a **Per-App Configuration** section where you can set port, API key, scheme (`http`/`https`), and GitHub repo overrides for each detected app. It pre-populates from `GET /api/settings/full` (with secrets shown as `***`).
 
 Key behaviors:
 - **Dirty tracking** — unsaved changes indicator; `beforeunload` warning if you try to navigate away
 - **Token secret** — send `null` to keep existing secret unchanged; changing it sends the new value
 - **Test Connection** — live Proxmox test using the values currently in the form (does not save)
-- **Save Changes** — writes to `/app/data/config.json`, reloads settings, restarts the scheduler with zero downtime
+- **Save Changes** — writes to `/app/data/proxmon.db`, reloads settings, restarts the scheduler with zero downtime
 - **Success toast** — auto-dismisses after 4 seconds
 
 ### Config persistence
 
-Settings saved via the UI are written to `/app/data/config.json` (mounted as `./data:/app/data` in Docker Compose). The file is written atomically (write to `.tmp` → `os.replace()`) with `0o600` permissions. On restart, the config file is loaded first; env vars fill in anything not in the file.
+Settings saved via the UI are stored in a SQLite database at `/app/data/proxmon.db` (mounted as `./data:/app/data` in Docker Compose). The database uses a single `settings` table with one row containing a JSON blob. On restart, the database is loaded first; env vars fill in anything not in the database.
 
-**Backward compatibility**: if you already have a working `.env` file and no `config.json` exists, proxmon reads all settings from env vars and skips the wizard. No migration needed.
+**Migration from config.json**: if upgrading from a version that used `config.json`, proxmon automatically imports it into SQLite on first start. The original file is left in place but is no longer read after migration.
+
+**Backward compatibility**: if you already have a working `.env` file and no database exists, proxmon reads all settings from env vars and skips the wizard. No migration needed.
 
 ---
 
@@ -468,7 +501,7 @@ If no detector matches after all three stages, the guest is marked `app_name: nu
 
 Once a detector is matched:
 
-1. **Installed version** — `detector.get_installed_version(ip, port)` makes an HTTP GET to the app's local API on the guest's IP. If the request fails or times out (5 s), `installed_version` is set to `null`.
+1. **Installed version** — `detector.get_installed_version(ip, port, api_key, scheme)` makes an HTTP GET to the app's local API on the guest's IP. If the request fails or times out (5 s), `installed_version` is set to `null`.
 
 2. **Latest version** — `GitHubClient.fetch_latest(github_repo)` queries the GitHub Releases API. Results are cached for 1 hour. Detectors with `github_repo = None` (like `DockerGenericDetector`) skip this step.
 
@@ -775,7 +808,7 @@ Failure response:
 
 ### `POST /api/settings`
 
-Saves settings to `/app/data/config.json` and hot-reloads: restarts the scheduler with the new config without restarting the container.
+Saves settings to `/app/data/proxmon.db` and hot-reloads: restarts the scheduler with the new config without restarting the container.
 
 Request body (all fields):
 ```json
@@ -892,7 +925,7 @@ docker compose up -d --build
 docker compose logs -f
 
 # Rebuild after code changes
-docker compose up -d --build backend
+docker compose build && docker compose up -d
 
 # Dev overrides (hot reload)
 cp docker-compose.override.yml.example docker-compose.override.yml
@@ -909,12 +942,12 @@ uv run --extra dev pytest -v
 ```
 
 ```
-tests/test_config_store.py   18 tests  — load, save, is_configured, missing_fields, priority
-tests/test_detectors.py      21 tests  — detection matching + version fetching for all 13 apps
-tests/test_discovery.py       7 tests  — Proxmox parsing, IP resolution, full cycle integration
+tests/test_config_store.py    8 tests  — load, save, migration, merge, is_configured
+tests/test_detectors.py      34 tests  — detection matching + version fetching for all 14 apps
+tests/test_discovery.py      10 tests  — Proxmox parsing, IP resolution, full cycle integration
 tests/test_github.py          8 tests  — caching, v-prefix stripping, rate limit, auth header
 ─────────────────────────────────────────────────────
-Total: 54 tests, ~2 seconds
+Total: 70 tests, ~2 seconds
 ```
 
 ---
@@ -949,11 +982,14 @@ class HomeBridgeDetector(BaseDetector):
     # Docker image substrings for Docker detection
     docker_images: list[str] = ["homebridge/homebridge", "oznu/homebridge"]
 
-    async def get_installed_version(self, host: str, port: int | None = None) -> str | None:
+    async def get_installed_version(
+        self, host: str, port: int | None = None, api_key: str | None = None,
+        scheme: str = "http",
+    ) -> str | None:
         """Query Homebridge's local REST API for its installed version."""
         p = port or self.default_port
         try:
-            resp = await self._http_get(f"http://{host}:{p}/api/auth/noauth")
+            resp = await self._http_get(f"{scheme}://{host}:{p}/api/auth/noauth")
             if resp.status_code == 200:
                 data = resp.json()
                 # Homebridge returns version in env.packageVersion
@@ -994,7 +1030,7 @@ docker compose up -d --build backend
 | `aliases` | `list[str]` | Yes | Additional name tokens (do not duplicate `name`) |
 | `default_port` | `int` | Yes | Default HTTP port for version probing |
 | `docker_images` | `list[str]` | Yes | Docker image substrings for `docker ps` matching |
-| `get_installed_version(host, port)` | `async → str \| None` | Yes | Return version string or `None` on any failure |
+| `get_installed_version(host, port, api_key, scheme)` | `async → str \| None` | Yes | Return version string or `None` on any failure |
 | `_http_get(url, timeout)` | `async → httpx.Response` | Inherited | HTTP GET helper; uses shared connection pool in production |
 | `detect(guest)` | `→ str \| None` | Inherited | Returns `"tag_match"`, `"name_match"`, or `None` |
 | `match_docker_image(image)` | `→ bool` | Inherited | Returns `True` if `image` matches any entry in `docker_images` |
@@ -1042,9 +1078,9 @@ proxmon/
 │   │   │
 │   │   ├── core/
 │   │   │   ├── __init__.py
-│   │   │   ├── config_store.py       /app/data/config.json read/write
-│   │   │   │                         • atomic write (tmp → os.replace)
-│   │   │   │                         • 0o600 permissions
+│   │   │   ├── config_store.py       /app/data/proxmon.db SQLite read/write
+│   │   │   │                         • single settings row, JSON blob
+│   │   │   │                         • auto-migrates config.json on first start
 │   │   │   │                         • merge_into_settings(settings) → Settings
 │   │   │   │                         • is_configured() / get_missing_fields()
 │   │   │   │
@@ -1090,6 +1126,7 @@ proxmon/
 │   │   │   ├── radarr.py
 │   │   │   ├── bazarr.py
 │   │   │   ├── prowlarr.py
+│   │   │   ├── overseerr.py
 │   │   │   ├── plex.py               XML parsing via xml.etree.ElementTree
 │   │   │   ├── immich.py
 │   │   │   ├── gitea.py
@@ -1110,10 +1147,10 @@ proxmon/
 │   │
 │   ├── tests/
 │   │   ├── __init__.py
-│   │   ├── test_config_store.py      18 tests: load, save, permissions, priority
-│   │   ├── test_detectors.py         21 tests: matching + version fetching (all 13 apps)
-│   │   ├── test_discovery.py          7 tests: Proxmox parsing, IP resolution, full cycle
-│   │   └── test_github.py             8 tests: caching, normalization, rate limits
+│   │   ├── test_config_store.py      config store: load, save, migration, merge
+│   │   ├── test_detectors.py         detection matching + version fetching (all 14 apps)
+│   │   ├── test_discovery.py         Proxmox parsing, IP resolution, full cycle
+│   │   └── test_github.py            caching, normalization, rate limits
 │   │
 │   ├── Dockerfile                    Python 3.12-slim + uv + curl (healthcheck)
 │   ├── pyproject.toml                hatchling build, uv deps, pytest config
@@ -1207,10 +1244,15 @@ proxmon/
 │   └── ux-spec-setup-ui.md           UX specification (wizard + settings)
 │
 ├── data/                             (created at runtime, gitignored)
-│   └── config.json                   UI-saved settings (0o600)
+│   └── proxmon.db                    UI-saved settings (SQLite)
+│
+├── .github/
+│   └── workflows/
+│       └── docker-build.yml          CI: build & push to ghcr.io on push to main
 │
 ├── docker-compose.yml                Production: backend (internal) + frontend (:3000)
 ├── docker-compose.override.yml.example  Dev: hot reload mounts
+├── CLAUDE.md                         Claude Code project context
 ├── .gitignore
 └── README.md
 ```
@@ -1232,11 +1274,10 @@ proxmon/
 - Only `docker ps`, `docker inspect`, `cat`, `which`, `dpkg -l`, `rpm -q` prefixes are permitted
 - `WarningPolicy` by default; set `SSH_KNOWN_HOSTS_PATH` for `RejectPolicy` (MITM protection)
 
-### Config file
+### Config database
 
-- `/app/data/config.json` is written with `0o600` (owner read/write only)
-- Written atomically: temp file → `os.replace()` — no partial writes visible to readers
-- Token secret is stored in plaintext in the config file — this is an accepted trade-off for a self-hosted homelab tool; do not expose the data volume publicly
+- `/app/data/proxmon.db` is a SQLite database with a single settings row
+- Token secret is stored in plaintext in the database — this is an accepted trade-off for a self-hosted homelab tool; do not expose the data volume publicly
 
 ### Network
 
@@ -1289,11 +1330,15 @@ proxmon/
 | "Command not in whitelist" in logs | A detector tried a non-whitelisted command | This is a bug; open an issue |
 | Host key warnings in logs | `SSH_KNOWN_HOSTS_PATH` not set | Expected; set it to enable strict verification |
 
+### GitHub token `"***"` bug
+
+If GitHub API calls return 401 Unauthorized after saving settings, the masked placeholder `"***"` may have been saved as the actual token value. To fix: open Settings, clear the GitHub Token field, type the new token, and save. The `_keep_or_replace()` function in `routes.py` guards against this, but older UI versions or manual API calls can trigger it.
+
 ### Container / Docker Compose
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Config lost after `docker compose down` | `./data` volume not mounted | Default `docker-compose.yml` includes `./data:/app/data`; check it wasn't removed |
+| Config lost after `docker compose down` | `./data` volume not mounted | Default `docker-compose.yml` includes `./data:/app/data`; config is in `proxmon.db` |
 | Backend fails to start | Missing required env vars (`.env` mode) | Check logs: `docker compose logs backend` |
 | Frontend shows "Failed to fetch" | Backend not running or unhealthy | Check: `docker compose ps`, `docker compose logs backend` |
 | Port 3000 already in use | Another service on the host | Change the port mapping in `docker-compose.yml`: `"3001:80"` |
