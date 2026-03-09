@@ -61,8 +61,8 @@ function settingsToFormData(s: FullSettings): FormData {
     ssh_enabled: s.ssh_enabled,
     ssh_username: s.ssh_username,
     ssh_key_path: s.ssh_key_path || '',
-    ssh_password: s.ssh_password || '',
-    github_token: s.github_token || '',
+    ssh_password: (s.ssh_password && s.ssh_password !== '***') ? s.ssh_password : '',
+    github_token: (s.github_token && s.github_token !== '***') ? s.github_token : '',
     log_level: s.log_level,
   };
 }

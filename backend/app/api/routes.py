@@ -324,6 +324,13 @@ async def get_app_config_defaults() -> list[dict[str, str | int | bool]]:
     ]
 
 
+def _keep_or_replace(incoming: str | None, existing: str | None) -> str | None:
+    """Return existing value when incoming is None, empty, or the masked sentinel '***'."""
+    if not incoming or incoming == "***":
+        return existing or None
+    return incoming
+
+
 @router.post("/api/settings")
 async def save_settings(
     body: SettingsSaveRequest,
@@ -358,8 +365,8 @@ async def save_settings(
         "ssh_enabled": body.ssh_enabled,
         "ssh_username": body.ssh_username,
         "ssh_key_path": body.ssh_key_path,
-        "ssh_password": body.ssh_password,
-        "github_token": body.github_token,
+        "ssh_password": _keep_or_replace(body.ssh_password, current_file.get("ssh_password")),
+        "github_token": _keep_or_replace(body.github_token, current_file.get("github_token")),
         "log_level": body.log_level,
     }
 
