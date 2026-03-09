@@ -23,9 +23,11 @@ COMMAND_WHITELIST = frozenset({
 
 # Reject commands containing shell metacharacters to prevent injection.
 # Covers: statement separators (;), logical ops (&& ||), pipes (|), command
-# substitution (` $ ( )), brace expansion ({), redirects (< >), history (!),
-# comments (#), newlines and backslash escapes.
-SHELL_METACHARACTERS = re.compile(r'[;&|`$<>()\{\}!\n\\#]')
+# substitution (` $ ( )), redirects (< >), history (!), comments (#),
+# newlines and backslash escapes.  Braces {} are intentionally excluded
+# because Docker --format uses Go templates (e.g. {{.Image}}) and the
+# command whitelist already prevents execution of arbitrary commands.
+SHELL_METACHARACTERS = re.compile(r'[;&|`$<>()!\n\\#]')
 
 # For user-configured version commands: only reject the most dangerous
 # injection patterns.  Pipes (|) are allowed for e.g. "myapp --version | head -1".
@@ -112,6 +114,17 @@ class SSHClient:
             )
             return None
 
+        effective_username = username or self._username
+        effective_key_path = key_path or self._key_path
+        effective_password = password or self._password
+        if not effective_key_path and not effective_password:
+            logger.warning(
+                "SSH version cmd skipped for %s: no credentials configured "
+                "(set SSH key/password in global Settings or per-app SSH fields)",
+                host,
+            )
+            return None
+
         try:
             return await asyncio.to_thread(
                 self._execute_sync,
@@ -123,7 +136,7 @@ class SSHClient:
                 password=password,
             )
         except Exception:
-            logger.debug("SSH version cmd failed on %s: %s", host, command)
+            logger.warning("SSH version cmd failed on %s: %.80s", host, command)
             return None
 
     def _execute_sync(
