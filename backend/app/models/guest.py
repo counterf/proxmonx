@@ -58,7 +58,7 @@ def _build_web_url(
     # Port 443 always implies https regardless of how the port was set.
     if effective_port == 443:
         return f"https://{host}"
-    if effective_port == 80:
+    if effective_port == 80 and scheme == "http":
         return f"http://{host}"
 
     return f"{scheme}://{host}:{effective_port}"
