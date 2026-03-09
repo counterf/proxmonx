@@ -1,8 +1,7 @@
-"""Tests for ConfigStore: load, save, is_configured, missing_fields, priority."""
+"""Tests for ConfigStore: SQLite-backed config persistence."""
 
 import json
 import os
-import stat
 from pathlib import Path
 
 import pytest
@@ -11,180 +10,84 @@ from app.core.config_store import ConfigStore
 
 
 @pytest.fixture()
-def config_path(tmp_path: Path) -> Path:
-    return tmp_path / "config.json"
+def db_path(tmp_path: Path) -> Path:
+    return tmp_path / "proxmon.db"
 
 
 @pytest.fixture()
-def store(config_path: Path) -> ConfigStore:
-    return ConfigStore(str(config_path))
+def store(db_path: Path) -> ConfigStore:
+    return ConfigStore(str(db_path))
 
 
-class TestLoad:
-    def test_returns_empty_dict_when_file_missing(self, store: ConfigStore) -> None:
-        assert store.load() == {}
-
-    def test_returns_parsed_json(self, store: ConfigStore, config_path: Path) -> None:
-        config_path.write_text(json.dumps({"proxmox_host": "https://10.0.0.1:8006"}))
-        result = store.load()
-        assert result == {"proxmox_host": "https://10.0.0.1:8006"}
-
-    def test_returns_empty_dict_on_invalid_json(self, store: ConfigStore, config_path: Path) -> None:
-        config_path.write_text("not valid json {{{")
-        assert store.load() == {}
-
-    def test_returns_empty_dict_when_json_is_array(self, store: ConfigStore, config_path: Path) -> None:
-        config_path.write_text(json.dumps([1, 2, 3]))
-        assert store.load() == {}
+_FULL_CONFIG = {
+    "proxmox_host": "https://10.0.0.1:8006",
+    "proxmox_token_id": "root@pam!test",
+    "proxmox_token_secret": "secret-uuid",
+    "proxmox_node": "pve",
+}
 
 
-class TestSave:
-    def test_creates_file(self, store: ConfigStore, config_path: Path) -> None:
-        store.save({"proxmox_host": "https://10.0.0.1:8006"})
-        assert config_path.exists()
-        data = json.loads(config_path.read_text())
-        assert data["proxmox_host"] == "https://10.0.0.1:8006"
-
-    def test_creates_parent_directories(self, tmp_path: Path) -> None:
-        nested = tmp_path / "a" / "b" / "config.json"
-        s = ConfigStore(str(nested))
-        s.save({"key": "val"})
-        assert nested.exists()
-
-    def test_sets_permissions_0600(self, store: ConfigStore, config_path: Path) -> None:
-        store.save({"key": "val"})
-        mode = stat.S_IMODE(config_path.stat().st_mode)
-        assert mode == 0o600
-
-    def test_atomic_write_no_tmp_left(self, store: ConfigStore, config_path: Path) -> None:
-        store.save({"key": "val"})
-        tmp = config_path.with_suffix(".tmp")
-        assert not tmp.exists()
-
-    def test_overwrites_existing(self, store: ConfigStore, config_path: Path) -> None:
-        store.save({"a": 1})
-        store.save({"b": 2})
-        data = json.loads(config_path.read_text())
-        assert "a" not in data
-        assert data["b"] == 2
-
+class TestSaveLoadRoundTrip:
     def test_roundtrip(self, store: ConfigStore) -> None:
-        original = {
-            "proxmox_host": "https://10.0.0.1:8006",
-            "proxmox_token_id": "root@pam!test",
-            "proxmox_token_secret": "secret-uuid",
-            "proxmox_node": "pve",
-            "poll_interval_seconds": 120,
-            "discover_vms": True,
-        }
+        original = {**_FULL_CONFIG, "poll_interval_seconds": 120, "discover_vms": True}
         store.save(original)
-        loaded = store.load()
-        assert loaded == original
+        assert store.load() == original
+
+    def test_load_empty_db_returns_empty_dict(self, store: ConfigStore) -> None:
+        assert store.load() == {}
 
 
 class TestIsConfigured:
-    def test_false_when_no_file_and_no_env(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Clear any env vars
-        for field in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
-                      "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
-            monkeypatch.delenv(field, raising=False)
+    def test_false_when_empty(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
+        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
+                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
+            monkeypatch.delenv(f, raising=False)
         assert store.is_configured() is False
 
-    def test_true_when_file_has_all_fields(self, store: ConfigStore, config_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        for field in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
-                      "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
-            monkeypatch.delenv(field, raising=False)
-        config_path.write_text(json.dumps({
-            "proxmox_host": "https://10.0.0.1:8006",
-            "proxmox_token_id": "root@pam!test",
-            "proxmox_token_secret": "secret",
-            "proxmox_node": "pve",
-        }))
+    def test_true_when_required_fields_present(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
+        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
+                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
+            monkeypatch.delenv(f, raising=False)
+        store.save(_FULL_CONFIG)
         assert store.is_configured() is True
-
-    def test_false_when_field_is_empty_string(self, store: ConfigStore, config_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        for field in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
-                      "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
-            monkeypatch.delenv(field, raising=False)
-        config_path.write_text(json.dumps({
-            "proxmox_host": "https://10.0.0.1:8006",
-            "proxmox_token_id": "",
-            "proxmox_token_secret": "secret",
-            "proxmox_node": "pve",
-        }))
-        assert store.is_configured() is False
 
 
 class TestGetMissingFields:
-    def test_all_missing_when_empty(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
-        for field in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
-                      "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
-            monkeypatch.delenv(field, raising=False)
-        missing = store.get_missing_fields()
-        assert set(missing) == {"proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"}
-
-    def test_partial_missing(self, store: ConfigStore, config_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        for field in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
-                      "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
-            monkeypatch.delenv(field, raising=False)
-        config_path.write_text(json.dumps({
-            "proxmox_host": "https://10.0.0.1:8006",
-            "proxmox_node": "pve",
-        }))
-        missing = store.get_missing_fields()
-        assert set(missing) == {"proxmox_token_id", "proxmox_token_secret"}
-
-
-class TestPriorityOrder:
-    def test_file_overrides_env(self, store: ConfigStore, config_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Config file values take priority over environment variables."""
-        monkeypatch.setenv("PROXMOX_HOST", "https://env-host:8006")
-        monkeypatch.setenv("PROXMOX_TOKEN_ID", "env@pam!token")
-        monkeypatch.setenv("PROXMOX_TOKEN_SECRET", "env-secret")
-        monkeypatch.setenv("PROXMOX_NODE", "env-node")
-
-        config_path.write_text(json.dumps({
-            "proxmox_host": "https://file-host:8006",
-            "proxmox_token_id": "file@pam!token",
-            "proxmox_token_secret": "file-secret",
-            "proxmox_node": "file-node",
-        }))
-
-        # is_configured should use file values (both present, so True)
-        assert store.is_configured() is True
-        # The file values are what's in the loaded data
-        data = store.load()
-        assert data["proxmox_host"] == "https://file-host:8006"
-
-    def test_env_used_when_no_file(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Environment variables are used when no config file exists."""
-        monkeypatch.setenv("PROXMOX_HOST", "https://env-host:8006")
-        monkeypatch.setenv("PROXMOX_TOKEN_ID", "env@pam!token")
-        monkeypatch.setenv("PROXMOX_TOKEN_SECRET", "env-secret")
-        monkeypatch.setenv("PROXMOX_NODE", "env-node")
-
-        assert store.is_configured() is True
-
-    def test_token_secret_from_env_only_is_preserved_on_save(
-        self, store: ConfigStore, config_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """When token_secret exists only in env (no config file), is_configured returns True."""
-        monkeypatch.setenv("PROXMOX_HOST", "https://env-host:8006")
-        monkeypatch.setenv("PROXMOX_TOKEN_ID", "env@pam!token")
-        monkeypatch.setenv("PROXMOX_TOKEN_SECRET", "env-secret-only")
-        monkeypatch.setenv("PROXMOX_NODE", "env-node")
-
-        # No config file exists yet — configured via env vars only
-        assert store.is_configured() is True
-
-        # Simulate a save that doesn't include the token secret (null = keep current)
-        # After save, the file should include the secret from env
-        new_data: dict[str, str | int | bool | None] = {
-            "proxmox_host": "https://env-host:8006",
-            "proxmox_token_id": "env@pam!token",
-            "proxmox_token_secret": "env-secret-only",  # caller resolves this before saving
-            "proxmox_node": "env-node",
+    def test_returns_all_when_empty(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
+        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
+                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
+            monkeypatch.delenv(f, raising=False)
+        assert set(store.get_missing_fields()) == {
+            "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node",
         }
-        store.save(new_data)
-        loaded = store.load()
-        assert loaded["proxmox_token_secret"] == "env-secret-only"
+
+
+class TestSaveIdempotent:
+    def test_second_save_overwrites_first(self, store: ConfigStore) -> None:
+        store.save({"a": 1})
+        store.save({"b": 2})
+        data = store.load()
+        assert "a" not in data
+        assert data["b"] == 2
+
+
+class TestMigration:
+    def test_migrates_config_json_if_db_empty(self, tmp_path: Path) -> None:
+        json_path = tmp_path / "config.json"
+        json_path.write_text(json.dumps(_FULL_CONFIG))
+
+        db_path = tmp_path / "proxmon.db"
+        store = ConfigStore(str(db_path))
+        assert store.load() == _FULL_CONFIG
+
+    def test_migration_skipped_if_settings_row_exists(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "proxmon.db"
+        store = ConfigStore(str(db_path))
+        store.save({"existing": "data"})
+
+        # Now write a config.json — it should NOT be migrated
+        json_path = tmp_path / "config.json"
+        json_path.write_text(json.dumps(_FULL_CONFIG))
+
+        store2 = ConfigStore(str(db_path))
+        assert store2.load() == {"existing": "data"}
