@@ -151,16 +151,28 @@ export default function Settings() {
     setSaving(true);
     setSaveError(null);
     try {
-      // Build app_config payload: only include api_keys that were actually changed
+      // Build app_config payload: include all overridden fields
       const appConfigPayload: Record<string, AppConfigEntry> = {};
       for (const [name, cfg] of Object.entries(appConfigs)) {
         const entry: AppConfigEntry = {};
+        // Plain fields — always send current value (null = clear/default)
         entry.port = cfg.port || null;
+        entry.scheme = cfg.scheme || null;
+        entry.github_repo = cfg.github_repo || null;
+        entry.ssh_version_cmd = cfg.ssh_version_cmd || null;
+        entry.ssh_username = cfg.ssh_username || null;
+        entry.ssh_key_path = cfg.ssh_key_path || null;
+        // Secret fields — only send if explicitly changed; otherwise backend
+        // keeps existing value (prevents "***" being written back as the token)
         if (changedApiKeys.current.has(name)) {
           entry.api_key = cfg.api_key ?? '';
+          entry.ssh_password = cfg.ssh_password ?? '';
         }
-        // Only include entries that have actual overrides
-        if (entry.port || changedApiKeys.current.has(name)) {
+        // Only include this app if at least one field is set
+        const hasContent = entry.port || entry.scheme || entry.github_repo ||
+          entry.ssh_version_cmd || entry.ssh_username || entry.ssh_key_path ||
+          changedApiKeys.current.has(name);
+        if (hasContent) {
           appConfigPayload[name] = entry;
         }
       }
