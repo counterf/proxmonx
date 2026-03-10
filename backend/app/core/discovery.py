@@ -431,22 +431,30 @@ class DiscoveryEngine:
                     guest.name,
                 )
 
-        # Get latest version from GitHub
-        effective_repo = github_repo_override or detector.github_repo
-        if effective_repo:
-            guest.github_repo_queried = effective_repo
-            try:
-                guest.latest_version = await self._github.get_latest_version(
-                    effective_repo
-                )
-                guest.github_lookup_status = "success" if guest.latest_version else "failed"
-            except Exception:
-                logger.warning(
-                    "GitHub version lookup failed for %s", effective_repo
-                )
-                guest.github_lookup_status = "failed"
+        # Get latest version: try detector's custom source first, then GitHub
+        custom_latest = await detector.get_latest_version(http_client=self._http_client)
+        if custom_latest:
+            guest.latest_version = custom_latest
+            guest.github_lookup_status = "success"
+            logger.debug(
+                "Latest version for %s from custom source: %s", detector.name, custom_latest
+            )
         else:
-            guest.github_lookup_status = "no_repo"
+            effective_repo = github_repo_override or detector.github_repo
+            if effective_repo:
+                guest.github_repo_queried = effective_repo
+                try:
+                    guest.latest_version = await self._github.get_latest_version(
+                        effective_repo
+                    )
+                    guest.github_lookup_status = "success" if guest.latest_version else "failed"
+                except Exception:
+                    logger.warning(
+                        "GitHub version lookup failed for %s", effective_repo
+                    )
+                    guest.github_lookup_status = "failed"
+            else:
+                guest.github_lookup_status = "no_repo"
 
         # Determine update status
         guest.update_status = _determine_update_status(

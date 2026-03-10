@@ -60,6 +60,17 @@ class BaseDetector(ABC):
     # Whether this detector's app supports API key authentication
     accepts_api_key: bool = False
 
+    async def get_latest_version(
+        self,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> str | None:
+        """Optional: fetch the latest available version from a custom source.
+
+        Return a version string to bypass the GitHub lookup entirely.
+        Return None (default) to fall through to the standard GitHub lookup.
+        """
+        return None
+
     @abstractmethod
     async def get_installed_version(
         self, host: str, port: int | None = None, api_key: str | None = None,
