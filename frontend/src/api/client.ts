@@ -128,3 +128,9 @@ export async function deleteGuestConfig(
     method: 'DELETE',
   });
 }
+
+export async function sendTestNotification(): Promise<{ success: boolean; message: string }> {
+  return fetchJson<{ success: boolean; message: string }>('/api/notifications/test', {
+    method: 'POST',
+  });
+}

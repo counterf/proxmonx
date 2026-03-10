@@ -13,8 +13,10 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, field_validator
 
 from app.config import AppConfig, Settings
+from app.core.alerting import AlertManager
 from app.core.discovery import DiscoveryEngine
 from app.core.github import GitHubClient
+from app.core.notifier import NtfyNotifier
 from app.core.proxmox import ProxmoxClient
 from app.core.scheduler import Scheduler
 from app.core.ssh import SSHClient
@@ -107,6 +109,14 @@ class SettingsSaveRequest(BaseModel):
     version_detect_method: str = "pct_first"
     app_config: dict[str, AppConfigEntry] | None = None
     proxmox_hosts: list[ProxmoxHostSaveEntry] | None = None
+    # Notifications
+    notifications_enabled: bool | None = None
+    ntfy_url: str | None = None
+    ntfy_token: str | None = None
+    ntfy_priority: int | None = None
+    notify_disk_threshold: int | None = None
+    notify_disk_cooldown_minutes: int | None = None
+    notify_on_outdated: bool | None = None
 
     @field_validator("proxmox_host")
     @classmethod
@@ -142,6 +152,27 @@ class SettingsSaveRequest(BaseModel):
         allowed = {"pct_first", "ssh_first", "ssh_only", "pct_only"}
         if v not in allowed:
             raise ValueError(f"version_detect_method must be one of {allowed}")
+        return v
+
+    @field_validator("ntfy_priority")
+    @classmethod
+    def validate_ntfy_priority(cls, v: int | None) -> int | None:
+        if v is not None and (v < 1 or v > 5):
+            raise ValueError("ntfy_priority must be between 1 and 5")
+        return v
+
+    @field_validator("notify_disk_threshold")
+    @classmethod
+    def validate_disk_threshold(cls, v: int | None) -> int | None:
+        if v is not None and (v < 50 or v > 100):
+            raise ValueError("notify_disk_threshold must be between 50 and 100")
+        return v
+
+    @field_validator("notify_disk_cooldown_minutes")
+    @classmethod
+    def validate_disk_cooldown(cls, v: int | None) -> int | None:
+        if v is not None and (v < 15 or v > 1440):
+            raise ValueError("notify_disk_cooldown_minutes must be between 15 and 1440")
         return v
 
     @field_validator("app_config")
@@ -455,6 +486,13 @@ async def get_full_settings(
         "app_config": masked_app_config,
         "guest_config": masked_guest_config,
         "proxmox_hosts": masked_hosts,
+        "notifications_enabled": settings.notifications_enabled,
+        "ntfy_url": settings.ntfy_url,
+        "ntfy_token": "***" if settings.ntfy_token else None,
+        "ntfy_priority": settings.ntfy_priority,
+        "notify_disk_threshold": settings.notify_disk_threshold,
+        "notify_disk_cooldown_minutes": settings.notify_disk_cooldown_minutes,
+        "notify_on_outdated": settings.notify_on_outdated,
     }
 
 
@@ -580,6 +618,35 @@ async def save_settings(
         "log_level": body.log_level,
         "version_detect_method": body.version_detect_method,
     }
+
+    # Notification settings -- only overwrite when the client sends a value
+    if body.notifications_enabled is not None:
+        config_data["notifications_enabled"] = body.notifications_enabled
+    else:
+        config_data["notifications_enabled"] = current_file.get("notifications_enabled", False)
+    if body.ntfy_url is not None:
+        config_data["ntfy_url"] = body.ntfy_url
+    else:
+        config_data["ntfy_url"] = current_file.get("ntfy_url", "")
+    config_data["ntfy_token"] = _keep_or_replace(
+        body.ntfy_token, current_file.get("ntfy_token"),
+    ) or ""
+    if body.ntfy_priority is not None:
+        config_data["ntfy_priority"] = body.ntfy_priority
+    else:
+        config_data["ntfy_priority"] = current_file.get("ntfy_priority", 3)
+    if body.notify_disk_threshold is not None:
+        config_data["notify_disk_threshold"] = body.notify_disk_threshold
+    else:
+        config_data["notify_disk_threshold"] = current_file.get("notify_disk_threshold", 95)
+    if body.notify_disk_cooldown_minutes is not None:
+        config_data["notify_disk_cooldown_minutes"] = body.notify_disk_cooldown_minutes
+    else:
+        config_data["notify_disk_cooldown_minutes"] = current_file.get("notify_disk_cooldown_minutes", 60)
+    if body.notify_on_outdated is not None:
+        config_data["notify_on_outdated"] = body.notify_on_outdated
+    else:
+        config_data["notify_on_outdated"] = current_file.get("notify_on_outdated", True)
 
     # Multi-host support
     if body.proxmox_hosts is not None and len(body.proxmox_hosts) > 0:
@@ -717,7 +784,18 @@ async def save_settings(
         github = GitHubClient(new_settings, http_client=new_client)
         ssh = SSHClient(new_settings)
         engine = DiscoveryEngine(proxmox, github, ssh, http_client=new_client, settings=new_settings)
-        new_scheduler = Scheduler(new_settings, engine)
+
+        alert_manager: AlertManager | None = None
+        if new_settings.notifications_enabled and new_settings.ntfy_url:
+            notifier = NtfyNotifier(
+                url=new_settings.ntfy_url,
+                token=new_settings.ntfy_token,
+                priority=new_settings.ntfy_priority,
+                http_client=new_client,
+            )
+            alert_manager = AlertManager(notifier, new_settings)
+
+        new_scheduler = Scheduler(new_settings, engine, alert_manager=alert_manager)
         new_scheduler.start()
         # Only update app state after successful start
         request.app.state.http_client = new_client
@@ -732,3 +810,26 @@ async def save_settings(
             await old_client.aclose()
 
     return {"success": True, "message": "Settings saved"}
+
+
+@router.post("/api/notifications/test", dependencies=[Depends(_require_api_key)])
+async def test_notification(
+    settings=Depends(_get_settings),
+) -> dict[str, bool | str]:
+    """Send a test notification to verify ntfy connectivity."""
+    if not settings.ntfy_url:
+        return {"success": False, "message": "ntfy URL is not configured"}
+
+    notifier = NtfyNotifier(
+        url=settings.ntfy_url,
+        token=settings.ntfy_token,
+        priority=settings.ntfy_priority,
+    )
+    sent = await notifier.send(
+        title="proxmon Test",
+        message="This is a test notification from proxmon.",
+        tags="white_check_mark",
+    )
+    if sent:
+        return {"success": True, "message": "Test notification sent successfully"}
+    return {"success": False, "message": "Failed to send notification -- check ntfy URL and token"}

@@ -8,7 +8,7 @@ from app.detectors.gitea import GiteaDetector
 from app.detectors.immich import ImmichDetector
 from app.detectors.ntfy import NtfyDetector
 from app.detectors.overseerr import OverseerrDetector
-from app.detectors.seer import SeerDetector
+from app.detectors.seerr import SeerDetector
 from app.detectors.plex import PlexDetector
 from app.detectors.prowlarr import ProwlarrDetector
 from app.detectors.qbittorrent import QBittorrentDetector

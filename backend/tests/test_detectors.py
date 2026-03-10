@@ -17,7 +17,7 @@ from app.detectors.sabnzbd import SABnzbdDetector
 from app.detectors.traefik import TraefikDetector
 from app.detectors.caddy import CaddyDetector
 from app.detectors.ntfy import NtfyDetector
-from app.detectors.seer import SeerDetector
+from app.detectors.seerr import SeerDetector
 from app.detectors.docker_generic import DockerGenericDetector
 from app.models.guest import GuestInfo
 

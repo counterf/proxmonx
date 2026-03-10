@@ -33,7 +33,7 @@ Each detector in `backend/app/detectors/` extends `BaseDetector` and implements:
 SQLite at `/app/data/proxmon.db`. Single `settings` table, one row, JSON blob. Auto-migrates `config.json` on first start.
 
 ## Tests
-`cd backend && pytest tests/` -- 84 tests across test_detectors.py, test_discovery.py, test_github.py, test_config_store.py, test_ssh_version_cmd.py
+`cd backend && pytest tests/` -- 116 tests across test_detectors.py, test_discovery.py, test_github.py, test_config_store.py, test_ssh_version_cmd.py, test_notifier.py, test_alerting.py
 
 ## Deploy
 ```bash

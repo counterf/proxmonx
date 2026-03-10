@@ -86,7 +86,7 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
 
   return (
     <div className="p-4 rounded bg-surface border border-gray-800">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-1">
         <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">Proxmox Hosts</h2>
         <button
           type="button"
@@ -97,6 +97,9 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
           + Add Host
         </button>
       </div>
+      <p className="text-xs text-gray-500 mb-3">
+        Connect to one or more Proxmox VE hosts. Each host needs an API token with at least PVEAuditor permissions.
+      </p>
 
       <div className="space-y-2">
         {hosts.map((host, idx) => {
@@ -139,6 +142,7 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
                         disabled={disabled}
                         className={inputClass}
                       />
+                      <p className="text-xs text-gray-600 mt-0.5">Friendly name shown in the dashboard</p>
                     </div>
                     <div>
                       <label htmlFor={`host-url-${host.id}`} className="block text-xs text-gray-400 mb-1">
@@ -153,6 +157,7 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
                         disabled={disabled}
                         className={inputClass}
                       />
+                      <p className="text-xs text-gray-600 mt-0.5">Full URL including port, e.g. https://192.168.1.10:8006</p>
                     </div>
                   </div>
 
@@ -170,6 +175,7 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
                         disabled={disabled}
                         className={inputClass}
                       />
+                      <p className="text-xs text-gray-600 mt-0.5">API token in user@realm!tokenname format</p>
                     </div>
                     <div>
                       <label htmlFor={`host-secret-${host.id}`} className="block text-xs text-gray-400 mb-1">
@@ -202,6 +208,7 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
                           </svg>
                         </button>
                       </div>
+                      <p className="text-xs text-gray-600 mt-0.5">UUID secret generated when creating the API token in Proxmox</p>
                     </div>
                   </div>
 
@@ -219,6 +226,7 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
                         disabled={disabled}
                         className={inputClass}
                       />
+                      <p className="text-xs text-gray-600 mt-0.5">Node name as shown in the Proxmox VE sidebar</p>
                     </div>
                     <div>
                       <label htmlFor={`host-ssh-user-${host.id}`} className="block text-xs text-gray-400 mb-1">SSH Username</label>
@@ -231,6 +239,7 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
                         disabled={disabled}
                         className={inputClass}
                       />
+                      <p className="text-xs text-gray-600 mt-0.5">User for SSH/pct exec connections to this Proxmox host</p>
                     </div>
                   </div>
 
@@ -246,6 +255,7 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
                         disabled={disabled}
                         className={inputClass}
                       />
+                      <p className="text-xs text-gray-600 mt-0.5">Path to private key file inside the proxmon container</p>
                     </div>
                     <div>
                       <label htmlFor={`host-ssh-pass-${host.id}`} className="block text-xs text-gray-400 mb-1">SSH Password</label>
@@ -277,31 +287,38 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
                           </svg>
                         </button>
                       </div>
+                      <p className="text-xs text-gray-600 mt-0.5">Password for SSH authentication to this Proxmox host</p>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-6">
-                    <div className="flex items-center gap-2">
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2">
                       <input
                         id={`host-verify-ssl-${host.id}`}
                         type="checkbox"
                         checked={host.verify_ssl}
                         onChange={(e) => updateHost(host.id, { verify_ssl: e.target.checked })}
                         disabled={disabled}
-                        className="accent-blue-500"
+                        className="accent-blue-500 mt-0.5"
                       />
-                      <label htmlFor={`host-verify-ssl-${host.id}`} className="text-xs text-gray-400">Verify SSL</label>
+                      <div>
+                        <label htmlFor={`host-verify-ssl-${host.id}`} className="text-xs text-gray-400">Verify SSL</label>
+                        <p className="text-xs text-gray-600">Validate this host's TLS certificate (disable for self-signed certs)</p>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-start gap-2">
                       <input
                         id={`host-pct-${host.id}`}
                         type="checkbox"
                         checked={host.pct_exec_enabled}
                         onChange={(e) => updateHost(host.id, { pct_exec_enabled: e.target.checked })}
                         disabled={disabled}
-                        className="accent-blue-500"
+                        className="accent-blue-500 mt-0.5"
                       />
-                      <label htmlFor={`host-pct-${host.id}`} className="text-xs text-gray-400">Enable pct exec</label>
+                      <div>
+                        <label htmlFor={`host-pct-${host.id}`} className="text-xs text-gray-400">Enable pct exec</label>
+                        <p className="text-xs text-gray-600">Run version commands inside LXC containers via the Proxmox host over SSH</p>
+                      </div>
                     </div>
                   </div>
 

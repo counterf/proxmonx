@@ -1,4 +1,4 @@
-"""Seer detector."""
+"""Seerr detector."""
 
 import logging
 
@@ -10,10 +10,10 @@ logger = logging.getLogger(__name__)
 
 
 class SeerDetector(BaseDetector):
-    name = "seer"
-    display_name = "Seer"
+    name = "seerr"
+    display_name = "Seerr"
     github_repo = "seerr-team/seerr"
-    aliases: list[str] = []
+    aliases: list[str] = ["seer"]
     default_port = 5055
     docker_images = ["seerr/seerr"]
     accepts_api_key = True

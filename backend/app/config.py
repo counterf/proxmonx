@@ -80,6 +80,15 @@ class Settings(BaseSettings):
     # Per-guest overrides keyed by guest ID (e.g. "1773123726644:100")
     guest_config: dict[str, AppConfig] = {}
 
+    # Notifications
+    notifications_enabled: bool = False
+    ntfy_url: str = ""
+    ntfy_token: str = ""
+    ntfy_priority: int = 3
+    notify_disk_threshold: int = 95
+    notify_disk_cooldown_minutes: int = 60
+    notify_on_outdated: bool = True
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
     def get_hosts(self) -> list[ProxmoxHostConfig]:

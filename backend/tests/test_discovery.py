@@ -165,7 +165,7 @@ class TestProxmoxClient:
             })
         )
         client = ProxmoxClient(_make_settings())
-        ip = await client.get_guest_network("100", "lxc")
+        ip, os_type = await client.get_guest_network("100", "lxc")
         assert ip == "10.0.0.100"
 
 

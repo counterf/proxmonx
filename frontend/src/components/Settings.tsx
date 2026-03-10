@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import type { FullSettings, SettingsSaveRequest, ConnectionTestResult, AppConfigEntry, ProxmoxHost } from '../types';
-import { fetchFullSettings, saveSettings, testConnection } from '../api/client';
+import { fetchFullSettings, saveSettings, testConnection, sendTestNotification } from '../api/client';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorBanner from './ErrorBanner';
 import FormField from './setup/FormField';
@@ -20,7 +20,7 @@ const DETECTORS = [
   { name: 'plex', displayName: 'Plex' },
   { name: 'immich', displayName: 'Immich' },
   { name: 'overseerr', displayName: 'Overseerr' },
-  { name: 'seer', displayName: 'Seer' },
+  { name: 'seerr', displayName: 'Seerr' },
   { name: 'gitea', displayName: 'Gitea' },
   { name: 'qbittorrent', displayName: 'qBittorrent' },
   { name: 'sabnzbd', displayName: 'SABnzbd' },
@@ -47,6 +47,13 @@ interface FormData {
   github_token: string;
   log_level: string;
   version_detect_method: string;
+  notifications_enabled: boolean;
+  ntfy_url: string;
+  ntfy_token: string;
+  ntfy_priority: number;
+  notify_disk_threshold: number;
+  notify_disk_cooldown_minutes: number;
+  notify_on_outdated: boolean;
 }
 
 interface FormErrors {
@@ -69,6 +76,13 @@ function settingsToFormData(s: FullSettings): FormData {
     github_token: (s.github_token && s.github_token !== '***') ? s.github_token : '',
     log_level: s.log_level,
     version_detect_method: s.version_detect_method || 'pct_first',
+    notifications_enabled: s.notifications_enabled ?? false,
+    ntfy_url: s.ntfy_url || '',
+    ntfy_token: (s.ntfy_token && s.ntfy_token !== '***') ? s.ntfy_token : '',
+    ntfy_priority: s.ntfy_priority ?? 3,
+    notify_disk_threshold: s.notify_disk_threshold ?? 95,
+    notify_disk_cooldown_minutes: s.notify_disk_cooldown_minutes ?? 60,
+    notify_on_outdated: s.notify_on_outdated ?? true,
   };
 }
 
@@ -119,6 +133,9 @@ export default function Settings() {
   const [toast, setToast] = useState<string | null>(null);
   // Track whether token_secret was changed from the masked value
   const tokenSecretChanged = useRef(false);
+  const ntfyTokenChanged = useRef(false);
+  const [testingNotification, setTestingNotification] = useState(false);
+  const [notificationTestResult, setNotificationTestResult] = useState<string | null>(null);
   // Per-app configuration
   const [appConfigs, setAppConfigs] = useState<Record<string, AppConfigEntry>>({});
   const [savedAppConfigs, setSavedAppConfigs] = useState<Record<string, AppConfigEntry>>({});
@@ -158,6 +175,9 @@ export default function Settings() {
     if (key === 'proxmox_token_secret') {
       tokenSecretChanged.current = true;
     }
+    if (key === 'ntfy_token') {
+      ntfyTokenChanged.current = true;
+    }
   }, []);
 
   // tokenSecretChanged must be ORed in: typing "***" back after changing it would
@@ -168,6 +188,7 @@ export default function Settings() {
   const hostsDirty = JSON.stringify(proxmoxHosts) !== JSON.stringify(savedProxmoxHosts);
   const isDirty =
     tokenSecretChanged.current ||
+    ntfyTokenChanged.current ||
     appConfigDirty ||
     hostsDirty ||
     (form !== null && savedForm !== null && JSON.stringify(form) !== JSON.stringify(savedForm));
@@ -277,12 +298,20 @@ export default function Settings() {
         version_detect_method: form.version_detect_method,
         app_config: Object.keys(appConfigPayload).length > 0 ? appConfigPayload : undefined,
         proxmox_hosts: hostsPayload,
+        notifications_enabled: form.notifications_enabled,
+        ntfy_url: form.ntfy_url,
+        ntfy_token: ntfyTokenChanged.current ? (form.ntfy_token || null) : null,
+        ntfy_priority: form.ntfy_priority,
+        notify_disk_threshold: form.notify_disk_threshold,
+        notify_disk_cooldown_minutes: form.notify_disk_cooldown_minutes,
+        notify_on_outdated: form.notify_on_outdated,
       };
       await saveSettings(payload);
       setSavedForm({ ...form });
       setSavedAppConfigs({ ...appConfigs });
       setSavedProxmoxHosts([...proxmoxHosts]);
       tokenSecretChanged.current = false;
+      ntfyTokenChanged.current = false;
       changedApiKeys.current = new Set();
       setToast('Settings saved. Discovery restarting...');
     } catch (err) {
@@ -409,7 +438,7 @@ export default function Settings() {
       <div className="p-4 rounded bg-surface border border-gray-800">
         <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Discovery</h2>
         <div className="space-y-3">
-          <FormField label="Poll Interval (seconds)" required error={errors.poll_interval_seconds} htmlFor="s_poll_interval">
+          <FormField label="Poll Interval (seconds)" required error={errors.poll_interval_seconds} htmlFor="s_poll_interval" hint="How often proxmon re-scans guests and checks for new versions (30 -- 3600)">
             <input
               id="s_poll_interval"
               type="number"
@@ -426,7 +455,7 @@ export default function Settings() {
             label="Include VMs"
             checked={form.discover_vms}
             onChange={(v) => setField('discover_vms', v)}
-            hint="Discover VMs in addition to LXC containers"
+            hint="Scan QEMU virtual machines in addition to LXC containers"
           />
 
           <Toggle
@@ -434,6 +463,7 @@ export default function Settings() {
             label="Verify SSL"
             checked={form.verify_ssl}
             onChange={(v) => setField('verify_ssl', v)}
+            hint="Validate TLS certificates when connecting to Proxmox and application APIs"
           />
 
           {!form.verify_ssl && (
@@ -445,7 +475,7 @@ export default function Settings() {
             </div>
           )}
 
-          <FormField label="Version Detection Method" htmlFor="s_version_detect_method">
+          <FormField label="Version Detection Method" htmlFor="s_version_detect_method" hint="CLI fallback strategy when an app's HTTP API probe does not return a version">
             <select
               id="s_version_detect_method"
               value={form.version_detect_method}
@@ -464,17 +494,21 @@ export default function Settings() {
       {/* SSH */}
       <div className="p-4 rounded bg-surface border border-gray-800">
         <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">SSH</h2>
+        <p className="text-xs text-gray-500 mb-3">
+          Global SSH defaults used for direct connections to guests. Per-host and per-app overrides take priority.
+        </p>
         <div className="space-y-3">
           <Toggle
             id="s_ssh_enabled"
             label="Enable SSH"
             checked={form.ssh_enabled}
             onChange={(v) => setField('ssh_enabled', v)}
+            hint="Allow SSH and pct exec for CLI-based version detection"
           />
 
           {form.ssh_enabled && (
             <>
-              <FormField label="SSH Username" required htmlFor="s_ssh_username">
+              <FormField label="SSH Username" required htmlFor="s_ssh_username" hint="Default username for SSH connections to guest containers">
                 <input
                   id="s_ssh_username"
                   type="text"
@@ -485,7 +519,8 @@ export default function Settings() {
               </FormField>
 
               <div>
-                <p className="text-xs text-gray-400 mb-2">Authentication</p>
+                <p className="text-xs text-gray-400 mb-1">Authentication</p>
+                <p className="text-xs text-gray-600 mb-2">Choose how proxmon authenticates when connecting via SSH</p>
                 <div className="flex gap-4">
                   <label className="flex items-center gap-1.5 text-sm text-gray-300 cursor-pointer">
                     <input
@@ -511,7 +546,7 @@ export default function Settings() {
               </div>
 
               {authMethod === 'key' && (
-                <FormField label="Private Key Path" htmlFor="s_ssh_key_path">
+                <FormField label="Private Key Path" htmlFor="s_ssh_key_path" hint="Absolute path to the SSH private key inside the proxmon container">
                   <input
                     id="s_ssh_key_path"
                     type="text"
@@ -529,6 +564,7 @@ export default function Settings() {
                   label="SSH Password"
                   value={form.ssh_password}
                   onChange={(v) => setField('ssh_password', v)}
+                  hint="Fallback password when no key is configured"
                 />
               )}
             </>
@@ -552,6 +588,123 @@ export default function Settings() {
         />
       </div>
 
+      {/* Notifications */}
+      <div className="p-4 rounded bg-surface border border-gray-800">
+        <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Notifications</h2>
+        <p className="text-xs text-gray-500 mb-3">
+          Push alerts to an ntfy server when disk usage or version thresholds are exceeded.
+        </p>
+        <div className="space-y-3">
+          <Toggle
+            id="s_notifications_enabled"
+            label="Enable Notifications"
+            checked={form.notifications_enabled}
+            onChange={(v) => setField('notifications_enabled', v)}
+            hint="Activate push notifications after each discovery cycle"
+          />
+
+          {form.notifications_enabled && (
+            <>
+              <FormField label="ntfy URL" required htmlFor="s_ntfy_url" hint="Full URL including the topic name, e.g. https://ntfy.sh/my-proxmon-alerts">
+                <input
+                  id="s_ntfy_url"
+                  type="text"
+                  value={form.ntfy_url}
+                  onChange={(e) => setField('ntfy_url', e.target.value)}
+                  placeholder="https://ntfy.sh/my-proxmon-alerts"
+                  className={inputClass('ntfy_url')}
+                />
+              </FormField>
+
+              <PasswordField
+                id="s_ntfy_token"
+                label="ntfy Access Token"
+                value={form.ntfy_token}
+                onChange={(v) => setField('ntfy_token', v)}
+                hint="Required only if the ntfy topic uses access control"
+              />
+
+              <FormField label="Priority" htmlFor="s_ntfy_priority" hint="Default priority for notifications (disk alerts always use High)">
+                <select
+                  id="s_ntfy_priority"
+                  value={form.ntfy_priority}
+                  onChange={(e) => setField('ntfy_priority', parseInt(e.target.value))}
+                  className={inputClass('ntfy_priority')}
+                >
+                  <option value={1}>1 - Min</option>
+                  <option value={2}>2 - Low</option>
+                  <option value={3}>3 - Default</option>
+                  <option value={4}>4 - High</option>
+                  <option value={5}>5 - Urgent</option>
+                </select>
+              </FormField>
+
+              <FormField label="Disk Usage Threshold (%)" htmlFor="s_disk_threshold" hint="Send an alert when a guest's disk usage reaches or exceeds this percentage (50 -- 100)">
+                <input
+                  id="s_disk_threshold"
+                  type="number"
+                  min={50}
+                  max={100}
+                  value={form.notify_disk_threshold}
+                  onChange={(e) => setField('notify_disk_threshold', parseInt(e.target.value) || 95)}
+                  className={inputClass('notify_disk_threshold')}
+                />
+              </FormField>
+
+              <FormField label="Disk Alert Cooldown (minutes)" htmlFor="s_disk_cooldown" hint="Minimum wait time before re-sending a disk alert for the same guest (15 -- 1440)">
+                <input
+                  id="s_disk_cooldown"
+                  type="number"
+                  min={15}
+                  max={1440}
+                  value={form.notify_disk_cooldown_minutes}
+                  onChange={(e) => setField('notify_disk_cooldown_minutes', parseInt(e.target.value) || 60)}
+                  className={inputClass('notify_disk_cooldown_minutes')}
+                />
+              </FormField>
+
+              <Toggle
+                id="s_notify_outdated"
+                label="Notify on Outdated"
+                checked={form.notify_on_outdated}
+                onChange={(v) => setField('notify_on_outdated', v)}
+                hint="Send a one-time alert when an app transitions from up-to-date to outdated"
+              />
+
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setTestingNotification(true);
+                    setNotificationTestResult(null);
+                    try {
+                      const res = await sendTestNotification();
+                      setNotificationTestResult(res.success ? res.message : `Failed: ${res.message}`);
+                    } catch (err) {
+                      setNotificationTestResult(err instanceof Error ? err.message : 'Test failed');
+                    } finally {
+                      setTestingNotification(false);
+                    }
+                  }}
+                  disabled={testingNotification || !form.ntfy_url}
+                  className="px-4 py-1.5 text-sm font-medium rounded bg-gray-700 hover:bg-gray-600 text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {testingNotification ? 'Sending...' : 'Send Test Notification'}
+                </button>
+                {notificationTestResult && (
+                  <p className={`text-xs mt-2 ${notificationTestResult.startsWith('Failed') ? 'text-red-400' : 'text-green-400'}`}>
+                    {notificationTestResult}
+                  </p>
+                )}
+                {!form.ntfy_url && (
+                  <p className="text-xs text-gray-500 mt-2">Save settings with a valid ntfy URL first to test notifications</p>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
       {/* App Configuration */}
       <AppConfigSection
         appConfigs={appConfigs}
@@ -563,6 +716,9 @@ export default function Settings() {
       {/* Plugins */}
       <div className="p-4 rounded bg-surface border border-gray-800">
         <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Plugins (Detectors)</h2>
+        <p className="text-xs text-gray-500 mb-3">
+          Built-in detectors that identify applications running inside guests by name, tag, or Docker image.
+        </p>
         <div className="space-y-1">
           {DETECTORS.map((d) => (
             <div key={d.name} className="flex items-center justify-between text-sm py-0.5">

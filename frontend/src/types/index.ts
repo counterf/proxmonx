@@ -120,6 +120,13 @@ export interface FullSettings {
   version_detect_method: string;
   app_config?: Record<string, AppConfigEntry>;
   proxmox_hosts: ProxmoxHost[];
+  notifications_enabled: boolean;
+  ntfy_url: string | null;
+  ntfy_token: string | null;
+  ntfy_priority: number;
+  notify_disk_threshold: number;
+  notify_disk_cooldown_minutes: number;
+  notify_on_outdated: boolean;
 }
 
 export interface SettingsSaveRequest {
@@ -139,6 +146,13 @@ export interface SettingsSaveRequest {
   version_detect_method: string;
   app_config?: Record<string, AppConfigEntry>;
   proxmox_hosts?: ProxmoxHost[];
+  notifications_enabled?: boolean;
+  ntfy_url?: string;
+  ntfy_token?: string | null;
+  ntfy_priority?: number;
+  notify_disk_threshold?: number;
+  notify_disk_cooldown_minutes?: number;
+  notify_on_outdated?: boolean;
 }
 
 export interface ConnectionTestResult {

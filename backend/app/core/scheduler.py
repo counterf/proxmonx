@@ -1,12 +1,18 @@
 """Background polling scheduler."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from app.config import Settings
 from app.core.discovery import DiscoveryEngine
 from app.models.guest import GuestInfo
+
+if TYPE_CHECKING:
+    from app.core.alerting import AlertManager
 
 logger = logging.getLogger(__name__)
 
@@ -14,10 +20,16 @@ logger = logging.getLogger(__name__)
 class Scheduler:
     """Runs the discovery/detection loop on a configurable interval."""
 
-    def __init__(self, settings: Settings, engine: DiscoveryEngine) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        engine: DiscoveryEngine,
+        alert_manager: AlertManager | None = None,
+    ) -> None:
         self._interval = settings.poll_interval_seconds
         self._enabled = settings.proxmon_enabled
         self._engine = engine
+        self._alert_manager = alert_manager
         self._guests: dict[str, GuestInfo] = {}
         self._lock = asyncio.Lock()
         self._running = False
@@ -90,7 +102,13 @@ class Scheduler:
         async with self._lock:
             self._running = True
             try:
+                old_guests = dict(self._guests)
                 self._guests = await self._engine.run_full_cycle(self._guests)
                 self._last_poll = datetime.now(timezone.utc)
+                if self._alert_manager:
+                    try:
+                        await self._alert_manager.evaluate(old_guests, self._guests)
+                    except Exception:
+                        logger.warning("Alert evaluation failed", exc_info=True)
             finally:
                 self._running = False

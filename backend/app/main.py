@@ -13,9 +13,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router, _get_scheduler, _get_settings, _get_config_store
 from app.config import Settings
+from app.core.alerting import AlertManager
 from app.core.config_store import ConfigStore
 from app.core.discovery import DiscoveryEngine
 from app.core.github import GitHubClient
+from app.core.notifier import NtfyNotifier
 from app.core.proxmox import ProxmoxClient
 from app.core.scheduler import Scheduler
 from app.core.ssh import SSHClient
@@ -82,7 +84,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     github = GitHubClient(settings, http_client=http_client)
     ssh = SSHClient(settings)
     engine = DiscoveryEngine(proxmox, github, ssh, http_client=http_client, settings=settings)
-    scheduler = Scheduler(settings, engine)
+
+    alert_manager: AlertManager | None = None
+    if settings.notifications_enabled and settings.ntfy_url:
+        notifier = NtfyNotifier(
+            url=settings.ntfy_url,
+            token=settings.ntfy_token,
+            priority=settings.ntfy_priority,
+            http_client=http_client,
+        )
+        alert_manager = AlertManager(notifier, settings)
+        logger.info("Notifications enabled -> %s", settings.ntfy_url)
+
+    scheduler = Scheduler(settings, engine, alert_manager=alert_manager)
     _scheduler = scheduler
 
     # Override dependency getters
