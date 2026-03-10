@@ -87,13 +87,18 @@ class GuestSummary(BaseModel):
     last_checked: datetime | None = None
     tags: list[str] = []
     web_url: str | None = None
+    host_id: str = "default"
+    host_label: str = "Default"
+    detection_method: str | None = None
+    version_detection_method: str | None = None
+    github_repo_queried: str | None = None
+    github_lookup_status: str | None = None
 
 
 class GuestDetail(GuestSummary):
     """Full detail view of a Proxmox guest."""
 
     ip: str | None = None
-    detection_method: str | None = None
     detector_used: str | None = None
     raw_detection_output: dict[str, str | int | float | bool | None] | None = None
     version_history: list[VersionCheck] = []
@@ -123,6 +128,15 @@ class GuestInfo(BaseModel):
     # "https" when they know the service uses TLS.  The scheme cannot be
     # reliably inferred from the port number alone.
     scheme: str = "http"
+    # Multi-host support
+    host_id: str = "default"
+    host_label: str = "Default"
+    # How the installed version was obtained: "http", "ssh", "pct_exec", or None
+    version_detection_method: str | None = None
+    # The owner/repo string actually used for the GitHub lookup
+    github_repo_queried: str | None = None
+    # Outcome of the GitHub lookup: "success", "failed", or "no_repo"
+    github_lookup_status: str | None = None
 
     def _web_url(self) -> str | None:
         return _build_web_url(
@@ -144,6 +158,12 @@ class GuestInfo(BaseModel):
             last_checked=self.last_checked,
             tags=self.tags,
             web_url=self._web_url(),
+            host_id=self.host_id,
+            host_label=self.host_label,
+            detection_method=self.detection_method,
+            version_detection_method=self.version_detection_method,
+            github_repo_queried=self.github_repo_queried,
+            github_lookup_status=self.github_lookup_status,
         )
 
     def to_detail(self) -> GuestDetail:
@@ -164,4 +184,9 @@ class GuestInfo(BaseModel):
             raw_detection_output=self.raw_detection_output,
             version_history=self.version_history,
             web_url=self._web_url(),
+            host_id=self.host_id,
+            host_label=self.host_label,
+            version_detection_method=self.version_detection_method,
+            github_repo_queried=self.github_repo_queried,
+            github_lookup_status=self.github_lookup_status,
         )

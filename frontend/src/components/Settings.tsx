@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import type { FullSettings, SettingsSaveRequest, ConnectionTestResult, AppConfigEntry } from '../types';
+import type { FullSettings, SettingsSaveRequest, ConnectionTestResult, AppConfigEntry, ProxmoxHost } from '../types';
 import { fetchFullSettings, saveSettings, testConnection } from '../api/client';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorBanner from './ErrorBanner';
@@ -10,6 +10,7 @@ import Toggle from './setup/Toggle';
 import ConnectionTestButton from './setup/ConnectionTestButton';
 import SuccessToast from './setup/SuccessToast';
 import AppConfigSection from './settings/AppConfigSection';
+import ProxmoxHostsSection from './settings/ProxmoxHostsSection';
 
 const DETECTORS = [
   { name: 'sonarr', displayName: 'Sonarr' },
@@ -18,6 +19,8 @@ const DETECTORS = [
   { name: 'prowlarr', displayName: 'Prowlarr' },
   { name: 'plex', displayName: 'Plex' },
   { name: 'immich', displayName: 'Immich' },
+  { name: 'overseerr', displayName: 'Overseerr' },
+  { name: 'seer', displayName: 'Seer' },
   { name: 'gitea', displayName: 'Gitea' },
   { name: 'qbittorrent', displayName: 'qBittorrent' },
   { name: 'sabnzbd', displayName: 'SABnzbd' },
@@ -43,6 +46,7 @@ interface FormData {
   ssh_password: string;
   github_token: string;
   log_level: string;
+  version_detect_method: string;
 }
 
 interface FormErrors {
@@ -64,7 +68,43 @@ function settingsToFormData(s: FullSettings): FormData {
     ssh_password: (s.ssh_password && s.ssh_password !== '***') ? s.ssh_password : '',
     github_token: (s.github_token && s.github_token !== '***') ? s.github_token : '',
     log_level: s.log_level,
+    version_detect_method: s.version_detect_method || 'pct_first',
   };
+}
+
+function initHostsFromSettings(s: FullSettings): ProxmoxHost[] {
+  if (s.proxmox_hosts && s.proxmox_hosts.length > 0) {
+    return s.proxmox_hosts;
+  }
+  // Seed from flat fields
+  if (s.proxmox_host || s.proxmox_token_id) {
+    return [{
+      id: 'default',
+      label: 'Default',
+      host: s.proxmox_host || '',
+      token_id: s.proxmox_token_id || '',
+      token_secret: s.proxmox_token_secret || '',
+      node: s.proxmox_node || '',
+      verify_ssl: s.verify_ssl,
+      ssh_username: s.ssh_username || 'root',
+      ssh_password: s.ssh_password,
+      ssh_key_path: s.ssh_key_path,
+      pct_exec_enabled: false,
+    }];
+  }
+  return [{
+    id: Date.now().toString(),
+    label: 'Default',
+    host: '',
+    token_id: '',
+    token_secret: '',
+    node: '',
+    verify_ssl: false,
+    ssh_username: 'root',
+    ssh_password: null,
+    ssh_key_path: null,
+    pct_exec_enabled: false,
+  }];
 }
 
 export default function Settings() {
@@ -83,6 +123,11 @@ export default function Settings() {
   const [appConfigs, setAppConfigs] = useState<Record<string, AppConfigEntry>>({});
   const [savedAppConfigs, setSavedAppConfigs] = useState<Record<string, AppConfigEntry>>({});
   const changedApiKeys = useRef<Set<string>>(new Set());
+  // Multi-host
+  const [proxmoxHosts, setProxmoxHosts] = useState<ProxmoxHost[]>([]);
+  const [savedProxmoxHosts, setSavedProxmoxHosts] = useState<ProxmoxHost[]>([]);
+  // Whether we use multi-host mode
+  const useMultiHost = true;
 
   useEffect(() => {
     fetchFullSettings()
@@ -94,6 +139,10 @@ export default function Settings() {
         const ac = s.app_config || {};
         setAppConfigs(ac);
         setSavedAppConfigs(ac);
+        // Load hosts
+        const hosts = initHostsFromSettings(s);
+        setProxmoxHosts(hosts);
+        setSavedProxmoxHosts(hosts);
         // Detect auth method from loaded data
         if (s.ssh_password && s.ssh_password !== '***') {
           setAuthMethod('password');
@@ -116,9 +165,11 @@ export default function Settings() {
   const appConfigDirty =
     changedApiKeys.current.size > 0 ||
     JSON.stringify(appConfigs) !== JSON.stringify(savedAppConfigs);
+  const hostsDirty = JSON.stringify(proxmoxHosts) !== JSON.stringify(savedProxmoxHosts);
   const isDirty =
     tokenSecretChanged.current ||
     appConfigDirty ||
+    hostsDirty ||
     (form !== null && savedForm !== null && JSON.stringify(form) !== JSON.stringify(savedForm));
 
   // beforeunload warning
@@ -135,11 +186,27 @@ export default function Settings() {
   const validate = (): boolean => {
     if (!form) return false;
     const errs: FormErrors = {};
-    if (!form.proxmox_host) errs.proxmox_host = 'Proxmox Host is required';
-    else if (!form.proxmox_host.startsWith('http://') && !form.proxmox_host.startsWith('https://'))
-      errs.proxmox_host = 'Enter a valid URL starting with http:// or https://';
-    if (!form.proxmox_token_id.trim()) errs.proxmox_token_id = 'Token ID is required';
-    if (!form.proxmox_node.trim()) errs.proxmox_node = 'Node name is required';
+
+    if (useMultiHost) {
+      // Validate first host at minimum
+      if (proxmoxHosts.length === 0) {
+        errs.proxmox_hosts = 'At least one host is required';
+      } else {
+        const first = proxmoxHosts[0];
+        if (!first.host) errs.proxmox_host = 'Host URL is required';
+        else if (!first.host.startsWith('http://') && !first.host.startsWith('https://'))
+          errs.proxmox_host = 'Enter a valid URL starting with http:// or https://';
+        if (!first.token_id.trim()) errs.proxmox_token_id = 'Token ID is required';
+        if (!first.node.trim()) errs.proxmox_node = 'Node name is required';
+      }
+    } else {
+      if (!form.proxmox_host) errs.proxmox_host = 'Proxmox Host is required';
+      else if (!form.proxmox_host.startsWith('http://') && !form.proxmox_host.startsWith('https://'))
+        errs.proxmox_host = 'Enter a valid URL starting with http:// or https://';
+      if (!form.proxmox_token_id.trim()) errs.proxmox_token_id = 'Token ID is required';
+      if (!form.proxmox_node.trim()) errs.proxmox_node = 'Node name is required';
+    }
+
     if (form.poll_interval_seconds < 30 || form.poll_interval_seconds > 3600)
       errs.poll_interval_seconds = 'Must be between 30 and 3600 seconds';
     setErrors(errs);
@@ -155,14 +222,14 @@ export default function Settings() {
       const appConfigPayload: Record<string, AppConfigEntry> = {};
       for (const [name, cfg] of Object.entries(appConfigs)) {
         const entry: AppConfigEntry = {};
-        // Plain fields — always send current value (null = clear/default)
+        // Plain fields -- always send current value (null = clear/default)
         entry.port = cfg.port || null;
         entry.scheme = cfg.scheme || null;
         entry.github_repo = cfg.github_repo || null;
         entry.ssh_version_cmd = cfg.ssh_version_cmd || null;
         entry.ssh_username = cfg.ssh_username || null;
         entry.ssh_key_path = cfg.ssh_key_path || null;
-        // Secret fields — only send if explicitly changed; otherwise backend
+        // Secret fields -- only send if explicitly changed; otherwise backend
         // keeps existing value (prevents "***" being written back as the token)
         if (changedApiKeys.current.has(name)) {
           entry.api_key = cfg.api_key ?? '';
@@ -177,12 +244,27 @@ export default function Settings() {
         }
       }
 
+      // Build proxmox_hosts payload -- mask secrets that haven't changed
+      const hostsPayload: ProxmoxHost[] = proxmoxHosts.map((h) => {
+        const saved = savedProxmoxHosts.find((s) => s.id === h.id);
+        return {
+          ...h,
+          // If token_secret is still the masked sentinel, send null to keep backend value
+          token_secret: h.token_secret === '***' ? null : (h.token_secret || null),
+          ssh_password: h.ssh_password === '***' ? null : (h.ssh_password || null),
+          // Preserve ssh_key_path
+          ssh_key_path: h.ssh_key_path || saved?.ssh_key_path || null,
+        };
+      });
+
+      // Use first host for flat fields (backward compat)
+      const firstHost = proxmoxHosts[0];
+
       const payload: SettingsSaveRequest = {
-        proxmox_host: form.proxmox_host,
-        proxmox_token_id: form.proxmox_token_id,
-        // Send null if token wasn't changed (keep current)
+        proxmox_host: firstHost?.host || form.proxmox_host,
+        proxmox_token_id: firstHost?.token_id || form.proxmox_token_id,
         proxmox_token_secret: tokenSecretChanged.current ? form.proxmox_token_secret : null,
-        proxmox_node: form.proxmox_node,
+        proxmox_node: firstHost?.node || form.proxmox_node,
         poll_interval_seconds: form.poll_interval_seconds,
         discover_vms: form.discover_vms,
         verify_ssl: form.verify_ssl,
@@ -192,11 +274,14 @@ export default function Settings() {
         ssh_password: form.ssh_password || null,
         github_token: form.github_token || null,
         log_level: form.log_level,
+        version_detect_method: form.version_detect_method,
         app_config: Object.keys(appConfigPayload).length > 0 ? appConfigPayload : undefined,
+        proxmox_hosts: hostsPayload,
       };
       await saveSettings(payload);
       setSavedForm({ ...form });
       setSavedAppConfigs({ ...appConfigs });
+      setSavedProxmoxHosts([...proxmoxHosts]);
       tokenSecretChanged.current = false;
       changedApiKeys.current = new Set();
       setToast('Settings saved. Discovery restarting...');
@@ -258,58 +343,67 @@ export default function Settings() {
 
       <h1 className="text-xl font-bold text-white">Settings</h1>
 
-      {/* Proxmox Connection */}
-      <div className="p-4 rounded bg-surface border border-gray-800">
-        <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Proxmox Connection</h2>
-        <div className="space-y-3">
-          <FormField label="Proxmox Host" required error={errors.proxmox_host} htmlFor="s_proxmox_host">
-            <input
-              id="s_proxmox_host"
-              type="text"
-              value={form.proxmox_host}
-              onChange={(e) => setField('proxmox_host', e.target.value)}
-              placeholder="https://192.168.1.10:8006"
-              aria-required
-              className={inputClass('proxmox_host')}
+      {/* Proxmox Hosts (multi-host) */}
+      {useMultiHost ? (
+        <ProxmoxHostsSection
+          hosts={proxmoxHosts}
+          onChange={setProxmoxHosts}
+          disabled={saving}
+        />
+      ) : (
+        /* Legacy single-host Proxmox Connection */
+        <div className="p-4 rounded bg-surface border border-gray-800">
+          <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Proxmox Connection</h2>
+          <div className="space-y-3">
+            <FormField label="Proxmox Host" required error={errors.proxmox_host} htmlFor="s_proxmox_host">
+              <input
+                id="s_proxmox_host"
+                type="text"
+                value={form.proxmox_host}
+                onChange={(e) => setField('proxmox_host', e.target.value)}
+                placeholder="https://192.168.1.10:8006"
+                aria-required
+                className={inputClass('proxmox_host')}
+              />
+            </FormField>
+
+            <FormField label="API Token ID" required error={errors.proxmox_token_id} htmlFor="s_proxmox_token_id">
+              <input
+                id="s_proxmox_token_id"
+                type="text"
+                value={form.proxmox_token_id}
+                onChange={(e) => setField('proxmox_token_id', e.target.value)}
+                placeholder="root@pam!proxmon"
+                aria-required
+                className={inputClass('proxmox_token_id')}
+              />
+            </FormField>
+
+            <PasswordField
+              id="s_proxmox_token_secret"
+              label="API Token Secret"
+              required
+              value={form.proxmox_token_secret}
+              onChange={(v) => setField('proxmox_token_secret', v)}
+              error={errors.proxmox_token_secret}
             />
-          </FormField>
 
-          <FormField label="API Token ID" required error={errors.proxmox_token_id} htmlFor="s_proxmox_token_id">
-            <input
-              id="s_proxmox_token_id"
-              type="text"
-              value={form.proxmox_token_id}
-              onChange={(e) => setField('proxmox_token_id', e.target.value)}
-              placeholder="root@pam!proxmon"
-              aria-required
-              className={inputClass('proxmox_token_id')}
-            />
-          </FormField>
+            <FormField label="Node Name" required error={errors.proxmox_node} htmlFor="s_proxmox_node">
+              <input
+                id="s_proxmox_node"
+                type="text"
+                value={form.proxmox_node}
+                onChange={(e) => setField('proxmox_node', e.target.value)}
+                placeholder="pve"
+                aria-required
+                className={inputClass('proxmox_node')}
+              />
+            </FormField>
 
-          <PasswordField
-            id="s_proxmox_token_secret"
-            label="API Token Secret"
-            required
-            value={form.proxmox_token_secret}
-            onChange={(v) => setField('proxmox_token_secret', v)}
-            error={errors.proxmox_token_secret}
-          />
-
-          <FormField label="Node Name" required error={errors.proxmox_node} htmlFor="s_proxmox_node">
-            <input
-              id="s_proxmox_node"
-              type="text"
-              value={form.proxmox_node}
-              onChange={(e) => setField('proxmox_node', e.target.value)}
-              placeholder="pve"
-              aria-required
-              className={inputClass('proxmox_node')}
-            />
-          </FormField>
-
-          <ConnectionTestButton onTest={handleTest} />
+            <ConnectionTestButton onTest={handleTest} />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Discovery */}
       <div className="p-4 rounded bg-surface border border-gray-800">
@@ -350,6 +444,20 @@ export default function Settings() {
               <span>SSL verification is disabled. Proxmox uses self-signed certificates by default.</span>
             </div>
           )}
+
+          <FormField label="Version Detection Method" htmlFor="s_version_detect_method">
+            <select
+              id="s_version_detect_method"
+              value={form.version_detect_method}
+              onChange={(e) => setField('version_detect_method', e.target.value)}
+              className={inputClass('version_detect_method')}
+            >
+              <option value="pct_first">pct exec first, fallback to SSH</option>
+              <option value="ssh_first">SSH first, fallback to pct exec</option>
+              <option value="ssh_only">SSH only</option>
+              <option value="pct_only">pct exec only</option>
+            </select>
+          </FormField>
         </div>
       </div>
 

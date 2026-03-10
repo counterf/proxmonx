@@ -4,6 +4,7 @@ import StatusBadge from './StatusBadge';
 
 interface GuestRowProps {
   guest: GuestSummary;
+  showHostCol?: boolean;
 }
 
 function formatRelativeTime(dateStr: string | null): string {
@@ -50,7 +51,7 @@ function AppNameCell({ guest }: { guest: GuestSummary }) {
 }
 
 /** Table row for desktop (>= md) */
-export function GuestTableRow({ guest }: GuestRowProps) {
+export function GuestTableRow({ guest, showHostCol = false }: GuestRowProps) {
   const navigate = useNavigate();
 
   const typeBadgeClass = guest.type === 'lxc'
@@ -80,6 +81,11 @@ export function GuestTableRow({ guest }: GuestRowProps) {
           {guest.type.toUpperCase()}
         </span>
       </td>
+      {showHostCol && (
+        <td className="px-3 py-2 text-sm text-gray-400 truncate max-w-[120px]" title={guest.host_label}>
+          {guest.host_label}
+        </td>
+      )}
       <td className="px-3 py-2 text-sm">
         <AppNameCell guest={guest} />
       </td>

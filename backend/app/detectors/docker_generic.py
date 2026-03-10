@@ -6,6 +6,8 @@ No upstream version check (no single GitHub repo).
 
 import logging
 
+import httpx
+
 from app.detectors.base import BaseDetector
 
 logger = logging.getLogger(__name__)
@@ -21,6 +23,8 @@ class DockerGenericDetector(BaseDetector):
 
     async def get_installed_version(
         self, host: str, port: int | None = None, api_key: str | None = None,
+        scheme: str = "http",
+        http_client: httpx.AsyncClient | None = None,
     ) -> str | None:
         # Generic Docker detector does not query a version endpoint.
         # Version is parsed from the image tag during Docker inspection.

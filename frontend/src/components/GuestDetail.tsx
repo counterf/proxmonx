@@ -159,6 +159,77 @@ export default function GuestDetail() {
         </div>
       </div>
 
+      {/* Version Detection panel */}
+      {guest.app_name && (() => {
+        const method = guest.version_detection_method;
+        const installedVersion = guest.installed_version;
+        const repoQueried = guest.github_repo_queried || githubRepo || null;
+        const lookupStatus = guest.github_lookup_status;
+
+        const methodConfig: Record<string, { label: string; bg: string; text: string }> = {
+          http: { label: 'HTTP API', bg: 'bg-blue-900/40', text: 'text-blue-300' },
+          ssh: { label: 'SSH command', bg: 'bg-yellow-900/40', text: 'text-yellow-300' },
+          pct_exec: { label: 'Container exec (pct)', bg: 'bg-purple-900/40', text: 'text-purple-300' },
+        };
+        const fallback = installedVersion
+          ? { label: 'Unknown', bg: 'bg-gray-800', text: 'text-gray-500' }
+          : { label: 'Not detected', bg: 'bg-gray-800', text: 'text-gray-500' };
+        const badge = method ? (methodConfig[method] || fallback) : fallback;
+
+        const statusColors: Record<string, string> = {
+          success: 'text-green-400',
+          failed: 'text-red-400',
+          no_repo: 'text-gray-500',
+        };
+
+        return (
+          <div className="p-4 rounded bg-surface border border-gray-800">
+            <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Version Detection</h2>
+            <div className="space-y-1 text-sm">
+              <div>
+                <span className="text-gray-500">Installed version source:</span>{' '}
+                <span
+                  className={`font-mono text-xs px-1.5 py-0.5 rounded ${badge.bg} ${badge.text}`}
+                  aria-label={`Installed version source: ${badge.label}`}
+                >
+                  {badge.label}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500">Latest version source:</span>{' '}
+                <span className="text-gray-200">
+                  GitHub Releases{!guest.latest_version && <span className="text-gray-500"> (not found)</span>}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500">Repository:</span>{' '}
+                {repoQueried ? (
+                  <a
+                    href={`https://github.com/${repoQueried}/releases`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-400 hover:text-blue-300"
+                    aria-label={`GitHub releases for ${repoQueried} (opens in new tab)`}
+                  >
+                    {repoQueried}
+                  </a>
+                ) : (
+                  <span className="text-gray-500">{'\u2014'}</span>
+                )}
+              </div>
+              {lookupStatus && (
+                <div>
+                  <span className="text-gray-500">Lookup status:</span>{' '}
+                  <span className={statusColors[lookupStatus] || 'text-gray-500'}>
+                    {lookupStatus === 'no_repo' ? 'No repo configured' : lookupStatus}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Version History */}
       {guest.version_history.length > 0 && (
         <div className="p-4 rounded bg-surface border border-gray-800">

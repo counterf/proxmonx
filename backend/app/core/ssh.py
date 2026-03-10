@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+import socket
 from pathlib import Path
 
 import paramiko
@@ -29,9 +30,12 @@ COMMAND_WHITELIST = frozenset({
 # command whitelist already prevents execution of arbitrary commands.
 SHELL_METACHARACTERS = re.compile(r'[;&|`$<>()!\n\\#]')
 
-# For user-configured version commands: only reject the most dangerous
-# injection patterns.  Pipes (|) are allowed for e.g. "myapp --version | head -1".
-_VERSION_CMD_DANGEROUS = re.compile(r';|`|\$\(|&&|\|\|')
+# For user-configured version commands: reject dangerous injection patterns.
+# Bare pipes are allowed only when the next token is a safe filter command.
+_VERSION_CMD_DANGEROUS = re.compile(r'[;`]|\$\(|&&|\|\|')
+
+# Commands allowed after a pipe in version commands.
+_PIPE_SAFE_COMMANDS = frozenset({'awk', 'grep', 'cut', 'head', 'tail', 'sed', 'tr', 'xargs'})
 
 
 class SSHClient:
@@ -57,7 +61,11 @@ class SSHClient:
 
         Rejects empty commands, commands over 512 chars, and commands
         containing dangerous injection patterns (;  `  $()  &&  ||).
-        Pipes (|) are allowed.  Newlines and null bytes are rejected.
+        Newlines and null bytes are rejected.
+
+        Pipes (|) are allowed only when every segment after the first
+        starts with a safe filter command (awk, grep, cut, head, tail,
+        sed, tr, xargs).
         """
         if not command or not command.strip():
             return False
@@ -67,6 +75,12 @@ class SSHClient:
             return False
         if _VERSION_CMD_DANGEROUS.search(command):
             return False
+        # Validate pipe segments
+        segments = command.split('|')
+        for segment in segments[1:]:
+            first_token = segment.strip().split()[0] if segment.strip() else ''
+            if first_token not in _PIPE_SAFE_COMMANDS:
+                return False
         return True
 
     async def execute(self, host: str, command: str, timeout: int = 10) -> str | None:
@@ -86,6 +100,10 @@ class SSHClient:
             return await asyncio.to_thread(
                 self._execute_sync, host, command, timeout
             )
+        except (paramiko.AuthenticationException, paramiko.NoValidConnectionsError,
+                socket.timeout, FileNotFoundError) as exc:
+            logger.warning("SSH command failed on %s: %s (%s)", host, command, exc)
+            return None
         except Exception:
             logger.debug("SSH command failed on %s: %s", host, command)
             return None
@@ -126,7 +144,7 @@ class SSHClient:
             return None
 
         try:
-            return await asyncio.to_thread(
+            result = await asyncio.to_thread(
                 self._execute_sync,
                 host,
                 command,
@@ -135,8 +153,69 @@ class SSHClient:
                 key_path=key_path,
                 password=password,
             )
+            if result:
+                logger.info("SSH version cmd on %s returned: %s", host, result[:80])
+            else:
+                logger.warning(
+                    "SSH version cmd on %s returned empty output for: %.80s",
+                    host, command,
+                )
+            return result
         except Exception:
             logger.warning("SSH version cmd failed on %s: %.80s", host, command)
+            return None
+
+    async def run_pct_exec(
+        self,
+        proxmox_host: str,
+        vmid: str,
+        cmd: str,
+        ssh_username: str | None = None,
+        ssh_key_path: str | None = None,
+        ssh_password: str | None = None,
+        timeout: int = 15,
+    ) -> str | None:
+        """Run ``pct exec <vmid> -- <cmd>`` on the Proxmox host via SSH.
+
+        Returns stdout on success, None on failure.
+        """
+        if not self._enabled:
+            logger.debug("SSH disabled, skipping pct exec on %s", proxmox_host)
+            return None
+
+        # Validate vmid is digits only
+        if not vmid.isdigit():
+            logger.warning("pct exec rejected: vmid %r is not numeric", vmid)
+            return None
+
+        # Validate the version command with the same safety check
+        if not self._is_version_cmd_safe(cmd):
+            logger.warning("pct exec rejected unsafe cmd for vmid %s: %.80s", vmid, cmd)
+            return None
+
+        pct_command = f"pct exec {vmid} -- {cmd}"
+        logger.info("pct exec on %s: %s", proxmox_host, pct_command)
+
+        try:
+            stdout, stderr = await asyncio.to_thread(
+                self._execute_sync_with_stderr,
+                proxmox_host,
+                pct_command,
+                timeout,
+                username=ssh_username,
+                key_path=ssh_key_path,
+                password=ssh_password,
+            )
+            if stdout:
+                logger.info("pct exec on %s vmid %s stdout: %s", proxmox_host, vmid, stdout[:200])
+            else:
+                logger.warning(
+                    "pct exec on %s vmid %s returned empty stdout (stderr: %s)",
+                    proxmox_host, vmid, stderr[:200] if stderr else "(none)",
+                )
+            return stdout or None
+        except Exception as exc:
+            logger.warning("pct exec failed on %s vmid %s: %s", proxmox_host, vmid, exc)
             return None
 
     def _execute_sync(
@@ -185,8 +264,60 @@ class SSHClient:
             if err:
                 logger.debug("SSH stderr on %s: %s", host, err)
             return output if output else None
+        except paramiko.AuthenticationException as exc:
+            logger.warning("SSH auth failed to %s: %s", host, exc)
+            return None
+        except paramiko.NoValidConnectionsError as exc:
+            logger.warning("SSH no valid connection to %s: %s", host, exc)
+            return None
+        except (socket.timeout, OSError) as exc:
+            logger.warning("SSH connection error to %s: %s", host, exc)
+            return None
         except Exception:
             logger.debug("SSH connection failed to %s", host)
             return None
+        finally:
+            client.close()
+
+    def _execute_sync_with_stderr(
+        self,
+        host: str,
+        command: str,
+        timeout: int,
+        username: str | None = None,
+        key_path: str | None = None,
+        password: str | None = None,
+    ) -> tuple[str, str]:
+        """Like _execute_sync but returns (stdout, stderr) for diagnostic logging."""
+        effective_username = username or self._username
+        effective_key_path = key_path or self._key_path
+        effective_password = password or self._password
+
+        client = paramiko.SSHClient()
+        if self._known_hosts_path and Path(self._known_hosts_path).is_file():
+            client.load_host_keys(self._known_hosts_path)
+            client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        else:
+            client.set_missing_host_key_policy(paramiko.WarningPolicy())
+        try:
+            connect_kwargs: dict[str, str | int | Path | None] = {
+                "hostname": host,
+                "username": effective_username,
+                "timeout": timeout,
+            }
+            if effective_key_path:
+                connect_kwargs["key_filename"] = effective_key_path
+            elif effective_password:
+                connect_kwargs["password"] = effective_password
+            else:
+                return "", "no credentials configured"
+
+            client.connect(**connect_kwargs)  # type: ignore[arg-type]
+            _, stdout, stderr = client.exec_command(command, timeout=timeout)
+            out = stdout.read().decode("utf-8", errors="replace").strip()
+            err = stderr.read().decode("utf-8", errors="replace").strip()
+            return out, err
+        except Exception as exc:
+            return "", str(exc)
         finally:
             client.close()

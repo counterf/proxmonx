@@ -200,8 +200,8 @@ class TestDiscoveryEngine:
         )
         guests = await engine.run_full_cycle({})
 
-        assert "100" in guests
-        assert guests["100"].installed_version == "4.0.14.2939"
+        assert "default:100" in guests
+        assert guests["default:100"].installed_version == "4.0.14.2939"
         # Verify API key was sent as X-Api-Key header
         assert route.calls[0].request.headers["x-api-key"] == "my-key"
 
@@ -250,8 +250,8 @@ class TestGithubRepoOverride:
         )
         guests = await engine.run_full_cycle({})
 
-        assert "100" in guests
-        assert guests["100"].latest_version == "4.1.0.0"
+        assert "default:100" in guests
+        assert guests["default:100"].latest_version == "4.1.0.0"
         assert custom_route.called
         assert not default_route.called
 
@@ -289,6 +289,6 @@ class TestGithubRepoOverride:
         )
         guests = await engine.run_full_cycle({})
 
-        assert "100" in guests
-        assert guests["100"].latest_version == "4.0.15.3012"
+        assert "default:100" in guests
+        assert guests["default:100"].latest_version == "4.0.15.3012"
         assert default_route.called

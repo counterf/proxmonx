@@ -16,12 +16,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 REQUIRED_FIELDS = ("proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node")
+_HOST_REQUIRED_KEYS = ("host", "token_id", "token_secret", "node")
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS settings (
     id         INTEGER PRIMARY KEY CHECK (id = 1),
     data       TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%%H:%%M:%%SZ', 'now'))
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 )
 """
 
@@ -40,6 +41,7 @@ class ConfigStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self._migrate_from_json()
+        self._migrate_multi_host()
 
     @property
     def path(self) -> Path:
@@ -83,6 +85,33 @@ class ConfigStore:
         except (json.JSONDecodeError, OSError) as exc:
             logger.error("Failed to migrate config.json: %s", exc)
 
+    def _migrate_multi_host(self) -> None:
+        """Promote legacy flat Proxmox fields to a ``proxmox_hosts`` list."""
+        data = self.load()
+        if not data:
+            return
+        if "proxmox_hosts" in data:
+            return  # already migrated
+        if not data.get("proxmox_host"):
+            return  # nothing to migrate
+
+        host_entry = {
+            "id": "default",
+            "label": "Default",
+            "host": data.get("proxmox_host", ""),
+            "token_id": data.get("proxmox_token_id", ""),
+            "token_secret": data.get("proxmox_token_secret", ""),
+            "node": data.get("proxmox_node", ""),
+            "verify_ssl": data.get("verify_ssl", False),
+            "ssh_username": data.get("ssh_username", "root"),
+            "ssh_password": data.get("ssh_password", ""),
+            "ssh_key_path": data.get("ssh_key_path", ""),
+            "pct_exec_enabled": False,
+        }
+        data["proxmox_hosts"] = [host_entry]
+        self.save(data)
+        logger.info("Migrated single-host config to proxmox_hosts list")
+
     def load(self) -> dict:
         """Read settings from SQLite, return as dict."""
         with self._connect() as conn:
@@ -107,12 +136,29 @@ class ConfigStore:
         logger.info("Settings saved via UI")
 
     def is_configured(self) -> bool:
-        """True if all required Proxmox fields are non-empty (from DB or env)."""
+        """True if at least one host has all required fields (from DB or env)."""
         return len(self.get_missing_fields()) == 0
 
     def get_missing_fields(self) -> list[str]:
-        """Return names of required fields that are missing or empty."""
+        """Return names of required fields that are missing or empty.
+
+        Checks ``proxmox_hosts`` first (multi-host); falls back to legacy
+        flat fields for backward compatibility.
+        """
         file_data = self.load()
+        hosts = file_data.get("proxmox_hosts")
+        if isinstance(hosts, list) and hosts:
+            # Check that at least one host has all required keys
+            for host in hosts:
+                if isinstance(host, dict) and all(host.get(k) for k in _HOST_REQUIRED_KEYS):
+                    return []
+            # None of the hosts are fully configured -- report host-level missing
+            first = hosts[0] if hosts else {}
+            if isinstance(first, dict):
+                return [k for k in _HOST_REQUIRED_KEYS if not first.get(k)]
+            return list(_HOST_REQUIRED_KEYS)
+
+        # Legacy flat fields
         missing: list[str] = []
         for field in REQUIRED_FIELDS:
             value = file_data.get(field) or os.environ.get(field.upper(), "") or os.environ.get(field, "")
@@ -122,7 +168,7 @@ class ConfigStore:
 
     def merge_into_settings(self, settings: Settings) -> Settings:
         """Return a new Settings instance with DB values taking priority over env/defaults."""
-        from app.config import AppConfig, Settings as SettingsCls
+        from app.config import AppConfig, ProxmoxHostConfig, Settings as SettingsCls
 
         config_data = self.load()
         if not config_data:
@@ -135,6 +181,12 @@ class ConfigStore:
                         k: AppConfig(**v) if isinstance(v, dict) else v
                         for k, v in value.items()
                     }
+            elif key == "proxmox_hosts":
+                if isinstance(value, list):
+                    current["proxmox_hosts"] = [
+                        ProxmoxHostConfig(**h) if isinstance(h, dict) else h
+                        for h in value
+                    ]
             elif key in current and value is not None:
                 current[key] = value
         return SettingsCls(**current)
