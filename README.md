@@ -2,7 +2,7 @@
 
 Self-hosted Proxmox monitoring dashboard that continuously discovers LXC containers and VMs, identifies the application running inside each guest, compares the installed version against the latest upstream release on GitHub, and shows a live update-status dashboard — with a built-in setup wizard so you never have to touch a config file.
 
-![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 84 passing](https://img.shields.io/badge/tests-84%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
+![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 116 passing](https://img.shields.io/badge/tests-116%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
 
 <!-- screenshot: dashboard showing guests table with version status badges -->
 
@@ -75,7 +75,7 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 │  ┌──────▼──────────────────────────────────────────────┐    │
 │  │  DiscoveryEngine                                      │    │
 │  │  • ProxmoxClient (async httpx, GET-only)             │    │
-│  │  • 14 Detector plugins (BaseDetector ABC)            │    │
+│  │  • 15 Detector plugins (BaseDetector ABC)            │    │
 │  │  • GitHubClient (releases API + 1h cache)            │    │
 │  │  • SSHClient (paramiko, command whitelist)           │    │
 │  └──────┬──────────────────┬────────────────────┬──────┘    │
@@ -97,7 +97,7 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 | **DiscoveryEngine** | Orchestrates the full cycle: list guests → detect app → get installed version → get latest version → compute status |
 | **Detector plugins** | One class per app; matches guests by name/tag/Docker image; queries the app's local HTTP API for its version |
 | **GitHubClient** | Fetches the latest release tag from GitHub Releases API; caches results for 1 hour; handles rate limits gracefully |
-| **SSHClient** | Connects to guests via paramiko; runs `docker ps` to identify running containers; enforces a command whitelist and metacharacter guard |
+| **SSHClient** | Connects to guests via paramiko; runs `docker ps` to identify running containers; executes version commands via SSH or `pct exec`; enforces a command whitelist and metacharacter guard |
 | **ConfigStore** | Reads/writes `/app/data/proxmon.db` (SQLite); single-row settings table with JSON blob; auto-migrates from `config.json`; database takes priority over environment variables |
 | **FastAPI routes** | REST API serving guests, settings, setup status, and connection test; dependency injection via `app.dependency_overrides` |
 | **React frontend** | Dashboard, per-guest detail, editable settings, 5-step setup wizard; polls `/api/guests` every 60 s |
@@ -110,21 +110,23 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
    └── GET /nodes/{node}/lxc  →  list of LXC containers
    └── GET /nodes/{node}/qemu  →  list of VMs (if DISCOVER_VMS=true)
 3. For each running guest (asyncio.gather, max 10 concurrent):
-   a. Resolve guest IP
-      └── GET /nodes/{node}/lxc/{vmid}/config  →  parse net0 ip= field
+   a. Resolve guest IP + OS type
+      └── GET /nodes/{node}/lxc/{vmid}/config  →  parse net0 ip= field + ostype
    b. Run detector pipeline:
       i.  Tag match: check Proxmox tags for "sonarr", "app:sonarr", etc.
       ii. Name match: tokenize guest name on [-_.\s], check each token
       iii. Docker match: SSH → "docker ps" → match image names
       iv. Fallback: mark as unknown
-   c. If detector matched:
-      └── detector.get_installed_version(ip, port)  →  HTTP GET to app API
+   c. If detector matched, resolve config (guest > app > detector defaults):
+      └── detector.get_installed_version(ip, port, api_key, scheme)  →  HTTP GET to app API
+      └── If API fails, try CLI fallback (pct exec or SSH) based on VERSION_DETECT_METHOD
    d. If github_repo is set:
       └── GitHubClient.fetch_latest(repo)  →  GET releases/latest (cached 1h)
    e. Compute update_status: up-to-date / outdated / unknown
    f. Append VersionCheck to history (max 10 entries)
 4. Update in-memory guest dict (thread-safe, asyncio.Lock)
-5. API serves updated data; frontend polls and re-renders
+5. AlertManager evaluates disk + outdated rules → sends ntfy notifications
+6. API serves updated data; frontend polls and re-renders
 ```
 
 ---
@@ -140,19 +142,26 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
   - Proxmox tag matching (`sonarr`, `app:sonarr`)
   - Guest name token matching (`sonarr-lxc` → sonarr)
   - Docker container inspection via SSH (`docker ps`)
-- **15 built-in app detectors** — arr-stack, Plex, Immich, Gitea, Seer, and more
+- **15 built-in app detectors** — arr-stack, Plex, Immich, Gitea, Seerr, and more
 - **Installed version detection** — queries each app's own HTTP API
 - **Latest version lookup** — GitHub Releases API with 1-hour cache
 - **Semantic version comparison** — `packaging.version.Version`, handles build hashes
 - **Per-guest version history** — last 10 checks retained in memory
-- **Dashboard** — filterable table: status (outdated/up-to-date/unknown), type (LXC/VM), text search
-- **Per-guest detail page** — all metadata, version history, raw detection output
+- **Dashboard** — filterable, sortable table with configurable columns; status badges, disk usage bars, OS type, detection method
+- **Configurable columns** — add/remove dashboard columns; selection persisted in browser
+- **Disk usage monitoring** — color-coded bars per guest (blue < 50%, green 50–75%, amber 76–90%, red 90%+)
+- **OS type display** — shows the guest OS (Alpine, Debian, Ubuntu, etc.) from Proxmox config
+- **App icons** — icons from [selfhst/icons](https://github.com/selfhst/icons) displayed next to app names
+- **Per-guest detail page** — all metadata, version history, raw detection output, instance settings
 - **Manual refresh** — POST `/api/refresh` triggers an immediate cycle
 - **Setup wizard** — 5-step guided first-run configuration (no `.env` editing required)
-- **Editable settings page** — live connection test, dirty tracking, save without restart
+- **Editable settings page** — live connection test, dirty tracking, field descriptions, save without restart
 - **Config persistence** — settings saved to SQLite at `/app/data/proxmon.db` (Docker volume)
-- **Per-app HTTPS scheme override** — configure `http` or `https` per app in Settings
-- **Per-app GitHub repo override** — custom `owner/repo` per app in Settings (e.g. fork or alternate release source)
+- **Multi-host support** — monitor guests across multiple Proxmox VE nodes from a single dashboard
+- **Per-app configuration** — override port, API key, scheme, GitHub repo, and SSH settings per app
+- **Per-guest configuration** — override API key, port, and scheme for individual guest instances (guest > app > detector defaults)
+- **Version detection cascade** — API probe first, then CLI fallback via pct exec or SSH (configurable: `pct_first`, `ssh_first`, `ssh_only`, `pct_only`)
+- **ntfy notifications** — push alerts when disk usage exceeds a threshold or an app becomes outdated; configurable cooldown
 - **App logo in header** — clickable app names link to the app's web UI; responsive mobile layout
 - **SQLite-backed config store** — settings persisted in SQLite (`/app/data/proxmon.db`); auto-migrates from `config.json` on first start
 - **GitHub Actions CI** — auto-builds and pushes Docker images to `ghcr.io` on every push to main
@@ -165,7 +174,7 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 - App-specific update handlers (plugin per app)
 - Audit log (who triggered what, when, outcome)
 - Health checks per app (is the app actually responding?)
-- Notification webhooks (ntfy, Gotify, Discord)
+- Additional notification channels (Gotify, Discord, webhooks)
 - Persistent version history (SQLite instead of in-memory)
 
 ---
@@ -180,14 +189,14 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 | **Prowlarr** | `prowlarr` | `GET /api/v1/system/status` → `version` | Prowlarr/Prowlarr | 9696 |
 | **Overseerr** | `overseerr` | `GET /api/v1/status` → `version` | sct/overseerr | 5055 |
 | **Plex** | `plex`, `plexmediaserver`, `pms` | `GET /identity` (XML attr) | plexinc/pms-docker | 32400 |
-| **Immich** | `immich` | `GET /api/server/about` → `version` | immich-app/immich | 2283 |
+| **Immich** | `immich` | `GET /api/server/about` → `version` (requires API key with `server.about` permission) | immich-app/immich | 2283 |
 | **Gitea** | `gitea` | `GET /api/v1/version` → `version` | go-gitea/gitea | 3000 |
 | **qBittorrent** | `qbittorrent`, `qbit` | `GET /api/v2/app/version` (plain text) | qbittorrent/qBittorrent | 8080 |
 | **SABnzbd** | `sabnzbd`, `sab` | `GET /api?mode=version&output=json` → `version` | sabnzbd/sabnzbd | 8085 |
 | **Traefik** | `traefik` | `GET /api/version` → `version` | traefik/traefik | 8080 |
 | **Caddy** | `caddy` | `GET :2019/config/` (admin API) | caddyserver/caddy | 2019 |
 | **ntfy** | `ntfy` | `GET /v1/info` → `version` | binwiederhier/ntfy | 80 |
-| **Seer** | `seer` | `GET /api/v1/status` → `version` | seerr-team/seerr | 5055 |
+| **Seerr** | `seerr`, `seer` | `GET /api/v1/status` → `version` | seerr-team/seerr | 5055 |
 | **Docker (generic)** | any Docker image | image tag parsing | N/A | N/A |
 
 **Detection keys** are matched against guest names (token-split on `-_.\s`) and Proxmox tags (exact match or `app:<key>`). For Docker detection, the image name substrings listed in each detector's `docker_images` list are matched against `docker ps` output.
@@ -329,8 +338,16 @@ When you configure proxmon via the UI, settings are saved to the SQLite database
 | `CORS_ORIGINS` | `http://localhost:3000,http://frontend` | No | Allowed CORS origins (comma-separated or JSON array) |
 | `LOG_LEVEL` | `info` | No | `debug` / `info` / `warning` / `error` |
 | `PROXMON_ENABLED` | `true` | No | Master switch; set `false` to pause all polling |
+| `VERSION_DETECT_METHOD` | `pct_first` | No | CLI fallback strategy: `pct_first`, `ssh_first`, `ssh_only`, `pct_only` |
 | `PROXMON_API_KEY` | — | No | API key for protecting mutating endpoints (POST settings, refresh) |
 | `CONFIG_DB_PATH` | `/app/data/proxmon.db` | No | Override path for SQLite config database |
+| `NOTIFICATIONS_ENABLED` | `false` | No | Enable ntfy push notifications |
+| `NTFY_URL` | — | No | Full ntfy topic URL, e.g. `https://ntfy.sh/proxmon-alerts` |
+| `NTFY_TOKEN` | — | No | ntfy access token (for private topics) |
+| `NTFY_PRIORITY` | `3` | No | Default ntfy priority (1 = min, 5 = max) |
+| `NOTIFY_DISK_THRESHOLD` | `95` | No | Disk usage percent that triggers an alert (50–100) |
+| `NOTIFY_DISK_COOLDOWN_MINUTES` | `60` | No | Minutes between repeated disk alerts for the same guest (15–1440) |
+| `NOTIFY_ON_OUTDATED` | `true` | No | Send notification when an app transitions from "ok" to "outdated" |
 
 ### SSH key mount example
 
@@ -383,9 +400,19 @@ Per-app overrides are configured in the Settings UI under the **App Configuratio
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `port` | `int` | Detector default | Override the HTTP port used for version probing |
-| `api_key` | `string` | — | API key for authenticated endpoints (e.g. *arr apps) |
+| `api_key` | `string` | — | API key for authenticated endpoints (e.g. *arr apps, Immich) |
 | `scheme` | `string` | `http` | Protocol scheme: `http` or `https` |
 | `github_repo` | `string` | Detector default | Override the GitHub `owner/repo` for latest version lookup |
+| `ssh_version_cmd` | `string` | — | Custom SSH command for CLI-based version detection |
+| `ssh_username` | `string` | Global default | Override SSH username for this app |
+| `ssh_key_path` | `string` | — | Override SSH private key path for this app |
+| `ssh_password` | `string` | — | Override SSH password for this app |
+
+### Per-guest configuration
+
+When multiple instances of the same app exist, per-guest overrides take precedence over per-app overrides. Configure them via the "Instance Settings" panel on each guest's detail page, or via API.
+
+Configuration priority: **guest-specific > app-specific > detector defaults**.
 
 ---
 
@@ -428,7 +455,7 @@ After saving, a transition screen polls `GET /health` until `guest_count > 0` (m
 
 ### Settings page
 
-The Settings page (`/settings`) is a fully editable form with the same four sections as the wizard, plus a **Per-App Configuration** section where you can set port, API key, scheme (`http`/`https`), and GitHub repo overrides for each detected app. It pre-populates from `GET /api/settings/full` (with secrets shown as `***`).
+The Settings page (`/settings`) is a fully editable form with sections for Proxmox hosts, discovery, SSH, GitHub token, **notifications** (ntfy), and **per-app configuration** where you can set port, API key, scheme (`http`/`https`), GitHub repo, and SSH overrides for each detected app. Every field includes a description/hint. It pre-populates from `GET /api/settings/full` (with secrets shown as `***`).
 
 Key behaviors:
 - **Dirty tracking** — unsaved changes indicator; `beforeunload` warning if you try to navigate away
@@ -563,7 +590,7 @@ installed <  latest       →  update_status = "outdated"
 
 ## 11. SSH Integration
 
-SSH is used exclusively for Docker container detection (Stage 3 of the detection pipeline). It is optional — disable it with `SSH_ENABLED=false` if your guests don't run Docker or you prefer not to grant SSH access.
+SSH is used for Docker container detection (Stage 3 of the detection pipeline) and as a fallback for version detection when the app's HTTP API probe fails. The version detection cascade (configurable via `VERSION_DETECT_METHOD`) tries API first, then `pct exec` or SSH depending on the strategy. SSH is optional — disable it with `SSH_ENABLED=false` if your guests don't run Docker or you prefer not to grant SSH access.
 
 ### How it works
 
@@ -667,7 +694,13 @@ Returns all discovered guests as a summary list.
     "latest_version": "4.0.14.2939",
     "update_status": "up-to-date",
     "last_checked": "2026-03-08T14:23:01+00:00",
-    "tags": ["media", "arr"]
+    "tags": ["media", "arr"],
+    "host_id": "pve1",
+    "host_label": "PVE Main",
+    "disk_used": 2147483648,
+    "disk_total": 10737418240,
+    "os_type": "debian",
+    "latest_version_source": "github"
   }
 ]
 ```
@@ -723,6 +756,66 @@ Returns `503` when unconfigured.
 
 ---
 
+### `GET /api/guests/{id}/config`
+
+Returns the per-guest configuration override for a specific guest instance.
+
+```json
+{
+  "api_key": "***",
+  "port": 8989,
+  "scheme": "https"
+}
+```
+
+Returns `404` if no per-guest config exists.
+
+---
+
+### `PUT /api/guests/{id}/config`
+
+Creates or updates a per-guest configuration override. Fields not provided are left unchanged.
+
+Request body:
+```json
+{
+  "api_key": "my-secret-key",
+  "port": 8989,
+  "scheme": "https"
+}
+```
+
+Response:
+```json
+{"success": true, "message": "Guest config saved"}
+```
+
+---
+
+### `DELETE /api/guests/{id}/config`
+
+Removes all per-guest configuration overrides for a guest.
+
+Response:
+```json
+{"success": true, "message": "Guest config deleted"}
+```
+
+---
+
+### `POST /api/notifications/test`
+
+Sends a test notification via ntfy using the currently saved notification settings. Useful for verifying ntfy URL, token, and connectivity.
+
+Response:
+```json
+{"success": true, "message": "Test notification sent successfully"}
+```
+
+Returns `{"success": false, "message": "..."}` if notifications are disabled or the ntfy server is unreachable.
+
+---
+
 ### `GET /api/settings`
 
 Returns current settings with all secrets masked.
@@ -751,10 +844,21 @@ Returns all settings for pre-populating the settings form. Secrets shown as `"**
 
 ```json
 {
-  "proxmox_host": "https://192.168.1.10:8006",
-  "proxmox_token_id": "root@pam!proxmon",
-  "proxmox_token_secret": "***",
-  "proxmox_node": "pve",
+  "proxmox_hosts": [
+    {
+      "id": "pve1",
+      "label": "PVE Main",
+      "host": "https://192.168.1.10:8006",
+      "token_id": "root@pam!proxmon",
+      "token_secret": "***",
+      "node": "pve",
+      "verify_ssl": false,
+      "ssh_username": "root",
+      "ssh_password": null,
+      "ssh_key_path": null,
+      "pct_exec_enabled": true
+    }
+  ],
   "poll_interval_seconds": 300,
   "discover_vms": false,
   "verify_ssl": false,
@@ -763,7 +867,17 @@ Returns all settings for pre-populating the settings form. Secrets shown as `"**
   "ssh_key_path": "/app/ssh/id_rsa",
   "ssh_password": null,
   "github_token": "***",
-  "log_level": "info"
+  "version_detect_method": "pct_first",
+  "log_level": "info",
+  "notifications_enabled": false,
+  "ntfy_url": null,
+  "ntfy_token": null,
+  "ntfy_priority": 3,
+  "notify_disk_threshold": 95,
+  "notify_disk_cooldown_minutes": 60,
+  "notify_on_outdated": true,
+  "app_config": {},
+  "guest_config": {}
 }
 ```
 
@@ -944,13 +1058,15 @@ uv run --extra dev pytest -v
 ```
 
 ```
+tests/test_alerting.py        17 tests  — disk threshold, cooldown, outdated transitions, enable/disable
 tests/test_config_store.py     8 tests  — load, save, migration, merge, is_configured
-tests/test_detectors.py       36 tests  — detection matching + version fetching for all 15 apps
-tests/test_discovery.py       10 tests  — Proxmox parsing, IP resolution, full cycle integration
+tests/test_detectors.py       37 tests  — detection matching + version fetching for all 15 apps
+tests/test_discovery.py       16 tests  — Proxmox parsing, IP resolution, config resolution, full cycle
 tests/test_github.py           8 tests  — caching, v-prefix stripping, rate limit, auth header
+tests/test_notifier.py         8 tests  — ntfy send, auth, priority, error handling, shared client
 tests/test_ssh_version_cmd.py 22 tests  — SSH version command safety validation
 ─────────────────────────────────────────────────────
-Total: 84 tests, ~2 seconds
+Total: 116 tests, ~2 seconds
 ```
 
 ---
@@ -1087,27 +1203,39 @@ proxmon/
 │   │   │   │                         • merge_into_settings(settings) → Settings
 │   │   │   │                         • is_configured() / get_missing_fields()
 │   │   │   │
+│   │   │   ├── alerting.py           Alert evaluation engine
+│   │   │   │                         • disk threshold with per-guest cooldown
+│   │   │   │                         • outdated transition detection (one-shot)
+│   │   │   │                         • dispatches via NtfyNotifier
+│   │   │   │
 │   │   │   ├── discovery.py          DiscoveryEngine orchestrator
 │   │   │   │                         • run_full_cycle(existing_guests) → dict
 │   │   │   │                         • asyncio.gather with semaphore (max 10 concurrent)
 │   │   │   │                         • error isolation: one guest failure doesn't stop others
 │   │   │   │                         • version history append-then-truncate (MAX=10)
+│   │   │   │                         • layered config resolution (guest > app > detector)
 │   │   │   │
 │   │   │   ├── github.py             GitHub Releases API client
 │   │   │   │                         • 1-hour in-memory TTL cache
 │   │   │   │                         • v-prefix stripping + build hash normalization
 │   │   │   │                         • graceful rate limit handling
 │   │   │   │
+│   │   │   ├── notifier.py           ntfy push notification sender
+│   │   │   │                         • async HTTP POST to ntfy server
+│   │   │   │                         • bearer token auth, configurable priority
+│   │   │   │                         • never raises (logs warnings on failure)
+│   │   │   │
 │   │   │   ├── proxmox.py            Proxmox VE async API client
 │   │   │   │                         • GET-only enforced (ALLOWED_METHODS = frozenset{"GET"})
 │   │   │   │                         • list_guests() → LXC + optional VM
-│   │   │   │                         • get_guest_network() → IP from net0/ipconfig0
+│   │   │   │                         • get_guest_network() → (IP, os_type) from net0/config
 │   │   │   │                         • check_connection() for settings test
 │   │   │   │
 │   │   │   ├── scheduler.py          asyncio background scheduler
 │   │   │   │                         • asyncio.Event for manual refresh (no task cancel)
 │   │   │   │                         • asyncio.Lock for thread-safe guest dict access
 │   │   │   │                         • guests property returns dict copy (no torn reads)
+│   │   │   │                         • AlertManager integration (post-cycle evaluation)
 │   │   │   │
 │   │   │   └── ssh.py                paramiko SSH executor
 │   │   │                             • asyncio.to_thread (non-blocking)
@@ -1138,6 +1266,7 @@ proxmon/
 │   │   │   ├── traefik.py
 │   │   │   ├── caddy.py              admin API on port 2019
 │   │   │   ├── ntfy.py
+│   │   │   ├── seerr.py              aliases: seer
 │   │   │   └── docker_generic.py     image tag parsing, no GitHub lookup
 │   │   │
 │   │   └── models/
@@ -1150,10 +1279,13 @@ proxmon/
 │   │
 │   ├── tests/
 │   │   ├── __init__.py
+│   │   ├── test_alerting.py          disk/outdated alert logic, cooldowns
 │   │   ├── test_config_store.py      config store: load, save, migration, merge
-│   │   ├── test_detectors.py         detection matching + version fetching (all 14 apps)
-│   │   ├── test_discovery.py         Proxmox parsing, IP resolution, full cycle
-│   │   └── test_github.py            caching, normalization, rate limits
+│   │   ├── test_detectors.py         detection matching + version fetching (all 15 apps)
+│   │   ├── test_discovery.py         Proxmox parsing, IP resolution, config resolution, full cycle
+│   │   ├── test_github.py            caching, normalization, rate limits
+│   │   ├── test_notifier.py          ntfy send, auth, errors, shared client
+│   │   └── test_ssh_version_cmd.py   SSH command whitelist + metacharacter guard
 │   │
 │   ├── Dockerfile                    Python 3.12-slim + uv + curl (healthcheck)
 │   ├── pyproject.toml                hatchling build, uv deps, pytest config
@@ -1183,37 +1315,54 @@ proxmon/
 │   │   │                             • ConnectionTestResult, HealthStatus, AppSettings
 │   │   │
 │   │   ├── hooks/
-│   │   │   └── useGuests.ts          Data fetching hook
-│   │   │                             • 60-second auto-poll (setInterval)
-│   │   │                             • manual refresh (triggerRefresh + 2s wait + reload)
-│   │   │                             • HttpError 503 → "not_configured" error state
+│   │   │   ├── useGuests.ts          Data fetching hook
+│   │   │   │                         • 60-second auto-poll (setInterval)
+│   │   │   │                         • manual refresh (triggerRefresh + 2s wait + reload)
+│   │   │   │                         • HttpError 503 → "not_configured" error state
+│   │   │   │
+│   │   │   └── useColumnVisibility.ts  Column visibility management
+│   │   │                             • COLUMN_DEFS registry (all dashboard columns)
+│   │   │                             • persists selection to localStorage
 │   │   │
 │   │   └── components/
+│   │       ├── AppIcon.tsx           App icon from selfhst/icons CDN
+│   │       │                         • maps app name to icon slug
+│   │       │                         • graceful fallback on load error
+│   │       │
+│   │       ├── ColumnToggle.tsx      Column visibility toggle dropdown
+│   │       │
 │   │       ├── Dashboard.tsx         Main guest table
 │   │       │                         • FilterBar (status / type / text search)
-│   │       │                         • loading skeleton, empty states
+│   │       │                         • configurable columns with persistence
+│   │       │                         • sorting by any visible column
 │   │       │                         • health badge + last-refresh timestamp
 │   │       │                         • refresh button with spinner
 │   │       │
 │   │       ├── GuestRow.tsx          Single table row
-│   │       │                         • type badge (LXC/VM)
-│   │       │                         • StatusBadge
-│   │       │                         • relative time display
+│   │       │                         • dynamic cells based on visible columns
+│   │       │                         • DiskUsageCell (color-coded progress bar)
+│   │       │                         • VersionSourceCell (API/PCT/SSH badge)
+│   │       │                         • OsTypeCell (OS icon + label)
 │   │       │                         • click → navigate to detail
 │   │       │
 │   │       ├── GuestDetail.tsx       Per-guest detail page (/guest/:id)
 │   │       │                         • breadcrumb navigation
-│   │       │                         • all GuestDetail fields
+│   │       │                         • all GuestDetail fields + instance settings panel
 │   │       │                         • version history table (last 10)
 │   │       │                         • collapsible raw detection output (JSON)
 │   │       │
 │   │       ├── Settings.tsx          Editable settings form (/settings)
 │   │       │                         • pre-populates from /api/settings/full
 │   │       │                         • dirty tracking + tokenSecretChanged ref
-│   │       │                         • beforeunload guard
+│   │       │                         • field descriptions / hints throughout
+│   │       │                         • notification section (ntfy config + test)
 │   │       │                         • ConnectionTestButton
 │   │       │                         • sticky Save Changes bar
 │   │       │                         • SuccessToast on save
+│   │       │
+│   │       ├── settings/
+│   │       │   ├── AppConfigSection.tsx    Per-app config (port, api_key, scheme, github_repo)
+│   │       │   └── ProxmoxHostsSection.tsx Multi-host config with per-host settings
 │   │       │
 │   │       ├── setup/
 │   │       │   ├── SetupWizard.tsx   5-step first-run wizard
@@ -1373,9 +1522,20 @@ docker compose logs --tail=100 backend
 - [ ] **App-specific update handlers** — plugin per app (e.g. `apt upgrade sonarr`, Docker pull + restart)
 - [ ] **Audit log** — immutable record of all update actions with timestamps, outcomes, and user context
 - [ ] **Health checks** — per-app HTTP health probe (is the app actually responding, not just running?)
-- [ ] **Notification webhooks** — push alerts to ntfy, Gotify, or Discord when updates are available
+- [ ] **Additional notification channels** — Gotify, Discord, generic webhook support
 - [ ] **Persistent history** — SQLite backend so version history survives restarts
-- [x] **Multi-node support** — monitor guests across multiple Proxmox nodes (shipped)
+
+### Already shipped (Phase 1.x)
+
+- [x] **Multi-node support** — monitor guests across multiple Proxmox nodes
+- [x] **ntfy notifications** — push alerts for disk threshold and outdated transitions with configurable cooldown
+- [x] **Per-guest configuration** — instance-level API key, port, scheme overrides
+- [x] **Configurable dashboard columns** — user can show/hide columns; selection persisted in browser
+- [x] **Disk usage monitoring** — color-coded disk bars on the dashboard
+- [x] **OS type display** — guest OS from Proxmox config shown in dashboard
+- [x] **App icons** — icons from selfhst/icons CDN next to app names
+- [x] **Version detection cascade** — API > PCT > SSH fallback strategy
+- [x] **Settings field descriptions** — hints and descriptions for all configuration options
 
 ---
 
