@@ -17,6 +17,7 @@ from app.detectors.sabnzbd import SABnzbdDetector
 from app.detectors.traefik import TraefikDetector
 from app.detectors.caddy import CaddyDetector
 from app.detectors.ntfy import NtfyDetector
+from app.detectors.seer import SeerDetector
 from app.detectors.docker_generic import DockerGenericDetector
 from app.models.guest import GuestInfo
 
@@ -176,6 +177,16 @@ class TestInstalledVersion:
 
     @respx.mock
     @pytest.mark.asyncio
+    async def test_seer_version(self) -> None:
+        respx.get("http://10.0.0.14:5055/api/v1/status").mock(
+            return_value=httpx.Response(200, json={"version": "v2.1.0"})
+        )
+        d = SeerDetector()
+        version = await d.get_installed_version("10.0.0.14")
+        assert version == "2.1.0"
+
+    @respx.mock
+    @pytest.mark.asyncio
     async def test_prowlarr_version(self) -> None:
         respx.get("http://10.0.0.12:9696/api/v1/system/status").mock(
             return_value=httpx.Response(200, json={"version": "1.12.2.4211"})
@@ -215,6 +226,7 @@ class TestApiKeySupport:
         assert BazarrDetector().accepts_api_key is True
         assert OverseerrDetector().accepts_api_key is True
         assert SABnzbdDetector().accepts_api_key is True
+        assert SeerDetector().accepts_api_key is True
         assert PlexDetector().accepts_api_key is False
         assert ImmichDetector().accepts_api_key is False
 
@@ -275,13 +287,13 @@ class TestApiKeySupport:
     @respx.mock
     @pytest.mark.asyncio
     async def test_sabnzbd_with_api_key(self) -> None:
-        route = respx.get("http://10.0.0.7:8085/api?mode=version&output=json").mock(
+        route = respx.get("http://10.0.0.7:8085/api?mode=version&output=json&apikey=sab-key").mock(
             return_value=httpx.Response(200, json={"version": "4.2.1"})
         )
         d = SABnzbdDetector()
         version = await d.get_installed_version("10.0.0.7", api_key="sab-key")
         assert version == "4.2.1"
-        assert route.calls[0].request.headers["x-api-key"] == "sab-key"
+        assert "apikey=sab-key" in str(route.calls[0].request.url)
 
     @respx.mock
     @pytest.mark.asyncio
@@ -293,6 +305,17 @@ class TestApiKeySupport:
         version = await d.get_installed_version("10.0.0.13", api_key="overseerr-key")
         assert version == "1.33.2"
         assert route.calls[0].request.headers["x-api-key"] == "overseerr-key"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_seer_with_api_key(self) -> None:
+        route = respx.get("http://10.0.0.14:5055/api/v1/status").mock(
+            return_value=httpx.Response(200, json={"version": "v2.1.0"})
+        )
+        d = SeerDetector()
+        version = await d.get_installed_version("10.0.0.14", api_key="seer-key")
+        assert version == "2.1.0"
+        assert route.calls[0].request.headers["x-api-key"] == "seer-key"
 
     @respx.mock
     @pytest.mark.asyncio

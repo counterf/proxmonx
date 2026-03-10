@@ -42,7 +42,8 @@ export default function GuestDetail() {
   if (error) return <ErrorBanner message={error} />;
   if (!guest) return <ErrorBanner message="Guest not found" />;
 
-  const githubRepo = guest.detector_used ? GITHUB_REPOS[guest.detector_used] : null;
+  const githubRepo = guest.github_repo_queried
+    || (guest.detector_used ? GITHUB_REPOS[guest.detector_used] : null);
   const releaseUrl = githubRepo && guest.latest_version
     ? `https://github.com/${githubRepo}/releases`
     : null;
@@ -198,7 +199,10 @@ export default function GuestDetail() {
               <div>
                 <span className="text-gray-500">Latest version source:</span>{' '}
                 <span className="text-gray-200">
-                  GitHub Releases{!guest.latest_version && <span className="text-gray-500"> (not found)</span>}
+                  {guest.latest_version_source === 'custom'
+                    ? 'App repository'
+                    : 'GitHub Releases'}
+                  {!guest.latest_version && <span className="text-gray-500"> (not found)</span>}
                 </span>
               </div>
               <div>
@@ -248,8 +252,8 @@ export default function GuestDetail() {
                 </tr>
               </thead>
               <tbody>
-                {[...guest.version_history].reverse().map((check, i) => (
-                  <tr key={i} className="border-b border-gray-800/50">
+                {[...guest.version_history].reverse().map((check) => (
+                  <tr key={check.timestamp} className="border-b border-gray-800/50">
                     <td className="px-2 py-1 text-gray-400 text-xs">{new Date(check.timestamp).toLocaleString()}</td>
                     <td className="px-2 py-1 text-gray-300 font-mono">{check.installed_version || '\u2014'}</td>
                     <td className="px-2 py-1 text-gray-300 font-mono">{check.latest_version || '\u2014'}</td>

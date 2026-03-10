@@ -4,7 +4,7 @@ interface StatusBadgeProps {
   status: UpdateStatus;
 }
 
-const STATUS_STYLES: Record<UpdateStatus, { label: string; className: string }> = {
+const STATUS_STYLES: Record<string, { label: string; className: string }> = {
   'up-to-date': {
     label: 'OK',
     className: 'bg-green-900 text-green-500',
@@ -19,8 +19,10 @@ const STATUS_STYLES: Record<UpdateStatus, { label: string; className: string }> 
   },
 };
 
+const FALLBACK_STYLE = { label: 'UNKNOWN', className: 'bg-gray-800 text-gray-400' };
+
 export default function StatusBadge({ status }: StatusBadgeProps) {
-  const style = STATUS_STYLES[status];
+  const style = STATUS_STYLES[status] || FALLBACK_STYLE;
   return (
     <span
       className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold ${style.className}`}

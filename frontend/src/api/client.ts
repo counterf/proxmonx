@@ -19,12 +19,32 @@ export class HttpError extends Error {
   }
 }
 
+const DEFAULT_TIMEOUT_MS = 30_000;
+
 async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE_URL}${path}`, options);
-  if (!response.ok) {
-    throw new HttpError(response.status, `HTTP ${response.status}: ${response.statusText}`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new HttpError(response.status, `HTTP ${response.status}: ${response.statusText}`);
+    }
+    try {
+      return await response.json() as T;
+    } catch {
+      throw new Error('Invalid JSON response from server');
+    }
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('Request timed out');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
   }
-  return response.json() as Promise<T>;
 }
 
 export async function fetchGuests(): Promise<GuestSummary[]> {

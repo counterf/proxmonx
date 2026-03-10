@@ -364,11 +364,17 @@ class DiscoveryEngine:
                     github_repo_override or "default",
                 )
 
-        # Store the effective port so GuestInfo._web_url() (in guest.py) can
-        # build the correct URL including scheme and port.
+        # Store the effective port and scheme so GuestInfo._web_url() (in guest.py)
+        # can build the correct URL.
         guest.effective_port = port_override or detector.default_port
+        guest.scheme = scheme
 
-        # Get installed version via HTTP probe
+        # Determine version detection strategy
+        detect_method = "pct_first"
+        if self._settings:
+            detect_method = self._settings.version_detect_method or "pct_first"
+
+        # HTTP probe always runs first regardless of method (it's the primary source)
         try:
             guest.installed_version = await detector.get_installed_version(
                 guest.ip, port=port_override, api_key=api_key, scheme=scheme,
@@ -381,60 +387,34 @@ class DiscoveryEngine:
                 "Version probe failed for %s on %s", detector.name, guest.name
             )
 
-        # pct exec: try if enabled for this host, guest is LXC, and version cmd exists
-        pct_exec_tried = False
-        if (
-            host_config
-            and host_config.pct_exec_enabled
-            and guest.type == "lxc"
-            and ssh_version_cmd
-        ):
-            pct_exec_tried = True
-            raw_vmid = guest.id.split(":")[-1] if ":" in guest.id else guest.id
-            proxmox_ip = _extract_host_ip(host_config.host)
-            if proxmox_ip:
-                try:
-                    pct_output = await self._ssh.run_pct_exec(
-                        proxmox_ip,
-                        raw_vmid,
-                        ssh_version_cmd,
-                        ssh_username=host_config.ssh_username,
-                        ssh_key_path=host_config.ssh_key_path,
-                        ssh_password=host_config.ssh_password,
-                    )
-                    if pct_output:
-                        guest.installed_version = pct_output.strip().splitlines()[0]
-                        guest.version_detection_method = "pct_exec"
-                except Exception:
-                    logger.warning(
-                        "pct exec failed for %s on %s, will try SSH",
-                        detector.name, guest.name,
-                    )
-
-        # SSH version command: try if pct exec did not succeed
-        if ssh_version_cmd and guest.ip and guest.version_detection_method != "pct_exec":
-            try:
-                ssh_output = await self._ssh.execute_version_cmd(
-                    guest.ip,
-                    ssh_version_cmd,
-                    username=ssh_username,
-                    key_path=ssh_key_path,
-                    password=ssh_password,
-                )
-                if ssh_output:
-                    guest.installed_version = ssh_output.strip().splitlines()[0]
-                    guest.version_detection_method = "ssh"
-            except Exception:
-                logger.warning(
-                    "SSH version cmd failed for %s on %s",
-                    detector.name,
-                    guest.name,
-                )
+        # If HTTP succeeded and no ssh_version_cmd is configured, skip CLI methods
+        if not ssh_version_cmd:
+            pass
+        elif detect_method == "pct_first":
+            await self._try_pct_then_ssh(
+                guest, host_config, ssh_version_cmd,
+                ssh_username, ssh_key_path, ssh_password,
+            )
+        elif detect_method == "ssh_first":
+            await self._try_ssh_then_pct(
+                guest, host_config, ssh_version_cmd,
+                ssh_username, ssh_key_path, ssh_password,
+            )
+        elif detect_method == "pct_only":
+            await self._try_pct_exec(
+                guest, host_config, ssh_version_cmd,
+            )
+        elif detect_method == "ssh_only":
+            await self._try_ssh(
+                guest, ssh_version_cmd,
+                ssh_username, ssh_key_path, ssh_password,
+            )
 
         # Get latest version: try detector's custom source first, then GitHub
         custom_latest = await detector.get_latest_version(http_client=self._http_client)
         if custom_latest:
             guest.latest_version = custom_latest
+            guest.latest_version_source = "custom"
             guest.github_lookup_status = "success"
             logger.debug(
                 "Latest version for %s from custom source: %s", detector.name, custom_latest
@@ -443,6 +423,7 @@ class DiscoveryEngine:
             effective_repo = github_repo_override or detector.github_repo
             if effective_repo:
                 guest.github_repo_queried = effective_repo
+                guest.latest_version_source = "github"
                 try:
                     guest.latest_version = await self._github.get_latest_version(
                         effective_repo
@@ -467,7 +448,102 @@ class DiscoveryEngine:
                 "version_detection_method": guest.version_detection_method,
                 "github_repo_queried": guest.github_repo_queried,
                 "github_lookup_status": guest.github_lookup_status,
+                "latest_version_source": guest.latest_version_source,
             })
+
+
+    async def _try_pct_exec(
+        self,
+        guest: GuestInfo,
+        host_config: ProxmoxHostConfig | None,
+        ssh_version_cmd: str,
+    ) -> bool:
+        """Attempt pct exec; return True if version was obtained."""
+        if (
+            not host_config
+            or not host_config.pct_exec_enabled
+            or guest.type != "lxc"
+        ):
+            return False
+        raw_vmid = guest.id.split(":")[-1] if ":" in guest.id else guest.id
+        proxmox_ip = _extract_host_ip(host_config.host)
+        if not proxmox_ip:
+            return False
+        try:
+            pct_output = await self._ssh.run_pct_exec(
+                proxmox_ip,
+                raw_vmid,
+                ssh_version_cmd,
+                ssh_username=host_config.ssh_username,
+                ssh_key_path=host_config.ssh_key_path,
+                ssh_password=host_config.ssh_password,
+            )
+            if pct_output:
+                guest.installed_version = pct_output.strip().splitlines()[0]
+                guest.version_detection_method = "pct_exec"
+                return True
+        except Exception:
+            logger.warning(
+                "pct exec failed for %s on %s",
+                guest.detector_used, guest.name,
+            )
+        return False
+
+    async def _try_ssh(
+        self,
+        guest: GuestInfo,
+        ssh_version_cmd: str,
+        ssh_username: str | None,
+        ssh_key_path: str | None,
+        ssh_password: str | None,
+    ) -> bool:
+        """Attempt SSH version command; return True if version was obtained."""
+        if not guest.ip:
+            return False
+        try:
+            ssh_output = await self._ssh.execute_version_cmd(
+                guest.ip,
+                ssh_version_cmd,
+                username=ssh_username,
+                key_path=ssh_key_path,
+                password=ssh_password,
+            )
+            if ssh_output:
+                guest.installed_version = ssh_output.strip().splitlines()[0]
+                guest.version_detection_method = "ssh"
+                return True
+        except Exception:
+            logger.warning(
+                "SSH version cmd failed for %s on %s",
+                guest.detector_used, guest.name,
+            )
+        return False
+
+    async def _try_pct_then_ssh(
+        self,
+        guest: GuestInfo,
+        host_config: ProxmoxHostConfig | None,
+        ssh_version_cmd: str,
+        ssh_username: str | None,
+        ssh_key_path: str | None,
+        ssh_password: str | None,
+    ) -> None:
+        """Try pct exec first, fall back to SSH."""
+        if not await self._try_pct_exec(guest, host_config, ssh_version_cmd):
+            await self._try_ssh(guest, ssh_version_cmd, ssh_username, ssh_key_path, ssh_password)
+
+    async def _try_ssh_then_pct(
+        self,
+        guest: GuestInfo,
+        host_config: ProxmoxHostConfig | None,
+        ssh_version_cmd: str,
+        ssh_username: str | None,
+        ssh_key_path: str | None,
+        ssh_password: str | None,
+    ) -> None:
+        """Try SSH first, fall back to pct exec."""
+        if not await self._try_ssh(guest, ssh_version_cmd, ssh_username, ssh_key_path, ssh_password):
+            await self._try_pct_exec(guest, host_config, ssh_version_cmd)
 
 
 def _extract_host_ip(host_url: str) -> str | None:

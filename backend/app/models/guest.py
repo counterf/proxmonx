@@ -93,6 +93,7 @@ class GuestSummary(BaseModel):
     version_detection_method: str | None = None
     github_repo_queried: str | None = None
     github_lookup_status: str | None = None
+    latest_version_source: str | None = None
 
 
 class GuestDetail(GuestSummary):
@@ -137,6 +138,8 @@ class GuestInfo(BaseModel):
     github_repo_queried: str | None = None
     # Outcome of the GitHub lookup: "success", "failed", or "no_repo"
     github_lookup_status: str | None = None
+    # Where the latest version came from: "github", "custom", or None
+    latest_version_source: str | None = None
 
     def _web_url(self) -> str | None:
         return _build_web_url(
@@ -164,6 +167,7 @@ class GuestInfo(BaseModel):
             version_detection_method=self.version_detection_method,
             github_repo_queried=self.github_repo_queried,
             github_lookup_status=self.github_lookup_status,
+            latest_version_source=self.latest_version_source,
         )
 
     def to_detail(self) -> GuestDetail:
@@ -189,4 +193,5 @@ class GuestInfo(BaseModel):
             version_detection_method=self.version_detection_method,
             github_repo_queried=self.github_repo_queried,
             github_lookup_status=self.github_lookup_status,
+            latest_version_source=self.latest_version_source,
         )

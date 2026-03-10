@@ -1,5 +1,8 @@
 # Development overrides
 # Copy to docker-compose.override.yml to use
+#
+# Note: In dev mode, Vite serves on port 5173 (mapped to host 3000).
+# In production, nginx serves on port 80 (mapped to host 3000).
 
 services:
   backend:
@@ -17,6 +20,6 @@ services:
       target: build
     volumes:
       - ./frontend/src:/app/src
-    command: npm run dev -- --host 0.0.0.0
+    command: npm run dev -- --host 0.0.0.0 --port 80
     ports:
-      - "3000:3000"
+      - "3000:80"

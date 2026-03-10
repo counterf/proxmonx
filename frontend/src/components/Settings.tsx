@@ -93,7 +93,7 @@ function initHostsFromSettings(s: FullSettings): ProxmoxHost[] {
     }];
   }
   return [{
-    id: Date.now().toString(),
+    id: crypto.randomUUID(),
     label: 'Default',
     host: '',
     token_id: '',

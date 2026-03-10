@@ -177,16 +177,28 @@ class ConfigStore:
         for key, value in config_data.items():
             if key == "app_config":
                 if isinstance(value, dict):
-                    current["app_config"] = {
-                        k: AppConfig(**v) if isinstance(v, dict) else v
-                        for k, v in value.items()
-                    }
+                    merged_apps: dict = {}
+                    for k, v in value.items():
+                        if isinstance(v, dict):
+                            try:
+                                merged_apps[k] = AppConfig(**v)
+                            except Exception as exc:
+                                logger.warning("Skipping invalid app_config entry '%s': %s", k, exc)
+                        else:
+                            merged_apps[k] = v
+                    current["app_config"] = merged_apps
             elif key == "proxmox_hosts":
                 if isinstance(value, list):
-                    current["proxmox_hosts"] = [
-                        ProxmoxHostConfig(**h) if isinstance(h, dict) else h
-                        for h in value
-                    ]
+                    merged_hosts: list = []
+                    for i, h in enumerate(value):
+                        if isinstance(h, dict):
+                            try:
+                                merged_hosts.append(ProxmoxHostConfig(**h))
+                            except Exception as exc:
+                                logger.warning("Skipping invalid proxmox_hosts[%d]: %s", i, exc)
+                        else:
+                            merged_hosts.append(h)
+                    current["proxmox_hosts"] = merged_hosts
             elif key in current and value is not None:
                 current[key] = value
         return SettingsCls(**current)

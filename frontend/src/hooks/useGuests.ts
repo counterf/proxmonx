@@ -20,14 +20,17 @@ export function useGuests(): UseGuestsResult {
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mountedRef = useRef(true);
 
   const load = useCallback(async () => {
     try {
       const data = await fetchGuests();
+      if (!mountedRef.current) return;
       setGuests(data);
       setLastRefreshed(new Date());
       setError(null);
     } catch (err) {
+      if (!mountedRef.current) return;
       if (err instanceof HttpError && err.status === 503) {
         setError('not_configured');
       } else {
@@ -35,7 +38,9 @@ export function useGuests(): UseGuestsResult {
         setError(message);
       }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -43,21 +48,25 @@ export function useGuests(): UseGuestsResult {
     setRefreshing(true);
     try {
       await triggerRefresh();
-      // Wait briefly for the backend to start processing, then poll
       await new Promise((resolve) => setTimeout(resolve, 2000));
       await load();
     } catch (err) {
+      if (!mountedRef.current) return;
       const message = err instanceof Error ? err.message : 'Refresh failed';
       setError(message);
     } finally {
-      setRefreshing(false);
+      if (mountedRef.current) {
+        setRefreshing(false);
+      }
     }
   }, [load]);
 
   useEffect(() => {
+    mountedRef.current = true;
     load();
     intervalRef.current = setInterval(load, POLL_INTERVAL);
     return () => {
+      mountedRef.current = false;
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }

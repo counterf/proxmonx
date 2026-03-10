@@ -2,7 +2,7 @@
 
 Self-hosted Proxmox monitoring dashboard that continuously discovers LXC containers and VMs, identifies the application running inside each guest, compares the installed version against the latest upstream release on GitHub, and shows a live update-status dashboard — with a built-in setup wizard so you never have to touch a config file.
 
-![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 70 passing](https://img.shields.io/badge/tests-70%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
+![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 84 passing](https://img.shields.io/badge/tests-84%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
 
 <!-- screenshot: dashboard showing guests table with version status badges -->
 
@@ -140,7 +140,7 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
   - Proxmox tag matching (`sonarr`, `app:sonarr`)
   - Guest name token matching (`sonarr-lxc` → sonarr)
   - Docker container inspection via SSH (`docker ps`)
-- **14 built-in app detectors** — arr-stack, Plex, Immich, Gitea, and more
+- **15 built-in app detectors** — arr-stack, Plex, Immich, Gitea, Seer, and more
 - **Installed version detection** — queries each app's own HTTP API
 - **Latest version lookup** — GitHub Releases API with 1-hour cache
 - **Semantic version comparison** — `packaging.version.Version`, handles build hashes
@@ -183,10 +183,11 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 | **Immich** | `immich` | `GET /api/server/about` → `version` | immich-app/immich | 2283 |
 | **Gitea** | `gitea` | `GET /api/v1/version` → `version` | go-gitea/gitea | 3000 |
 | **qBittorrent** | `qbittorrent`, `qbit` | `GET /api/v2/app/version` (plain text) | qbittorrent/qBittorrent | 8080 |
-| **SABnzbd** | `sabnzbd`, `sab` | `GET /api?mode=version&output=json` → `version` | sabnzbd/sabnzbd | 8080 |
+| **SABnzbd** | `sabnzbd`, `sab` | `GET /api?mode=version&output=json` → `version` | sabnzbd/sabnzbd | 8085 |
 | **Traefik** | `traefik` | `GET /api/version` → `version` | traefik/traefik | 8080 |
 | **Caddy** | `caddy` | `GET :2019/config/` (admin API) | caddyserver/caddy | 2019 |
 | **ntfy** | `ntfy` | `GET /v1/info` → `version` | binwiederhier/ntfy | 80 |
+| **Seer** | `seer` | `GET /api/v1/status` → `version` | seerr-team/seerr | 5055 |
 | **Docker (generic)** | any Docker image | image tag parsing | N/A | N/A |
 
 **Detection keys** are matched against guest names (token-split on `-_.\s`) and Proxmox tags (exact match or `app:<key>`). For Docker detection, the image name substrings listed in each detector's `docker_images` list are matched against `docker ps` output.
@@ -328,6 +329,7 @@ When you configure proxmon via the UI, settings are saved to the SQLite database
 | `CORS_ORIGINS` | `http://localhost:3000,http://frontend` | No | Allowed CORS origins (comma-separated or JSON array) |
 | `LOG_LEVEL` | `info` | No | `debug` / `info` / `warning` / `error` |
 | `PROXMON_ENABLED` | `true` | No | Master switch; set `false` to pause all polling |
+| `PROXMON_API_KEY` | — | No | API key for protecting mutating endpoints (POST settings, refresh) |
 | `CONFIG_DB_PATH` | `/app/data/proxmon.db` | No | Override path for SQLite config database |
 
 ### SSH key mount example
@@ -942,12 +944,13 @@ uv run --extra dev pytest -v
 ```
 
 ```
-tests/test_config_store.py    8 tests  — load, save, migration, merge, is_configured
-tests/test_detectors.py      34 tests  — detection matching + version fetching for all 14 apps
-tests/test_discovery.py      10 tests  — Proxmox parsing, IP resolution, full cycle integration
-tests/test_github.py          8 tests  — caching, v-prefix stripping, rate limit, auth header
+tests/test_config_store.py     8 tests  — load, save, migration, merge, is_configured
+tests/test_detectors.py       36 tests  — detection matching + version fetching for all 15 apps
+tests/test_discovery.py       10 tests  — Proxmox parsing, IP resolution, full cycle integration
+tests/test_github.py           8 tests  — caching, v-prefix stripping, rate limit, auth header
+tests/test_ssh_version_cmd.py 22 tests  — SSH version command safety validation
 ─────────────────────────────────────────────────────
-Total: 70 tests, ~2 seconds
+Total: 84 tests, ~2 seconds
 ```
 
 ---
@@ -1372,7 +1375,7 @@ docker compose logs --tail=100 backend
 - [ ] **Health checks** — per-app HTTP health probe (is the app actually responding, not just running?)
 - [ ] **Notification webhooks** — push alerts to ntfy, Gotify, or Discord when updates are available
 - [ ] **Persistent history** — SQLite backend so version history survives restarts
-- [ ] **Multi-node support** — monitor guests across multiple Proxmox nodes
+- [x] **Multi-node support** — monitor guests across multiple Proxmox nodes (shipped)
 
 ---
 

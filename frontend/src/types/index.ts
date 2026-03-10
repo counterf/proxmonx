@@ -18,6 +18,7 @@ export interface GuestSummary {
   host_label: string;
   detection_method: string | null;
   version_detection_method: string | null;
+  latest_version_source: string | null;
 }
 
 export interface VersionCheck {

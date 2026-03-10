@@ -82,6 +82,13 @@ class ProxmoxHostSaveEntry(BaseModel):
     ssh_key_path: str | None = None
     pct_exec_enabled: bool = False
 
+    @field_validator("host")
+    @classmethod
+    def validate_host_url(cls, v: str) -> str:
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("Host must start with http:// or https://")
+        return v.rstrip("/")
+
 
 class SettingsSaveRequest(BaseModel):
     proxmox_host: str
@@ -127,6 +134,14 @@ class SettingsSaveRequest(BaseModel):
     def validate_poll_interval(cls, v: int) -> int:
         if v < 30 or v > 3600:
             raise ValueError("Poll interval must be between 30 and 3600 seconds")
+        return v
+
+    @field_validator("version_detect_method")
+    @classmethod
+    def validate_version_detect_method(cls, v: str) -> str:
+        allowed = {"pct_first", "ssh_first", "ssh_only", "pct_only"}
+        if v not in allowed:
+            raise ValueError(f"version_detect_method must be one of {allowed}")
         return v
 
     @field_validator("app_config")
@@ -458,7 +473,7 @@ async def save_settings(
     }
 
     # Multi-host support
-    if body.proxmox_hosts:
+    if body.proxmox_hosts is not None and len(body.proxmox_hosts) > 0:
         existing_hosts: list[dict] = current_file.get("proxmox_hosts", [])
         saved_hosts = []
         for entry in body.proxmox_hosts:
@@ -484,6 +499,12 @@ async def save_settings(
             config_data["proxmox_token_id"] = first["token_id"]
             config_data["proxmox_token_secret"] = first["token_secret"]
             config_data["proxmox_node"] = first["node"]
+
+    # Preserve existing proxmox_hosts when payload omits them
+    if "proxmox_hosts" not in config_data:
+        existing_hosts_data = current_file.get("proxmox_hosts")
+        if existing_hosts_data:
+            config_data["proxmox_hosts"] = existing_hosts_data
 
     # Merge app_config: preserve existing API keys when client sends "***" or null
     if body.app_config is not None:
