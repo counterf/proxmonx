@@ -78,7 +78,14 @@ class TestMigration:
 
         db_path = tmp_path / "proxmon.db"
         store = ConfigStore(str(db_path))
-        assert store.load() == _FULL_CONFIG
+        loaded = store.load()
+        # config.json flat fields are preserved; multi-host migration also runs
+        for key, value in _FULL_CONFIG.items():
+            assert loaded[key] == value
+        # multi-host migration wraps the single host into proxmox_hosts
+        assert "proxmox_hosts" in loaded
+        assert loaded["proxmox_hosts"][0]["host"] == _FULL_CONFIG["proxmox_host"]
+        assert loaded["proxmox_hosts"][0]["id"] == "default"
 
     def test_migration_skipped_if_settings_row_exists(self, tmp_path: Path) -> None:
         db_path = tmp_path / "proxmon.db"

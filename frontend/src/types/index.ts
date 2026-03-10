@@ -14,6 +14,10 @@ export interface GuestSummary {
   last_checked: string | null;
   tags: string[];
   web_url: string | null;
+  host_id: string;
+  host_label: string;
+  detection_method: string | null;
+  version_detection_method: string | null;
 }
 
 export interface VersionCheck {
@@ -29,6 +33,8 @@ export interface GuestDetail extends GuestSummary {
   detector_used: string | null;
   raw_detection_output: Record<string, string | number | boolean | null> | null;
   version_history: VersionCheck[];
+  github_repo_queried: string | null;
+  github_lookup_status: string | null;  // "success" | "failed" | "no_repo" | null
 }
 
 export interface HealthStatus {
@@ -79,6 +85,20 @@ export interface AppConfigDefault {
   github_repo: string | null;
 }
 
+export interface ProxmoxHost {
+  id: string;
+  label: string;
+  host: string;
+  token_id: string;
+  token_secret: string | null;
+  node: string;
+  verify_ssl: boolean;
+  ssh_username: string;
+  ssh_password: string | null;
+  ssh_key_path: string | null;
+  pct_exec_enabled: boolean;
+}
+
 export interface FullSettings {
   proxmox_host: string | null;
   proxmox_token_id: string | null;
@@ -93,7 +113,9 @@ export interface FullSettings {
   ssh_password: string | null;
   github_token: string | null;
   log_level: string;
+  version_detect_method: string;
   app_config?: Record<string, AppConfigEntry>;
+  proxmox_hosts: ProxmoxHost[];
 }
 
 export interface SettingsSaveRequest {
@@ -110,7 +132,9 @@ export interface SettingsSaveRequest {
   ssh_password: string | null;
   github_token: string | null;
   log_level: string;
+  version_detect_method: string;
   app_config?: Record<string, AppConfigEntry>;
+  proxmox_hosts?: ProxmoxHost[];
 }
 
 export interface ConnectionTestResult {

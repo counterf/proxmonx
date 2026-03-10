@@ -2,11 +2,13 @@
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import httpx
 
-from app.config import Settings
+from app.config import ProxmoxHostConfig, Settings
 from app.core.github import GitHubClient
 from app.core.proxmox import ProxmoxClient
 from app.core.ssh import SSHClient
@@ -40,10 +42,6 @@ class DiscoveryEngine:
         self._http_client = http_client
         self._settings = settings
         self._semaphore = asyncio.Semaphore(MAX_CONCURRENT_PROBES)
-        # Share the HTTP client with all detectors
-        if http_client:
-            for detector in ALL_DETECTORS:
-                detector.http_client = http_client
 
     async def run_full_cycle(
         self,
@@ -51,23 +49,64 @@ class DiscoveryEngine:
     ) -> dict[str, GuestInfo]:
         """Run a complete discovery + detection + version check cycle.
 
-        Returns updated guest map.
+        When multiple Proxmox hosts are configured, discovery runs against
+        each host in parallel and the results are merged.  Guest IDs are
+        namespaced as ``{host_id}:{vmid}`` to avoid collisions.
         """
+        hosts = self._settings.get_hosts() if self._settings else []
+
+        if not hosts:
+            # Legacy single-host path (no proxmox_hosts configured)
+            return await self._run_single_host_cycle(existing_guests)
+
+        if len(hosts) == 1:
+            return await self._run_host_cycle(
+                hosts[0], existing_guests,
+            )
+
+        # Multi-host: parallel discovery
+        logger.info("Starting multi-host discovery across %d hosts", len(hosts))
+        start = datetime.now(timezone.utc)
+
+        tasks = [
+            self._run_host_cycle(host, existing_guests)
+            for host in hosts
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        merged: dict[str, GuestInfo] = {}
+        for i, result in enumerate(results):
+            if isinstance(result, dict):
+                merged.update(result)
+            elif isinstance(result, Exception):
+                logger.error(
+                    "Discovery failed for host %s: %s", hosts[i].label, result,
+                )
+
+        elapsed = (datetime.now(timezone.utc) - start).total_seconds()
+        logger.info(
+            "Multi-host discovery complete: %d guests from %d hosts in %.1fs",
+            len(merged), len(hosts), elapsed,
+        )
+        return merged
+
+    async def _run_single_host_cycle(
+        self,
+        existing_guests: dict[str, GuestInfo],
+    ) -> dict[str, GuestInfo]:
+        """Legacy single-host discovery cycle (no host namespacing)."""
         logger.info("Starting full discovery cycle")
         start = datetime.now(timezone.utc)
 
-        # Step 1: Discover guests from Proxmox
         guests = await self._proxmox.list_guests()
         logger.info("Discovered %d guests", len(guests))
 
-        # Step 2: Resolve IPs and detect apps concurrently
         tasks = [
             self._process_guest(guest, existing_guests.get(guest.id))
             for guest in guests
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Step 3: Build updated guest map
         updated: dict[str, GuestInfo] = {}
         for result in results:
             if isinstance(result, GuestInfo):
@@ -81,18 +120,87 @@ class DiscoveryEngine:
         )
         return updated
 
+    async def _run_host_cycle(
+        self,
+        host_config: ProxmoxHostConfig,
+        existing_guests: dict[str, GuestInfo],
+    ) -> dict[str, GuestInfo]:
+        """Run discovery for a single Proxmox host, namespacing guest IDs."""
+        logger.info("Starting discovery for host %s (%s)", host_config.label, host_config.host)
+        start = datetime.now(timezone.utc)
+
+        # Build a per-host ProxmoxClient using a temporary Settings-like config
+        settings = self._build_host_settings(host_config)
+        proxmox = ProxmoxClient(settings, http_client=self._http_client)
+
+        guests = await proxmox.list_guests()
+        logger.info("Host %s: discovered %d guests", host_config.label, len(guests))
+
+        # Namespace guest IDs and set host fields
+        for guest in guests:
+            guest.id = f"{host_config.id}:{guest.id}"
+            guest.host_id = host_config.id
+            guest.host_label = host_config.label
+
+        tasks = [
+            self._process_guest(
+                guest,
+                existing_guests.get(guest.id),
+                host_config=host_config,
+            )
+            for guest in guests
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        updated: dict[str, GuestInfo] = {}
+        for result in results:
+            if isinstance(result, GuestInfo):
+                updated[result.id] = result
+            elif isinstance(result, Exception):
+                logger.error("Guest processing failed on host %s: %s", host_config.label, result)
+
+        elapsed = (datetime.now(timezone.utc) - start).total_seconds()
+        logger.info(
+            "Host %s discovery complete: %d guests in %.1fs",
+            host_config.label, len(updated), elapsed,
+        )
+        return updated
+
+    def _build_host_settings(self, host_config: ProxmoxHostConfig) -> Settings:
+        """Build a Settings instance from a ProxmoxHostConfig for ProxmoxClient."""
+        return Settings(
+            proxmox_host=host_config.host,
+            proxmox_token_id=host_config.token_id,
+            proxmox_token_secret=host_config.token_secret,
+            proxmox_node=host_config.node,
+            verify_ssl=host_config.verify_ssl,
+            discover_vms=self._settings.discover_vms if self._settings else False,
+            ssh_enabled=self._settings.ssh_enabled if self._settings else True,
+            ssh_username=host_config.ssh_username or (self._settings.ssh_username if self._settings else "root"),
+            ssh_key_path=host_config.ssh_key_path or (self._settings.ssh_key_path if self._settings else None),
+            ssh_password=host_config.ssh_password or (self._settings.ssh_password if self._settings else None),
+        )
+
     async def _process_guest(
         self,
         guest: GuestInfo,
         previous: GuestInfo | None,
+        host_config: ProxmoxHostConfig | None = None,
     ) -> GuestInfo:
         """Process a single guest: resolve IP, detect app, check versions."""
         async with self._semaphore:
             try:
-                # Resolve IP
+                # Resolve IP -- need the correct proxmox client for this host
                 if not guest.ip:
-                    guest.ip = await self._proxmox.get_guest_network(
-                        guest.id, guest.type
+                    if host_config:
+                        settings = self._build_host_settings(host_config)
+                        proxmox = ProxmoxClient(settings, http_client=self._http_client)
+                    else:
+                        proxmox = self._proxmox
+                    # Extract raw vmid from namespaced ID
+                    raw_vmid = guest.id.split(":")[-1] if ":" in guest.id else guest.id
+                    guest.ip = await proxmox.get_guest_network(
+                        raw_vmid, guest.type
                     )
 
                 # Skip stopped guests for app detection
@@ -113,11 +221,11 @@ class DiscoveryEngine:
                     return guest
 
                 # Detect app
-                await self._detect_app(guest)
+                await self._detect_app(guest, host_config=host_config)
 
                 # Get installed version
                 if guest.detector_used and guest.ip:
-                    await self._check_version(guest)
+                    await self._check_version(guest, host_config=host_config)
 
                 # Preserve version history from previous checks
                 if previous:
@@ -142,7 +250,11 @@ class DiscoveryEngine:
                 guest.last_checked = datetime.now(timezone.utc)
                 return guest
 
-    async def _detect_app(self, guest: GuestInfo) -> None:
+    async def _detect_app(
+        self,
+        guest: GuestInfo,
+        host_config: ProxmoxHostConfig | None = None,
+    ) -> None:
         """Attempt to detect which app a guest is running."""
         # Strategy 1 & 2: Name and tag matching
         for detector in ALL_DETECTORS:
@@ -210,7 +322,11 @@ class DiscoveryEngine:
                 }
                 return
 
-    async def _check_version(self, guest: GuestInfo) -> None:
+    async def _check_version(
+        self,
+        guest: GuestInfo,
+        host_config: ProxmoxHostConfig | None = None,
+    ) -> None:
         """Check installed and latest versions for a detected app."""
         from app.detectors.registry import DETECTOR_MAP
 
@@ -256,14 +372,47 @@ class DiscoveryEngine:
         try:
             guest.installed_version = await detector.get_installed_version(
                 guest.ip, port=port_override, api_key=api_key, scheme=scheme,
+                http_client=self._http_client,
             )
+            if guest.installed_version:
+                guest.version_detection_method = "http"
         except Exception:
             logger.warning(
                 "Version probe failed for %s on %s", detector.name, guest.name
             )
 
-        # SSH version command takes priority over HTTP probe if configured
-        if ssh_version_cmd and guest.ip:
+        # pct exec: try if enabled for this host, guest is LXC, and version cmd exists
+        pct_exec_tried = False
+        if (
+            host_config
+            and host_config.pct_exec_enabled
+            and guest.type == "lxc"
+            and ssh_version_cmd
+        ):
+            pct_exec_tried = True
+            raw_vmid = guest.id.split(":")[-1] if ":" in guest.id else guest.id
+            proxmox_ip = _extract_host_ip(host_config.host)
+            if proxmox_ip:
+                try:
+                    pct_output = await self._ssh.run_pct_exec(
+                        proxmox_ip,
+                        raw_vmid,
+                        ssh_version_cmd,
+                        ssh_username=host_config.ssh_username,
+                        ssh_key_path=host_config.ssh_key_path,
+                        ssh_password=host_config.ssh_password,
+                    )
+                    if pct_output:
+                        guest.installed_version = pct_output.strip().splitlines()[0]
+                        guest.version_detection_method = "pct_exec"
+                except Exception:
+                    logger.warning(
+                        "pct exec failed for %s on %s, will try SSH",
+                        detector.name, guest.name,
+                    )
+
+        # SSH version command: try if pct exec did not succeed
+        if ssh_version_cmd and guest.ip and guest.version_detection_method != "pct_exec":
             try:
                 ssh_output = await self._ssh.execute_version_cmd(
                     guest.ip,
@@ -274,6 +423,7 @@ class DiscoveryEngine:
                 )
                 if ssh_output:
                     guest.installed_version = ssh_output.strip().splitlines()[0]
+                    guest.version_detection_method = "ssh"
             except Exception:
                 logger.warning(
                     "SSH version cmd failed for %s on %s",
@@ -284,27 +434,57 @@ class DiscoveryEngine:
         # Get latest version from GitHub
         effective_repo = github_repo_override or detector.github_repo
         if effective_repo:
+            guest.github_repo_queried = effective_repo
             try:
                 guest.latest_version = await self._github.get_latest_version(
                     effective_repo
                 )
+                guest.github_lookup_status = "success" if guest.latest_version else "failed"
             except Exception:
                 logger.warning(
                     "GitHub version lookup failed for %s", effective_repo
                 )
+                guest.github_lookup_status = "failed"
+        else:
+            guest.github_lookup_status = "no_repo"
 
         # Determine update status
         guest.update_status = _determine_update_status(
             guest.installed_version, guest.latest_version
         )
 
+        # Append version fields to raw_detection_output for transparency
+        if guest.raw_detection_output is not None:
+            guest.raw_detection_output.update({
+                "version_detection_method": guest.version_detection_method,
+                "github_repo_queried": guest.github_repo_queried,
+                "github_lookup_status": guest.github_lookup_status,
+            })
+
+
+def _extract_host_ip(host_url: str) -> str | None:
+    """Extract hostname/IP from a Proxmox host URL.
+
+    Handles formats like ``https://192.168.1.10:8006`` or bare ``192.168.1.10``.
+    """
+    if not host_url:
+        return None
+    if "://" in host_url:
+        parsed = urlparse(host_url)
+        return parsed.hostname
+    # Bare hostname/IP, possibly with port
+    return host_url.split(":")[0]
+
 
 def _normalize_version_string(version: str) -> str:
-    """Strip v prefix and build-hash suffixes (e.g. '1.40.0.7998-c29d4c0c8' -> '1.40.0.7998')."""
+    """Strip v prefix and build-hash suffixes (e.g. '1.40.0.7998-c29d4c0c8' -> '1.40.0.7998').
+
+    Preserves legitimate pre-release suffixes like '1.0.0-beta.1'.
+    Only strips suffixes that look like build hashes (7+ hex chars after a hyphen).
+    """
     version = version.lstrip("v")
-    # Strip everything after a hyphen (build hashes like -c29d4c0c8)
-    if "-" in version:
-        version = version.split("-")[0]
+    # Only strip suffixes that look like build hashes (7+ hex chars)
+    version = re.sub(r'-[0-9a-f]{7,}$', '', version)
     return version
 
 

@@ -64,6 +64,7 @@ class BaseDetector(ABC):
     async def get_installed_version(
         self, host: str, port: int | None = None, api_key: str | None = None,
         scheme: str = "http",
+        http_client: httpx.AsyncClient | None = None,
     ) -> str | None:
         """Query the app's local API for its version.
 
@@ -71,13 +72,16 @@ class BaseDetector(ABC):
             host: Guest IP address.
             port: Override port (uses default_port if None).
             api_key: Optional API key for authenticated endpoints.
+            http_client: Shared HTTP client (avoids mutating singleton state).
         """
         ...
 
     async def _http_get(
         self, url: str, timeout: float = 5.0, headers: dict[str, str] | None = None,
+        http_client: httpx.AsyncClient | None = None,
     ) -> httpx.Response:
         """Helper for making HTTP GET requests to guest apps."""
-        ctx = contextlib.nullcontext(self.http_client) if self.http_client else httpx.AsyncClient(timeout=timeout, verify=False, follow_redirects=True)
-        async with ctx as client:
-            return await client.get(url, headers=headers or {})
+        client = http_client or self.http_client
+        ctx = contextlib.nullcontext(client) if client else httpx.AsyncClient(timeout=timeout, verify=False, follow_redirects=True)
+        async with ctx as c:
+            return await c.get(url, headers=headers or {})

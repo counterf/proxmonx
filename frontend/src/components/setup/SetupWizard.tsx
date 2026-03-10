@@ -195,6 +195,7 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
         ssh_password: form.ssh_password || null,
         github_token: form.github_token || null,
         log_level: form.log_level,
+        version_detect_method: 'pct_first',
       };
       await saveSettings(payload);
       // Transition to discovery screen

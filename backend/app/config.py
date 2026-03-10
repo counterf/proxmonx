@@ -19,14 +19,33 @@ class AppConfig(BaseModel):
     ssh_password: str | None = None
 
 
+class ProxmoxHostConfig(BaseModel):
+    """Configuration for a single Proxmox host."""
+
+    id: str  # unique identifier, e.g. "pve1"
+    label: str  # display name
+    host: str  # URL, e.g. "https://192.168.1.10:8006"
+    token_id: str = ""
+    token_secret: str = ""
+    node: str = ""
+    verify_ssl: bool = False
+    ssh_username: str = "root"
+    ssh_password: str | None = None
+    ssh_key_path: str | None = None
+    pct_exec_enabled: bool = False
+
+
 class Settings(BaseSettings):
     """All settings configurable via environment variables or config file."""
 
-    # Proxmox connection (optional so app can start unconfigured)
+    # Proxmox connection -- legacy flat fields (kept for backward compat)
     proxmox_host: str | None = None
     proxmox_token_id: str | None = None
     proxmox_token_secret: str | None = None
     proxmox_node: str | None = None
+
+    # Multi-host configuration
+    proxmox_hosts: list[ProxmoxHostConfig] = []
 
     # Discovery
     poll_interval_seconds: int = 300
@@ -44,6 +63,9 @@ class Settings(BaseSettings):
     # SSH host key verification
     ssh_known_hosts_path: str = ""
 
+    # Version detection strategy
+    version_detect_method: str = "pct_first"  # pct_first | ssh_first | ssh_only | pct_only
+
     # Application
     log_level: str = "info"
     proxmon_enabled: bool = True
@@ -56,6 +78,33 @@ class Settings(BaseSettings):
     app_config: dict[str, AppConfig] = {}
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    def get_hosts(self) -> list[ProxmoxHostConfig]:
+        """Return the list of configured hosts.
+
+        If ``proxmox_hosts`` is populated, return it directly.
+        Otherwise fall back to the legacy flat fields and wrap them
+        in a single-entry list for backward compatibility.
+        """
+        if self.proxmox_hosts:
+            return list(self.proxmox_hosts)
+        # Fallback: legacy flat fields
+        if self.proxmox_host and self.proxmox_token_id:
+            return [
+                ProxmoxHostConfig(
+                    id="default",
+                    label="Default",
+                    host=self.proxmox_host,
+                    token_id=self.proxmox_token_id,
+                    token_secret=self.proxmox_token_secret or "",
+                    node=self.proxmox_node or "",
+                    verify_ssl=self.verify_ssl,
+                    ssh_username=self.ssh_username,
+                    ssh_password=self.ssh_password or "",
+                    ssh_key_path=self.ssh_key_path or "",
+                )
+            ]
+        return []
 
     def masked_token_id(self) -> str:
         """Return token ID with secret portion masked."""

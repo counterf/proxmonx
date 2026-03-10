@@ -30,11 +30,20 @@ class TestIsVersionCmdSafe:
     def test_valid_simple_command(self) -> None:
         assert SSHClient._is_version_cmd_safe("myapp --version") is True
 
-    def test_valid_with_pipe(self) -> None:
+    def test_allow_pipe_to_safe_filter(self) -> None:
         assert SSHClient._is_version_cmd_safe("myapp --version | head -1") is True
 
-    def test_valid_with_flags(self) -> None:
+    def test_allow_pipe_to_awk(self) -> None:
+        assert SSHClient._is_version_cmd_safe("traefik version | awk '/^Version:/ {print $2}'") is True
+
+    def test_allow_pipe_to_tail(self) -> None:
         assert SSHClient._is_version_cmd_safe("dpkg -l sonarr | tail -1") is True
+
+    def test_reject_pipe_to_unsafe_command(self) -> None:
+        assert SSHClient._is_version_cmd_safe("myapp --version | bash") is False
+
+    def test_reject_pipe_to_sh(self) -> None:
+        assert SSHClient._is_version_cmd_safe("echo test | sh -c 'id'") is False
 
     def test_reject_empty(self) -> None:
         assert SSHClient._is_version_cmd_safe("") is False

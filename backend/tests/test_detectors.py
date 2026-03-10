@@ -167,7 +167,7 @@ class TestInstalledVersion:
     @respx.mock
     @pytest.mark.asyncio
     async def test_bazarr_version(self) -> None:
-        respx.get("http://10.0.0.11:6767/api/bazarr/api/v1/system/status").mock(
+        respx.get("http://10.0.0.11:6767/api/system/status").mock(
             return_value=httpx.Response(200, json={"bazarr_version": "1.4.3"})
         )
         d = BazarrDetector()
@@ -264,7 +264,7 @@ class TestApiKeySupport:
     @respx.mock
     @pytest.mark.asyncio
     async def test_bazarr_with_api_key(self) -> None:
-        route = respx.get("http://10.0.0.11:6767/api/bazarr/api/v1/system/status").mock(
+        route = respx.get("http://10.0.0.11:6767/api/system/status").mock(
             return_value=httpx.Response(200, json={"bazarr_version": "1.4.3"})
         )
         d = BazarrDetector()

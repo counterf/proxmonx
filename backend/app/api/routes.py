@@ -1,12 +1,15 @@
 """API route definitions."""
 
+import hmac
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, field_validator
 
 from app.config import AppConfig, Settings
@@ -66,6 +69,20 @@ class AppConfigEntry(BaseModel):
         return v
 
 
+class ProxmoxHostSaveEntry(BaseModel):
+    id: str
+    label: str
+    host: str
+    token_id: str
+    token_secret: str | None = None  # None / "***" = keep current
+    node: str
+    verify_ssl: bool = False
+    ssh_username: str = "root"
+    ssh_password: str | None = None
+    ssh_key_path: str | None = None
+    pct_exec_enabled: bool = False
+
+
 class SettingsSaveRequest(BaseModel):
     proxmox_host: str
     proxmox_token_id: str
@@ -80,7 +97,9 @@ class SettingsSaveRequest(BaseModel):
     ssh_password: str | None = None
     github_token: str | None = None
     log_level: str = "info"
+    version_detect_method: str = "pct_first"
     app_config: dict[str, AppConfigEntry] | None = None
+    proxmox_hosts: list[ProxmoxHostSaveEntry] | None = None
 
     @field_validator("proxmox_host")
     @classmethod
@@ -131,6 +150,7 @@ class ConnectionTestRequest(BaseModel):
     proxmox_token_secret: str
     proxmox_node: str
     verify_ssl: bool = False
+    host_id: str | None = None
 
 
 # --- Dependency placeholders ---
@@ -149,6 +169,33 @@ def _get_settings():
 def _get_config_store():
     """Dependency placeholder -- overridden in main.py."""
     raise RuntimeError("ConfigStore not initialized")
+
+
+_api_key_header = APIKeyHeader(name="X-Api-Key", auto_error=False)
+
+
+async def _require_api_key(
+    request: Request,
+    x_api_key: str | None = Depends(_api_key_header),
+) -> None:
+    """Validate API key on mutating endpoints when PROXMON_API_KEY is set.
+
+    Accepts the key via ``Authorization: Bearer <token>`` or ``X-Api-Key: <token>``.
+    If PROXMON_API_KEY is not configured, authentication is skipped (backwards compatible).
+    """
+    expected = os.environ.get("PROXMON_API_KEY")
+    if not expected:
+        return  # no key configured -- allow all requests
+
+    # Check X-Api-Key header first, then Authorization: Bearer
+    token = x_api_key
+    if not token:
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            token = auth[7:].strip()
+
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
 # --- Existing endpoints ---
@@ -203,7 +250,7 @@ async def get_guest(guest_id: str, scheduler=Depends(_get_scheduler)) -> GuestDe
     return guest.to_detail()
 
 
-@router.post("/api/refresh", status_code=202)
+@router.post("/api/refresh", status_code=202, dependencies=[Depends(_require_api_key)])
 async def refresh(scheduler=Depends(_get_scheduler)) -> dict[str, str]:
     """Trigger an immediate re-discovery cycle."""
     if scheduler is None:
@@ -250,6 +297,23 @@ async def get_full_settings(
             "ssh_key_path": cfg.ssh_key_path,
             "ssh_password": "***" if cfg.ssh_password else None,
         }
+    # Mask secrets in proxmox_hosts
+    masked_hosts = []
+    for h in settings.proxmox_hosts:
+        masked_hosts.append({
+            "id": h.id,
+            "label": h.label,
+            "host": h.host,
+            "token_id": h.token_id,
+            "token_secret": "***" if h.token_secret else None,
+            "node": h.node,
+            "verify_ssl": h.verify_ssl,
+            "ssh_username": h.ssh_username,
+            "ssh_password": "***" if h.ssh_password else None,
+            "ssh_key_path": h.ssh_key_path,
+            "pct_exec_enabled": h.pct_exec_enabled,
+        })
+
     return {
         "proxmox_host": settings.proxmox_host,
         "proxmox_token_id": settings.proxmox_token_id,
@@ -264,11 +328,13 @@ async def get_full_settings(
         "ssh_password": "***" if settings.ssh_password else None,
         "github_token": "***" if settings.github_token else None,
         "log_level": settings.log_level,
+        "version_detect_method": settings.version_detect_method,
         "app_config": masked_app_config,
+        "proxmox_hosts": masked_hosts,
     }
 
 
-@router.post("/api/settings/test-connection")
+@router.post("/api/settings/test-connection", dependencies=[Depends(_require_api_key)])
 async def test_connection(
     body: ConnectionTestRequest,
 ) -> dict[str, bool | str | dict[str, str | int | float | bool | None] | None]:
@@ -350,7 +416,7 @@ def _keep_or_replace(incoming: str | None, existing: str | None) -> str | None:
     return incoming
 
 
-@router.post("/api/settings")
+@router.post("/api/settings", dependencies=[Depends(_require_api_key)])
 async def save_settings(
     body: SettingsSaveRequest,
     request: Request,
@@ -362,15 +428,16 @@ async def save_settings(
     # Read existing config once to avoid TOCTOU and preserve values
     current_file = config_store.load()
 
-    # If token_secret is None, keep current value
-    token_secret = body.proxmox_token_secret
-    if token_secret is None:
-        token_secret = current_file.get("proxmox_token_secret") or settings.proxmox_token_secret
-        if not token_secret:
-            raise HTTPException(
-                status_code=422,
-                detail="Token secret is required (no existing value found)",
-            )
+    # If token_secret is None, empty, or masked sentinel, keep current value
+    token_secret = _keep_or_replace(
+        body.proxmox_token_secret,
+        current_file.get("proxmox_token_secret") or settings.proxmox_token_secret,
+    )
+    if not token_secret:
+        raise HTTPException(
+            status_code=422,
+            detail="Token secret is required (no existing value found)",
+        )
 
     # Build config data to persist
     config_data: dict[str, Any] = {
@@ -387,7 +454,36 @@ async def save_settings(
         "ssh_password": _keep_or_replace(body.ssh_password, current_file.get("ssh_password")),
         "github_token": _keep_or_replace(body.github_token, current_file.get("github_token")),
         "log_level": body.log_level,
+        "version_detect_method": body.version_detect_method,
     }
+
+    # Multi-host support
+    if body.proxmox_hosts:
+        existing_hosts: list[dict] = current_file.get("proxmox_hosts", [])
+        saved_hosts = []
+        for entry in body.proxmox_hosts:
+            existing = next((h for h in existing_hosts if h.get("id") == entry.id), {})
+            saved_hosts.append({
+                "id": entry.id,
+                "label": entry.label,
+                "host": entry.host,
+                "token_id": entry.token_id,
+                "token_secret": _keep_or_replace(entry.token_secret, existing.get("token_secret")),
+                "node": entry.node,
+                "verify_ssl": entry.verify_ssl,
+                "ssh_username": entry.ssh_username,
+                "ssh_password": _keep_or_replace(entry.ssh_password, existing.get("ssh_password")),
+                "ssh_key_path": entry.ssh_key_path or existing.get("ssh_key_path") or "",
+                "pct_exec_enabled": entry.pct_exec_enabled,
+            })
+        config_data["proxmox_hosts"] = saved_hosts
+        # Also write first host as flat fields for backward compat
+        if saved_hosts:
+            first = saved_hosts[0]
+            config_data["proxmox_host"] = first["host"]
+            config_data["proxmox_token_id"] = first["token_id"]
+            config_data["proxmox_token_secret"] = first["token_secret"]
+            config_data["proxmox_node"] = first["node"]
 
     # Merge app_config: preserve existing API keys when client sends "***" or null
     if body.app_config is not None:

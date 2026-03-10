@@ -9,6 +9,9 @@ interface FilterBarProps {
   onTypeChange: (value: GuestType | 'all') => void;
   resultCount: number;
   totalCount: number;
+  hosts?: Map<string, string>;
+  hostFilter?: string;
+  onHostChange?: (value: string) => void;
 }
 
 export default function FilterBar({
@@ -20,8 +23,11 @@ export default function FilterBar({
   onTypeChange,
   resultCount,
   totalCount,
+  hosts,
+  hostFilter = 'all',
+  onHostChange,
 }: FilterBarProps) {
-  const hasActiveFilters = search !== '' || statusFilter !== 'all' || typeFilter !== 'all';
+  const hasActiveFilters = search !== '' || statusFilter !== 'all' || typeFilter !== 'all' || hostFilter !== 'all';
 
   return (
     <div className="space-y-2">
@@ -55,10 +61,23 @@ export default function FilterBar({
           <option value="lxc">LXC</option>
           <option value="vm">VM</option>
         </select>
+        {hosts && hosts.size > 1 && onHostChange && (
+          <select
+            value={hostFilter}
+            onChange={(e) => onHostChange(e.target.value)}
+            aria-label="Filter by host"
+            className="flex-1 sm:flex-none px-3 py-1.5 text-sm rounded bg-gray-800 border border-gray-700 text-gray-200 focus:outline-none focus:border-blue-500"
+          >
+            <option value="all">All hosts</option>
+            {Array.from(hosts.entries()).map(([id, label]) => (
+              <option key={id} value={id}>{label}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {hasActiveFilters && (
-        <div className="flex items-center gap-2" aria-live="polite">
+        <div className="flex items-center gap-2 flex-wrap" aria-live="polite">
           <span className="text-xs text-gray-500">
             Showing {resultCount} of {totalCount} guests
           </span>
@@ -78,6 +97,12 @@ export default function FilterBar({
             <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300">
               Type: {typeFilter}
               <button onClick={() => onTypeChange('all')} className="text-gray-500 hover:text-white" aria-label="Clear type filter">x</button>
+            </span>
+          )}
+          {hostFilter !== 'all' && onHostChange && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300">
+              Host: {hosts?.get(hostFilter) || hostFilter}
+              <button onClick={() => onHostChange('all')} className="text-gray-500 hover:text-white" aria-label="Clear host filter">x</button>
             </span>
           )}
         </div>
