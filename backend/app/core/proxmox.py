@@ -90,38 +90,58 @@ class ProxmoxClient:
             tags_raw = str(raw.get("tags", ""))
             tags = [t.strip() for t in tags_raw.replace(";", ",").split(",") if t.strip()]
 
+            disk_used = int(raw.get("disk", 0)) or None
+            disk_total = int(raw.get("maxdisk", 0)) or None
+
             return GuestInfo(
                 id=vmid,
                 name=name,
                 type=guest_type,  # type: ignore[arg-type]
                 status=status,  # type: ignore[arg-type]
                 tags=tags,
+                disk_used=disk_used,
+                disk_total=disk_total,
             )
         except Exception:
             logger.exception("Failed to parse guest: %s", raw)
             return None
 
-    async def get_guest_network(self, vmid: str, guest_type: str) -> str | None:
-        """Attempt to resolve a guest's IP address from Proxmox API.
+    async def get_guest_network(self, vmid: str, guest_type: str) -> tuple[str | None, str | None]:
+        """Resolve a guest's IP address and OS type from the Proxmox API.
+
+        Returns (ip, os_type).
 
         Strategy 1: parse static IP from LXC/VM config (net0 ip= field).
         Strategy 2: query /interfaces endpoint for live IPs (works with DHCP).
         """
         endpoint = "lxc" if guest_type == "lxc" else "qemu"
+        os_type: str | None = None
+        ip: str | None = None
+
         try:
             data = await self._get(f"/nodes/{self._node}/{endpoint}/{vmid}/config")
             config = data.get("data", {})
             if isinstance(config, dict):
+                raw_os = config.get("ostype")
+                if raw_os:
+                    os_type = str(raw_os)
+
                 for key in ["net0", "net1", "ipconfig0", "ipconfig1"]:
                     net_str = str(config.get(key, ""))
                     if "ip=" in net_str:
                         for part in net_str.split(","):
                             if part.startswith("ip="):
-                                ip = part[3:].split("/")[0]
-                                if ip and ip != "dhcp":
-                                    return ip
+                                candidate = part[3:].split("/")[0]
+                                if candidate and candidate != "dhcp":
+                                    ip = candidate
+                                    break
+                    if ip:
+                        break
         except Exception:
             logger.debug("Could not resolve IP from config for guest %s", vmid)
+
+        if ip:
+            return ip, os_type
 
         # Fallback: live interface list (handles DHCP-assigned IPs)
         try:
@@ -134,13 +154,13 @@ class ProxmoxClient:
                     name = str(iface.get("name", ""))
                     inet = str(iface.get("inet", ""))
                     if inet and name != "lo" and not inet.startswith("127."):
-                        ip = inet.split("/")[0]
-                        if ip:
-                            return ip
+                        candidate = inet.split("/")[0]
+                        if candidate:
+                            return candidate, os_type
         except Exception:
             logger.debug("Could not resolve IP from interfaces for guest %s", vmid)
 
-        return None
+        return None, os_type
 
     async def check_connection(self) -> bool:
         """Test connectivity to the Proxmox API."""

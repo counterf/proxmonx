@@ -13,6 +13,76 @@ from app.core.proxmox import ProxmoxClient
 from app.core.ssh import SSHClient
 
 
+class TestResolveConfig:
+    """Tests for the _resolve_config layered config resolution."""
+
+    def _make_engine(self, **settings_overrides: Any) -> DiscoveryEngine:
+        defaults: dict[str, Any] = {
+            "proxmox_host": "https://pve.local:8006",
+            "proxmox_token_id": "test@pve!token",
+            "proxmox_token_secret": "secret",
+            "proxmox_node": "pve",
+            "ssh_enabled": False,
+        }
+        defaults.update(settings_overrides)
+        settings = Settings(**defaults)
+        return DiscoveryEngine(
+            ProxmoxClient(settings), GitHubClient(settings),
+            SSHClient(settings), settings=settings,
+        )
+
+    def test_defaults_when_no_config(self) -> None:
+        engine = self._make_engine()
+        port, api_key, scheme, *_ = engine._resolve_config("sonarr", "default:100")
+        assert port is None
+        assert api_key is None
+        assert scheme == "http"
+
+    def test_app_config_applies(self) -> None:
+        engine = self._make_engine(
+            app_config={"sonarr": AppConfig(port=9999, api_key="app-key", scheme="https")}
+        )
+        port, api_key, scheme, *_ = engine._resolve_config("sonarr", "default:100")
+        assert port == 9999
+        assert api_key == "app-key"
+        assert scheme == "https"
+
+    def test_guest_config_overrides_app_config(self) -> None:
+        engine = self._make_engine(
+            app_config={"sonarr": AppConfig(port=9999, api_key="app-key", scheme="https")},
+            guest_config={"default:100": AppConfig(api_key="guest-key")},
+        )
+        port, api_key, scheme, *_ = engine._resolve_config("sonarr", "default:100")
+        assert port == 9999  # inherited from app_config
+        assert api_key == "guest-key"  # overridden by guest_config
+        assert scheme == "https"  # inherited from app_config
+
+    def test_guest_config_port_override(self) -> None:
+        engine = self._make_engine(
+            app_config={"sonarr": AppConfig(port=8989)},
+            guest_config={"default:100": AppConfig(port=7777)},
+        )
+        port, api_key, *_ = engine._resolve_config("sonarr", "default:100")
+        assert port == 7777
+        assert api_key is None
+
+    def test_guest_config_without_app_config(self) -> None:
+        engine = self._make_engine(
+            guest_config={"default:100": AppConfig(api_key="solo-key", scheme="https")},
+        )
+        port, api_key, scheme, *_ = engine._resolve_config("sonarr", "default:100")
+        assert port is None
+        assert api_key == "solo-key"
+        assert scheme == "https"
+
+    def test_unrelated_guest_id_not_applied(self) -> None:
+        engine = self._make_engine(
+            guest_config={"default:200": AppConfig(api_key="other-key")},
+        )
+        _, api_key, *_ = engine._resolve_config("sonarr", "default:100")
+        assert api_key is None
+
+
 def _make_settings(**overrides: Any) -> Settings:
     defaults: dict[str, Any] = {
         "proxmox_host": "https://pve.local:8006",

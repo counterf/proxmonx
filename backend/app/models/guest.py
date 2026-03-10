@@ -94,6 +94,9 @@ class GuestSummary(BaseModel):
     github_repo_queried: str | None = None
     github_lookup_status: str | None = None
     latest_version_source: str | None = None
+    disk_used: int | None = None
+    disk_total: int | None = None
+    os_type: str | None = None
 
 
 class GuestDetail(GuestSummary):
@@ -140,6 +143,11 @@ class GuestInfo(BaseModel):
     github_lookup_status: str | None = None
     # Where the latest version came from: "github", "custom", or None
     latest_version_source: str | None = None
+    # Disk usage reported by Proxmox (bytes); None when unavailable
+    disk_used: int | None = None
+    disk_total: int | None = None
+    # OS type from Proxmox config (e.g. "debian", "alpine", "ubuntu")
+    os_type: str | None = None
 
     def _web_url(self) -> str | None:
         return _build_web_url(
@@ -168,6 +176,9 @@ class GuestInfo(BaseModel):
             github_repo_queried=self.github_repo_queried,
             github_lookup_status=self.github_lookup_status,
             latest_version_source=self.latest_version_source,
+            disk_used=self.disk_used,
+            disk_total=self.disk_total,
+            os_type=self.os_type,
         )
 
     def to_detail(self) -> GuestDetail:
@@ -194,4 +205,7 @@ class GuestInfo(BaseModel):
             github_repo_queried=self.github_repo_queried,
             github_lookup_status=self.github_lookup_status,
             latest_version_source=self.latest_version_source,
+            disk_used=self.disk_used,
+            disk_total=self.disk_total,
+            os_type=self.os_type,
         )

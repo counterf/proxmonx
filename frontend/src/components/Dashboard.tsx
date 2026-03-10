@@ -6,8 +6,10 @@ import FilterBar from './FilterBar';
 import { GuestTableRow, GuestCard } from './GuestRow';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorBanner from './ErrorBanner';
+import ColumnToggle from './ColumnToggle';
+import { useColumnVisibility, COLUMN_DEFS, type ColumnKey } from '../hooks/useColumnVisibility';
 
-type SortColumn = 'name' | 'type' | 'app_name' | 'installed_version' | 'latest_version' | 'update_status' | 'last_checked' | 'host_label';
+type SortColumn = ColumnKey;
 type SortDirection = 'asc' | 'desc';
 
 function compareSemver(a: string, b: string): number {
@@ -24,7 +26,22 @@ function compareSemver(a: string, b: string): number {
   return 0;
 }
 
+function diskPercent(g: GuestSummary): number | null {
+  if (g.disk_used == null || g.disk_total == null || g.disk_total === 0) return null;
+  return g.disk_used / g.disk_total;
+}
+
 function compareGuests(a: GuestSummary, b: GuestSummary, col: SortColumn, dir: SortDirection): number {
+  if (col === 'disk') {
+    const da = diskPercent(a);
+    const db = diskPercent(b);
+    if (da == null && db == null) return 0;
+    if (da == null) return 1;
+    if (db == null) return -1;
+    const cmp = da - db;
+    return dir === 'desc' ? -cmp : cmp;
+  }
+
   const getVal = (g: GuestSummary): string | null => {
     switch (col) {
       case 'name': return g.name;
@@ -35,6 +52,8 @@ function compareGuests(a: GuestSummary, b: GuestSummary, col: SortColumn, dir: S
       case 'update_status': return g.update_status;
       case 'last_checked': return g.last_checked;
       case 'host_label': return g.host_label;
+      case 'version_detection_method': return g.version_detection_method;
+      case 'os_type': return g.os_type;
       default: return null;
     }
   };
@@ -158,7 +177,9 @@ export default function Dashboard() {
     return map;
   }, [guests]);
 
-  const showHostCol = uniqueHosts.size > 1 || (uniqueHosts.size === 1 && !uniqueHosts.has('default'));
+  const hasMultipleHosts = uniqueHosts.size > 1 || (uniqueHosts.size === 1 && !uniqueHosts.has('default'));
+
+  const { visibleColumns, toggleColumn, resetToDefaults } = useColumnVisibility();
 
   const filtered = useMemo(() => {
     return guests.filter((g) => {
@@ -183,20 +204,27 @@ export default function Dashboard() {
   const outdatedCount = guests.filter((g) => g.update_status === 'outdated').length;
   const unknownCount = guests.filter((g) => g.update_status === 'unknown').length;
 
+  const activeColumns = useMemo(() => {
+    const cols = COLUMN_DEFS.filter((c) => {
+      if (!visibleColumns.has(c.key)) return false;
+      if (c.key === 'host_label' && !hasMultipleHosts) return false;
+      return true;
+    });
+    const actionsWeight = 1.2;
+    const totalWeight = cols.reduce((sum, c) => sum + c.weight, 0) + actionsWeight;
+    return {
+      cols: cols.map((c) => ({
+        key: c.key as SortColumn,
+        label: c.label,
+        width: `${((c.weight / totalWeight) * 100).toFixed(1)}%`,
+      })),
+      actionsWidth: `${((actionsWeight / totalWeight) * 100).toFixed(1)}%`,
+    };
+  }, [visibleColumns, hasMultipleHosts]);
+
   if (loading) {
     return <LoadingSpinner text="Loading guests..." />;
   }
-
-  const sortableColumns: { key: SortColumn; label: string; width: string }[] = [
-    { key: 'name', label: 'Guest Name', width: showHostCol ? '18%' : '20%' },
-    { key: 'type', label: 'Type', width: '6%' },
-    ...(showHostCol ? [{ key: 'host_label' as SortColumn, label: 'Host', width: '10%' }] : []),
-    { key: 'app_name', label: 'App', width: showHostCol ? '14%' : '16%' },
-    { key: 'installed_version', label: 'Installed', width: '12%' },
-    { key: 'latest_version', label: 'Latest', width: '12%' },
-    { key: 'update_status', label: 'Status', width: '10%' },
-    { key: 'last_checked', label: 'Last Checked', width: showHostCol ? '10%' : '14%' },
-  ];
 
   return (
     <div className="space-y-4">
@@ -224,6 +252,8 @@ export default function Dashboard() {
             )}
             {refreshing ? 'Refreshing...' : 'Refresh'}
           </button>
+
+          <ColumnToggle visibleColumns={visibleColumns} onToggle={toggleColumn} onReset={resetToDefaults} />
 
           {/* Health badges */}
           {outdatedCount > 0 && (
@@ -300,7 +330,7 @@ export default function Dashboard() {
               <caption className="sr-only">Proxmox guests</caption>
               <thead className="bg-surface border-b border-gray-800">
                 <tr>
-                  {sortableColumns.map((col) => (
+                  {activeColumns.cols.map((col) => (
                     <th
                       key={col.key}
                       scope="col"
@@ -313,12 +343,12 @@ export default function Dashboard() {
                       <SortIcon active={sortColumn === col.key} direction={sortDirection} />
                     </th>
                   ))}
-                  <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: '8%' }}>Actions</th>
+                  <th scope="col" className="px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider" style={{ width: activeColumns.actionsWidth }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {sorted.map((guest) => (
-                  <GuestTableRow key={guest.id} guest={guest} showHostCol={showHostCol} />
+                  <GuestTableRow key={guest.id} guest={guest} visibleColumns={visibleColumns} />
                 ))}
               </tbody>
             </table>

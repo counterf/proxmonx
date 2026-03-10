@@ -8,6 +8,7 @@ import type {
   SettingsSaveRequest,
   ConnectionTestResult,
   AppConfigDefault,
+  AppConfigEntry,
 } from '../types';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -103,4 +104,27 @@ export async function saveSettings(
 
 export async function fetchAppConfigDefaults(): Promise<AppConfigDefault[]> {
   return fetchJson<AppConfigDefault[]>('/api/app-config/defaults');
+}
+
+export async function fetchGuestConfig(id: string): Promise<AppConfigEntry> {
+  return fetchJson<AppConfigEntry>(`/api/guests/${encodeURIComponent(id)}/config`);
+}
+
+export async function saveGuestConfig(
+  id: string,
+  data: AppConfigEntry,
+): Promise<{ status: string }> {
+  return fetchJson<{ status: string }>(`/api/guests/${encodeURIComponent(id)}/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteGuestConfig(
+  id: string,
+): Promise<{ status: string }> {
+  return fetchJson<{ status: string }>(`/api/guests/${encodeURIComponent(id)}/config`, {
+    method: 'DELETE',
+  });
 }

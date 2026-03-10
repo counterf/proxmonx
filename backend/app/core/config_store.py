@@ -187,6 +187,18 @@ class ConfigStore:
                         else:
                             merged_apps[k] = v
                     current["app_config"] = merged_apps
+            elif key == "guest_config":
+                if isinstance(value, dict):
+                    merged_guests: dict = {}
+                    for k, v in value.items():
+                        if isinstance(v, dict):
+                            try:
+                                merged_guests[k] = AppConfig(**v)
+                            except Exception as exc:
+                                logger.warning("Skipping invalid guest_config entry '%s': %s", k, exc)
+                        else:
+                            merged_guests[k] = v
+                    current["guest_config"] = merged_guests
             elif key == "proxmox_hosts":
                 if isinstance(value, list):
                     merged_hosts: list = []

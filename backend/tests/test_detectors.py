@@ -107,6 +107,17 @@ class TestInstalledVersion:
 
     @respx.mock
     @pytest.mark.asyncio
+    async def test_immich_with_api_key(self) -> None:
+        route = respx.get("http://10.0.0.4:2283/api/server/about").mock(
+            return_value=httpx.Response(200, json={"version": "v1.94.1"})
+        )
+        d = ImmichDetector()
+        version = await d.get_installed_version("10.0.0.4", api_key="immich-key")
+        assert version == "1.94.1"
+        assert route.calls[0].request.headers["x-api-key"] == "immich-key"
+
+    @respx.mock
+    @pytest.mark.asyncio
     async def test_gitea_version(self) -> None:
         respx.get("http://10.0.0.5:3000/api/v1/version").mock(
             return_value=httpx.Response(200, json={"version": "1.22.0"})
@@ -228,7 +239,7 @@ class TestApiKeySupport:
         assert SABnzbdDetector().accepts_api_key is True
         assert SeerDetector().accepts_api_key is True
         assert PlexDetector().accepts_api_key is False
-        assert ImmichDetector().accepts_api_key is False
+        assert ImmichDetector().accepts_api_key is True
 
     @respx.mock
     @pytest.mark.asyncio

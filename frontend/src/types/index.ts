@@ -19,6 +19,9 @@ export interface GuestSummary {
   detection_method: string | null;
   version_detection_method: string | null;
   latest_version_source: string | null;
+  disk_used: number | null;
+  disk_total: number | null;
+  os_type: string | null;
 }
 
 export interface VersionCheck {

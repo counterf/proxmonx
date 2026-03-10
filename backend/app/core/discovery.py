@@ -199,7 +199,7 @@ class DiscoveryEngine:
                         proxmox = self._proxmox
                     # Extract raw vmid from namespaced ID
                     raw_vmid = guest.id.split(":")[-1] if ":" in guest.id else guest.id
-                    guest.ip = await proxmox.get_guest_network(
+                    guest.ip, guest.os_type = await proxmox.get_guest_network(
                         raw_vmid, guest.type
                     )
 
@@ -322,6 +322,68 @@ class DiscoveryEngine:
                 }
                 return
 
+    def _resolve_config(
+        self, detector_name: str, guest_id: str,
+    ) -> tuple[
+        int | None, str | None, str,
+        str | None, str | None, str | None, str | None, str | None,
+    ]:
+        """Resolve effective config: guest_config -> app_config -> defaults.
+
+        Returns (port, api_key, scheme, github_repo, ssh_version_cmd,
+                 ssh_username, ssh_key_path, ssh_password).
+        """
+        port: int | None = None
+        api_key: str | None = None
+        scheme: str = "http"
+        github_repo: str | None = None
+        ssh_cmd: str | None = None
+        ssh_user: str | None = None
+        ssh_key: str | None = None
+        ssh_pass: str | None = None
+
+        # Layer 1: app-level defaults
+        if self._settings and self._settings.app_config:
+            app_cfg = self._settings.app_config.get(detector_name)
+            if app_cfg:
+                port = app_cfg.port
+                api_key = app_cfg.api_key
+                if app_cfg.scheme:
+                    scheme = app_cfg.scheme
+                github_repo = app_cfg.github_repo
+                ssh_cmd = app_cfg.ssh_version_cmd
+                ssh_user = app_cfg.ssh_username
+                ssh_key = app_cfg.ssh_key_path
+                ssh_pass = app_cfg.ssh_password
+
+        # Layer 2: guest-level overrides (non-null fields win)
+        if self._settings and self._settings.guest_config:
+            guest_cfg = self._settings.guest_config.get(guest_id)
+            if guest_cfg:
+                if guest_cfg.port is not None:
+                    port = guest_cfg.port
+                if guest_cfg.api_key is not None:
+                    api_key = guest_cfg.api_key
+                if guest_cfg.scheme is not None:
+                    scheme = guest_cfg.scheme
+                if guest_cfg.github_repo is not None:
+                    github_repo = guest_cfg.github_repo
+                if guest_cfg.ssh_version_cmd is not None:
+                    ssh_cmd = guest_cfg.ssh_version_cmd
+                if guest_cfg.ssh_username is not None:
+                    ssh_user = guest_cfg.ssh_username
+                if guest_cfg.ssh_key_path is not None:
+                    ssh_key = guest_cfg.ssh_key_path
+                if guest_cfg.ssh_password is not None:
+                    ssh_pass = guest_cfg.ssh_password
+
+        logger.debug(
+            "Resolved config for %s (guest %s): port=%s, api_key=%s, scheme=%s",
+            detector_name, guest_id,
+            port or "default", "set" if api_key else "none", scheme,
+        )
+        return port, api_key, scheme, github_repo, ssh_cmd, ssh_user, ssh_key, ssh_pass
+
     async def _check_version(
         self,
         guest: GuestInfo,
@@ -334,35 +396,10 @@ class DiscoveryEngine:
         if not detector or not guest.ip:
             return
 
-        # Look up per-app overrides from settings
-        port_override: int | None = None
-        api_key: str | None = None
-        scheme: str = "http"
-        github_repo_override: str | None = None
-        ssh_version_cmd: str | None = None
-        ssh_username: str | None = None
-        ssh_key_path: str | None = None
-        ssh_password: str | None = None
-        if self._settings and self._settings.app_config:
-            app_cfg = self._settings.app_config.get(detector.name)
-            if app_cfg:
-                port_override = app_cfg.port
-                api_key = app_cfg.api_key
-                if app_cfg.scheme:
-                    scheme = app_cfg.scheme
-                github_repo_override = app_cfg.github_repo
-                ssh_version_cmd = app_cfg.ssh_version_cmd
-                ssh_username = app_cfg.ssh_username
-                ssh_key_path = app_cfg.ssh_key_path
-                ssh_password = app_cfg.ssh_password
-                logger.debug(
-                    "Using overrides for %s: port=%s, api_key=%s, scheme=%s, github_repo=%s",
-                    detector.name,
-                    port_override or "default",
-                    "set" if api_key else "none",
-                    scheme,
-                    github_repo_override or "default",
-                )
+        # Resolve config: guest-level -> app-level -> detector defaults
+        port_override, api_key, scheme, github_repo_override, \
+            ssh_version_cmd, ssh_username, ssh_key_path, ssh_password = \
+            self._resolve_config(detector.name, guest.id)
 
         # Store the effective port and scheme so GuestInfo._web_url() (in guest.py)
         # can build the correct URL.
@@ -387,28 +424,27 @@ class DiscoveryEngine:
                 "Version probe failed for %s on %s", detector.name, guest.name
             )
 
-        # If HTTP succeeded and no ssh_version_cmd is configured, skip CLI methods
-        if not ssh_version_cmd:
-            pass
-        elif detect_method == "pct_first":
-            await self._try_pct_then_ssh(
-                guest, host_config, ssh_version_cmd,
-                ssh_username, ssh_key_path, ssh_password,
-            )
-        elif detect_method == "ssh_first":
-            await self._try_ssh_then_pct(
-                guest, host_config, ssh_version_cmd,
-                ssh_username, ssh_key_path, ssh_password,
-            )
-        elif detect_method == "pct_only":
-            await self._try_pct_exec(
-                guest, host_config, ssh_version_cmd,
-            )
-        elif detect_method == "ssh_only":
-            await self._try_ssh(
-                guest, ssh_version_cmd,
-                ssh_username, ssh_key_path, ssh_password,
-            )
+        # CLI fallback: only attempt if API probe did not obtain a version
+        if not guest.installed_version and ssh_version_cmd:
+            if detect_method == "pct_first":
+                await self._try_pct_then_ssh(
+                    guest, host_config, ssh_version_cmd,
+                    ssh_username, ssh_key_path, ssh_password,
+                )
+            elif detect_method == "ssh_first":
+                await self._try_ssh_then_pct(
+                    guest, host_config, ssh_version_cmd,
+                    ssh_username, ssh_key_path, ssh_password,
+                )
+            elif detect_method == "pct_only":
+                await self._try_pct_exec(
+                    guest, host_config, ssh_version_cmd,
+                )
+            elif detect_method == "ssh_only":
+                await self._try_ssh(
+                    guest, ssh_version_cmd,
+                    ssh_username, ssh_key_path, ssh_password,
+                )
 
         # Get latest version: try detector's custom source first, then GitHub
         custom_latest = await detector.get_latest_version(http_client=self._http_client)

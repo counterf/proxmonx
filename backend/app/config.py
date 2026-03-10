@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     # Per-app overrides (port and API key)
     app_config: dict[str, AppConfig] = {}
 
+    # Per-guest overrides keyed by guest ID (e.g. "1773123726644:100")
+    guest_config: dict[str, AppConfig] = {}
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
     def get_hosts(self) -> list[ProxmoxHostConfig]:

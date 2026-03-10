@@ -265,6 +265,101 @@ async def get_guest(guest_id: str, scheduler=Depends(_get_scheduler)) -> GuestDe
     return guest.to_detail()
 
 
+class GuestConfigSaveRequest(BaseModel):
+    port: int | None = None
+    api_key: str | None = None
+    scheme: str | None = None
+    github_repo: str | None = None
+    ssh_version_cmd: str | None = None
+    ssh_username: str | None = None
+    ssh_key_path: str | None = None
+    ssh_password: str | None = None
+
+
+@router.get("/api/guests/{guest_id}/config")
+async def get_guest_config(
+    guest_id: str,
+    config_store=Depends(_get_config_store),
+) -> dict[str, Any]:
+    """Return per-guest config overrides (API keys masked)."""
+    data = config_store.load()
+    guest_cfg = data.get("guest_config", {}).get(guest_id, {})
+    if guest_cfg.get("api_key"):
+        guest_cfg = dict(guest_cfg)
+        guest_cfg["api_key"] = "***"
+    return guest_cfg
+
+
+def _reload_settings_into_engine(request: Request, config_store) -> None:
+    """Reload settings from DB and update the discovery engine's reference."""
+    new_settings = config_store.merge_into_settings(Settings())
+    request.app.dependency_overrides[_get_settings] = lambda: new_settings
+    scheduler = request.app.dependency_overrides.get(_get_scheduler, lambda: None)()
+    if scheduler and hasattr(scheduler, '_engine'):
+        scheduler._engine._settings = new_settings
+
+
+@router.put("/api/guests/{guest_id}/config", dependencies=[Depends(_require_api_key)])
+async def save_guest_config(
+    guest_id: str,
+    body: GuestConfigSaveRequest,
+    request: Request,
+    config_store=Depends(_get_config_store),
+) -> dict[str, str]:
+    """Save per-guest configuration overrides."""
+    data = config_store.load()
+    all_guest_cfg: dict = data.get("guest_config", {})
+    prev = all_guest_cfg.get(guest_id, {})
+
+    merged: dict[str, Any] = {}
+    if body.port is not None:
+        merged["port"] = body.port
+    if body.scheme is not None and body.scheme != "":
+        merged["scheme"] = body.scheme
+    if body.github_repo is not None and body.github_repo != "":
+        merged["github_repo"] = body.github_repo
+    if body.ssh_version_cmd is not None and body.ssh_version_cmd != "":
+        merged["ssh_version_cmd"] = body.ssh_version_cmd
+    if body.ssh_username is not None and body.ssh_username != "":
+        merged["ssh_username"] = body.ssh_username
+
+    merged["api_key"] = _keep_or_replace(body.api_key, prev.get("api_key"))
+    merged["ssh_key_path"] = _keep_or_replace(body.ssh_key_path, prev.get("ssh_key_path"))
+    merged["ssh_password"] = _keep_or_replace(body.ssh_password, prev.get("ssh_password"))
+
+    # Strip None values
+    merged = {k: v for k, v in merged.items() if v is not None}
+
+    if merged:
+        all_guest_cfg[guest_id] = merged
+    elif guest_id in all_guest_cfg:
+        del all_guest_cfg[guest_id]
+
+    data["guest_config"] = all_guest_cfg
+    config_store.save(data)
+    _reload_settings_into_engine(request, config_store)
+    logger.info("Guest config saved for %s", guest_id)
+    return {"status": "saved"}
+
+
+@router.delete("/api/guests/{guest_id}/config", dependencies=[Depends(_require_api_key)])
+async def delete_guest_config(
+    guest_id: str,
+    request: Request,
+    config_store=Depends(_get_config_store),
+) -> dict[str, str]:
+    """Remove all per-guest config overrides (reset to inherit from global)."""
+    data = config_store.load()
+    all_guest_cfg: dict = data.get("guest_config", {})
+    if guest_id in all_guest_cfg:
+        del all_guest_cfg[guest_id]
+        data["guest_config"] = all_guest_cfg
+        config_store.save(data)
+    _reload_settings_into_engine(request, config_store)
+    logger.info("Guest config cleared for %s", guest_id)
+    return {"status": "cleared"}
+
+
 @router.post("/api/refresh", status_code=202, dependencies=[Depends(_require_api_key)])
 async def refresh(scheduler=Depends(_get_scheduler)) -> dict[str, str]:
     """Trigger an immediate re-discovery cycle."""
@@ -312,6 +407,19 @@ async def get_full_settings(
             "ssh_key_path": cfg.ssh_key_path,
             "ssh_password": "***" if cfg.ssh_password else None,
         }
+    # Mask API keys in guest_config
+    masked_guest_config: dict[str, dict[str, Any]] = {}
+    for gid, cfg in settings.guest_config.items():
+        masked_guest_config[gid] = {
+            "port": cfg.port,
+            "api_key": "***" if cfg.api_key else None,
+            "scheme": cfg.scheme,
+            "github_repo": cfg.github_repo,
+            "ssh_version_cmd": cfg.ssh_version_cmd,
+            "ssh_username": cfg.ssh_username,
+            "ssh_key_path": cfg.ssh_key_path,
+            "ssh_password": "***" if cfg.ssh_password else None,
+        }
     # Mask secrets in proxmox_hosts
     masked_hosts = []
     for h in settings.proxmox_hosts:
@@ -345,6 +453,7 @@ async def get_full_settings(
         "log_level": settings.log_level,
         "version_detect_method": settings.version_detect_method,
         "app_config": masked_app_config,
+        "guest_config": masked_guest_config,
         "proxmox_hosts": masked_hosts,
     }
 
@@ -582,6 +691,11 @@ async def save_settings(
     else:
         # Preserve existing app_config when payload omits it
         config_data["app_config"] = current_file.get("app_config", {})
+
+    # Always preserve guest_config (managed via /api/guests/{id}/config)
+    existing_guest_config = current_file.get("guest_config")
+    if existing_guest_config:
+        config_data["guest_config"] = existing_guest_config
 
     # Write to config file
     try:
