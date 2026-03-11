@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import type { FullSettings, SettingsSaveRequest, ConnectionTestResult, AppConfigEntry, ProxmoxHost } from '../types';
-import { fetchFullSettings, saveSettings, testConnection, sendTestNotification } from '../api/client';
+import { fetchFullSettings, saveSettings, testConnection, sendTestNotification, changePassword } from '../api/client';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorBanner from './ErrorBanner';
 import FormField from './setup/FormField';
@@ -11,6 +11,7 @@ import ConnectionTestButton from './setup/ConnectionTestButton';
 import SuccessToast from './setup/SuccessToast';
 import AppConfigSection from './settings/AppConfigSection';
 import ProxmoxHostsSection from './settings/ProxmoxHostsSection';
+import SecuritySection from './settings/SecuritySection';
 
 const DETECTORS = [
   { name: 'sonarr', displayName: 'Sonarr' },
@@ -47,6 +48,8 @@ interface FormData {
   github_token: string;
   log_level: string;
   version_detect_method: string;
+  auth_mode: 'disabled' | 'forms';
+  auth_username: string;
   notifications_enabled: boolean;
   ntfy_url: string;
   ntfy_token: string;
@@ -76,6 +79,8 @@ function settingsToFormData(s: FullSettings): FormData {
     github_token: (s.github_token && s.github_token !== '***') ? s.github_token : '',
     log_level: s.log_level,
     version_detect_method: s.version_detect_method || 'pct_first',
+    auth_mode: s.auth_mode || 'forms',
+    auth_username: s.auth_username || 'root',
     notifications_enabled: s.notifications_enabled ?? false,
     ntfy_url: s.ntfy_url || '',
     ntfy_token: (s.ntfy_token && s.ntfy_token !== '***') ? s.ntfy_token : '',
@@ -143,6 +148,10 @@ export default function Settings() {
   // Multi-host
   const [proxmoxHosts, setProxmoxHosts] = useState<ProxmoxHost[]>([]);
   const [savedProxmoxHosts, setSavedProxmoxHosts] = useState<ProxmoxHost[]>([]);
+  // Auth password local state
+  const [authPasswordSet, setAuthPasswordSet] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   // Whether we use multi-host mode
   const useMultiHost = true;
 
@@ -152,6 +161,7 @@ export default function Settings() {
         const fd = settingsToFormData(s);
         setForm(fd);
         setSavedForm(fd);
+        setAuthPasswordSet(s.auth_password_set ?? false);
         // Load app config
         const ac = s.app_config || {};
         setAppConfigs(ac);
@@ -186,11 +196,13 @@ export default function Settings() {
     changedApiKeys.current.size > 0 ||
     JSON.stringify(appConfigs) !== JSON.stringify(savedAppConfigs);
   const hostsDirty = JSON.stringify(proxmoxHosts) !== JSON.stringify(savedProxmoxHosts);
+  const passwordDirty = newPassword !== '' || confirmPassword !== '';
   const isDirty =
     tokenSecretChanged.current ||
     ntfyTokenChanged.current ||
     appConfigDirty ||
     hostsDirty ||
+    passwordDirty ||
     (form !== null && savedForm !== null && JSON.stringify(form) !== JSON.stringify(savedForm));
 
   // beforeunload warning
@@ -236,9 +248,21 @@ export default function Settings() {
 
   const handleSave = async () => {
     if (!form || !validate()) return;
+    // Password validation
+    if (newPassword && newPassword !== confirmPassword) {
+      setSaveError('Passwords do not match');
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     try {
+      // Change password first if provided
+      if (newPassword) {
+        await changePassword(newPassword);
+        setNewPassword('');
+        setConfirmPassword('');
+        setAuthPasswordSet(true);
+      }
       // Build app_config payload: include all overridden fields
       const appConfigPayload: Record<string, AppConfigEntry> = {};
       for (const [name, cfg] of Object.entries(appConfigs)) {
@@ -296,6 +320,8 @@ export default function Settings() {
         github_token: form.github_token || null,
         log_level: form.log_level,
         version_detect_method: form.version_detect_method,
+        auth_mode: form.auth_mode,
+        auth_username: form.auth_username,
         app_config: Object.keys(appConfigPayload).length > 0 ? appConfigPayload : undefined,
         proxmox_hosts: hostsPayload,
         notifications_enabled: form.notifications_enabled,
@@ -371,6 +397,20 @@ export default function Settings() {
       </div>
 
       <h1 className="text-xl font-bold text-white">Settings</h1>
+
+      {/* Security */}
+      <SecuritySection
+        authMode={form.auth_mode}
+        authUsername={form.auth_username}
+        authPasswordSet={authPasswordSet}
+        newPassword={newPassword}
+        confirmPassword={confirmPassword}
+        onAuthModeChange={(v) => setField('auth_mode', v)}
+        onAuthUsernameChange={(v) => setField('auth_username', v)}
+        onNewPasswordChange={setNewPassword}
+        onConfirmPasswordChange={setConfirmPassword}
+        disabled={saving}
+      />
 
       {/* Proxmox Hosts (multi-host) */}
       {useMultiHost ? (

@@ -9,6 +9,7 @@ import type {
   ConnectionTestResult,
   AppConfigDefault,
   AppConfigEntry,
+  AuthStatus,
 } from '../types';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -28,6 +29,7 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   try {
     const response = await fetch(`${BASE_URL}${path}`, {
       ...options,
+      credentials: 'include',
       signal: controller.signal,
     });
     if (!response.ok) {
@@ -132,5 +134,31 @@ export async function deleteGuestConfig(
 export async function sendTestNotification(): Promise<{ success: boolean; message: string }> {
   return fetchJson<{ success: boolean; message: string }>('/api/notifications/test', {
     method: 'POST',
+  });
+}
+
+export async function fetchAuthStatus(): Promise<AuthStatus> {
+  return fetchJson<AuthStatus>('/api/auth/status');
+}
+
+export async function login(username: string, password: string): Promise<{ success: boolean }> {
+  return fetchJson<{ success: boolean }>('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export async function logout(): Promise<void> {
+  await fetchJson<{ success: boolean }>('/api/auth/logout', {
+    method: 'POST',
+  });
+}
+
+export async function changePassword(newPassword: string): Promise<{ success: boolean }> {
+  return fetchJson<{ success: boolean }>('/api/auth/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ new_password: newPassword }),
   });
 }

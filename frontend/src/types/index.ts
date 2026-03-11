@@ -120,6 +120,9 @@ export interface FullSettings {
   version_detect_method: string;
   app_config?: Record<string, AppConfigEntry>;
   proxmox_hosts: ProxmoxHost[];
+  auth_mode: 'disabled' | 'forms';
+  auth_username: string;
+  auth_password_set: boolean;
   notifications_enabled: boolean;
   ntfy_url: string | null;
   ntfy_token: string | null;
@@ -146,6 +149,8 @@ export interface SettingsSaveRequest {
   version_detect_method: string;
   app_config?: Record<string, AppConfigEntry>;
   proxmox_hosts?: ProxmoxHost[];
+  auth_mode?: 'disabled' | 'forms';
+  auth_username?: string;
   notifications_enabled?: boolean;
   ntfy_url?: string;
   ntfy_token?: string | null;
@@ -159,4 +164,9 @@ export interface ConnectionTestResult {
   success: boolean;
   message: string;
   node_info: Record<string, unknown> | null;
+}
+
+export interface AuthStatus {
+  auth_mode: 'disabled' | 'forms';
+  authenticated: boolean;
 }

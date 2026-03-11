@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     # Per-guest overrides keyed by guest ID (e.g. "1773123726644:100")
     guest_config: dict[str, AppConfig] = {}
 
+    # Authentication
+    auth_mode: str = "forms"  # "disabled" | "forms"
+    auth_username: str = "root"
+    # auth_password_hash is stored in the DB JSON blob only — never on Settings,
+    # to prevent accidental serialization of the hash.
+
     # Notifications
     notifications_enabled: bool = False
     ntfy_url: str = ""

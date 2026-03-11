@@ -139,6 +139,9 @@ class SettingsSaveRequest(BaseModel):
     version_detect_method: str = "pct_first"
     app_config: dict[str, AppConfigEntry] | None = None
     proxmox_hosts: list[ProxmoxHostSaveEntry] | None = None
+    # Authentication
+    auth_mode: str | None = None
+    auth_username: str | None = None
     # Notifications
     notifications_enabled: bool | None = None
     ntfy_url: str | None = None
@@ -575,6 +578,9 @@ async def get_full_settings(
         "app_config": masked_app_config,
         "guest_config": masked_guest_config,
         "proxmox_hosts": masked_hosts,
+        "auth_mode": settings.auth_mode,
+        "auth_username": settings.auth_username,
+        "auth_password_set": bool(settings.auth_password_hash),
         "notifications_enabled": settings.notifications_enabled,
         "ntfy_url": settings.ntfy_url,
         "ntfy_token": "***" if settings.ntfy_token else None,
@@ -707,6 +713,20 @@ async def save_settings(
         "log_level": body.log_level,
         "version_detect_method": body.version_detect_method,
     }
+
+    # Auth settings -- preserve existing values when not sent
+    if body.auth_mode is not None:
+        config_data["auth_mode"] = body.auth_mode
+    else:
+        config_data["auth_mode"] = current_file.get("auth_mode", "forms")
+    if body.auth_username is not None:
+        config_data["auth_username"] = body.auth_username
+    else:
+        config_data["auth_username"] = current_file.get("auth_username", "root")
+    # Always preserve the password hash (managed via /api/auth/change-password)
+    existing_hash = current_file.get("auth_password_hash", "")
+    if existing_hash:
+        config_data["auth_password_hash"] = existing_hash
 
     # Notification settings -- only overwrite when the client sends a value
     if body.notifications_enabled is not None:
