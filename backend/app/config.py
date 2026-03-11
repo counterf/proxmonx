@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings
+
+VersionDetectMethod = Literal["pct_first", "ssh_first", "ssh_only", "pct_only"]
 
 
 class AppConfig(BaseModel):
@@ -64,7 +68,15 @@ class Settings(BaseSettings):
     ssh_known_hosts_path: str = ""
 
     # Version detection strategy
-    version_detect_method: str = "pct_first"  # pct_first | ssh_first | ssh_only | pct_only
+    version_detect_method: VersionDetectMethod = "pct_first"
+
+    @field_validator("version_detect_method", mode="before")
+    @classmethod
+    def coerce_detect_method(cls, v: str) -> str:
+        allowed = {"pct_first", "ssh_first", "ssh_only", "pct_only"}
+        if v not in allowed:
+            return "pct_first"
+        return v
 
     # Application
     log_level: str = "info"

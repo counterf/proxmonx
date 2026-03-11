@@ -129,35 +129,44 @@ class DiscoveryEngine:
         logger.info("Starting discovery for host %s (%s)", host_config.label, host_config.host)
         start = datetime.now(timezone.utc)
 
-        # Build a per-host ProxmoxClient using a temporary Settings-like config
         settings = self._build_host_settings(host_config)
-        proxmox = ProxmoxClient(settings, http_client=self._http_client)
 
-        guests = await proxmox.list_guests()
-        logger.info("Host %s: discovered %d guests", host_config.label, len(guests))
+        # Per-host HTTP client respects the host's own verify_ssl setting
+        host_client = httpx.AsyncClient(
+            timeout=10.0,
+            verify=host_config.verify_ssl,
+            follow_redirects=True,
+        )
+        try:
+            proxmox = ProxmoxClient(settings, http_client=host_client)
 
-        # Namespace guest IDs and set host fields
-        for guest in guests:
-            guest.id = f"{host_config.id}:{guest.id}"
-            guest.host_id = host_config.id
-            guest.host_label = host_config.label
+            guests = await proxmox.list_guests()
+            logger.info("Host %s: discovered %d guests", host_config.label, len(guests))
 
-        tasks = [
-            self._process_guest(
-                guest,
-                existing_guests.get(guest.id),
-                host_config=host_config,
-            )
-            for guest in guests
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+            for guest in guests:
+                guest.id = f"{host_config.id}:{guest.id}"
+                guest.host_id = host_config.id
+                guest.host_label = host_config.label
 
-        updated: dict[str, GuestInfo] = {}
-        for result in results:
-            if isinstance(result, GuestInfo):
-                updated[result.id] = result
-            elif isinstance(result, Exception):
-                logger.error("Guest processing failed on host %s: %s", host_config.label, result)
+            tasks = [
+                self._process_guest(
+                    guest,
+                    existing_guests.get(guest.id),
+                    host_config=host_config,
+                    host_http_client=host_client,
+                )
+                for guest in guests
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            updated: dict[str, GuestInfo] = {}
+            for result in results:
+                if isinstance(result, GuestInfo):
+                    updated[result.id] = result
+                elif isinstance(result, Exception):
+                    logger.error("Guest processing failed on host %s: %s", host_config.label, result)
+        finally:
+            await host_client.aclose()
 
         elapsed = (datetime.now(timezone.utc) - start).total_seconds()
         logger.info(
@@ -186,6 +195,7 @@ class DiscoveryEngine:
         guest: GuestInfo,
         previous: GuestInfo | None,
         host_config: ProxmoxHostConfig | None = None,
+        host_http_client: httpx.AsyncClient | None = None,
     ) -> GuestInfo:
         """Process a single guest: resolve IP, detect app, check versions."""
         async with self._semaphore:
@@ -194,7 +204,7 @@ class DiscoveryEngine:
                 if not guest.ip:
                     if host_config:
                         settings = self._build_host_settings(host_config)
-                        proxmox = ProxmoxClient(settings, http_client=self._http_client)
+                        proxmox = ProxmoxClient(settings, http_client=host_http_client)
                     else:
                         proxmox = self._proxmox
                     # Extract raw vmid from namespaced ID
@@ -409,7 +419,11 @@ class DiscoveryEngine:
         # Determine version detection strategy
         detect_method = "pct_first"
         if self._settings:
-            detect_method = self._settings.version_detect_method or "pct_first"
+            method = self._settings.version_detect_method
+            if method in ("pct_first", "ssh_first", "ssh_only", "pct_only"):
+                detect_method = method
+            elif method:
+                logger.warning("Invalid version_detect_method '%s', using pct_first", method)
 
         # HTTP probe always runs first regardless of method (it's the primary source)
         try:

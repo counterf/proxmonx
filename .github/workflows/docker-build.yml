@@ -24,8 +24,21 @@ jobs:
               - 'frontend/**'
               - '!frontend/node_modules/**'
 
-  build-backend:
+  test-backend:
     needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Run tests
+        working-directory: ./backend
+        run: uv sync --all-extras && uv run pytest tests/ -v
+
+  build-backend:
+    needs: [changes, test-backend]
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     permissions:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from app.config import AppConfig, ProxmoxHostConfig, Settings
 from app.core.config_store import ConfigStore
 
 
@@ -98,3 +99,136 @@ class TestMigration:
 
         store2 = ConfigStore(str(db_path))
         assert store2.load() == {"existing": "data"}
+
+
+class TestMergeIntoSettings:
+    def test_merges_basic_fields(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
+        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
+                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
+            monkeypatch.delenv(f, raising=False)
+        store.save({**_FULL_CONFIG, "poll_interval_seconds": 120})
+        result = store.merge_into_settings(Settings())
+        assert result.proxmox_host == "https://10.0.0.1:8006"
+        assert result.poll_interval_seconds == 120
+
+    def test_merges_app_config(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
+        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
+                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
+            monkeypatch.delenv(f, raising=False)
+        store.save({
+            **_FULL_CONFIG,
+            "app_config": {"sonarr": {"port": 9999, "api_key": "abc123"}},
+        })
+        result = store.merge_into_settings(Settings())
+        assert "sonarr" in result.app_config
+        assert isinstance(result.app_config["sonarr"], AppConfig)
+        assert result.app_config["sonarr"].port == 9999
+        assert result.app_config["sonarr"].api_key == "abc123"
+
+    def test_merges_guest_config(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
+        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
+                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
+            monkeypatch.delenv(f, raising=False)
+        store.save({
+            **_FULL_CONFIG,
+            "guest_config": {"pve1:100": {"port": 8080, "scheme": "https"}},
+        })
+        result = store.merge_into_settings(Settings())
+        assert "pve1:100" in result.guest_config
+        assert isinstance(result.guest_config["pve1:100"], AppConfig)
+        assert result.guest_config["pve1:100"].port == 8080
+        assert result.guest_config["pve1:100"].scheme == "https"
+
+    def test_merges_proxmox_hosts(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
+        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
+                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
+            monkeypatch.delenv(f, raising=False)
+        store.save({
+            **_FULL_CONFIG,
+            "proxmox_hosts": [{
+                "id": "pve1", "label": "PVE1",
+                "host": "https://10.0.0.1:8006",
+                "token_id": "root@pam!test", "token_secret": "secret",
+                "node": "pve",
+            }],
+        })
+        result = store.merge_into_settings(Settings())
+        assert len(result.proxmox_hosts) == 1
+        assert isinstance(result.proxmox_hosts[0], ProxmoxHostConfig)
+        assert result.proxmox_hosts[0].id == "pve1"
+
+    def test_skips_invalid_app_config_entries(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
+        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
+                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
+            monkeypatch.delenv(f, raising=False)
+        store.save({
+            **_FULL_CONFIG,
+            "app_config": {
+                "sonarr": {"port": 8989},
+                "bad_entry": "not-a-dict",
+            },
+        })
+        result = store.merge_into_settings(Settings())
+        assert "sonarr" in result.app_config
+        assert result.app_config["sonarr"].port == 8989
+        # Non-dict entry is dropped, does not crash
+        assert "bad_entry" not in result.app_config
+
+    def test_skips_invalid_proxmox_host_entries(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
+        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
+                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
+            monkeypatch.delenv(f, raising=False)
+        store.save({
+            **_FULL_CONFIG,
+            "proxmox_hosts": [
+                {"id": "pve1", "label": "PVE1", "host": "https://10.0.0.1:8006",
+                 "token_id": "root@pam!test", "token_secret": "secret", "node": "pve"},
+                "not-a-dict",
+            ],
+        })
+        result = store.merge_into_settings(Settings())
+        # Valid host is included, non-dict is dropped
+        assert len(result.proxmox_hosts) == 1
+        assert result.proxmox_hosts[0].id == "pve1"
+
+    def test_empty_db_returns_original_settings(self, store: ConfigStore) -> None:
+        original = Settings()
+        result = store.merge_into_settings(original)
+        assert result.poll_interval_seconds == original.poll_interval_seconds
+
+
+class TestGetMissingFieldsMultiHost:
+    def test_configured_when_host_has_all_fields(self, store: ConfigStore) -> None:
+        store.save({
+            "proxmox_hosts": [{
+                "id": "pve1", "label": "PVE1",
+                "host": "https://10.0.0.1:8006",
+                "token_id": "root@pam!test",
+                "token_secret": "secret",
+                "node": "pve",
+            }],
+        })
+        assert store.get_missing_fields() == []
+
+    def test_missing_when_host_lacks_fields(self, store: ConfigStore) -> None:
+        store.save({
+            "proxmox_hosts": [{
+                "id": "pve1", "label": "PVE1",
+                "host": "https://10.0.0.1:8006",
+                "token_id": "", "token_secret": "", "node": "",
+            }],
+        })
+        missing = store.get_missing_fields()
+        assert "token_id" in missing
+        assert "token_secret" in missing
+        assert "node" in missing
+
+    def test_configured_if_any_host_is_complete(self, store: ConfigStore) -> None:
+        store.save({
+            "proxmox_hosts": [
+                {"id": "bad", "label": "Bad", "host": "", "token_id": "", "token_secret": "", "node": ""},
+                {"id": "pve1", "label": "PVE1", "host": "https://10.0.0.1:8006",
+                 "token_id": "root@pam!test", "token_secret": "secret", "node": "pve"},
+            ],
+        })
+        assert store.get_missing_fields() == []

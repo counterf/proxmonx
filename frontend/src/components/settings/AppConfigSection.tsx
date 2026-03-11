@@ -39,22 +39,17 @@ export default function AppConfigSection({
       updated.port = value === '' || isNaN(num) ? null : num;
     } else if (field === 'scheme') {
       updated.scheme = value === 'http' ? null : value;
-      changedKeys.current.add(name);
     } else if (field === 'github_repo') {
       updated.github_repo = value;
-      changedKeys.current.add(name);
     } else if (field === 'api_key') {
       updated.api_key = value;
       changedKeys.current.add(name);
     } else if (field === 'ssh_version_cmd') {
       updated.ssh_version_cmd = value;
-      changedKeys.current.add(name);
     } else if (field === 'ssh_username') {
       updated.ssh_username = value;
-      changedKeys.current.add(name);
     } else if (field === 'ssh_key_path') {
       updated.ssh_key_path = value;
-      changedKeys.current.add(name);
     } else if (field === 'ssh_password') {
       updated.ssh_password = value;
       changedKeys.current.add(name);

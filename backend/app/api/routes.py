@@ -84,12 +84,42 @@ class ProxmoxHostSaveEntry(BaseModel):
     ssh_key_path: str | None = None
     pct_exec_enabled: bool = False
 
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Host ID is required")
+        if len(v) > 64:
+            raise ValueError("Host ID must not exceed 64 characters")
+        return v.strip()
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Host label is required")
+        return v.strip()
+
     @field_validator("host")
     @classmethod
     def validate_host_url(cls, v: str) -> str:
         if not v.startswith(("http://", "https://")):
             raise ValueError("Host must start with http:// or https://")
         return v.rstrip("/")
+
+    @field_validator("token_id")
+    @classmethod
+    def validate_token_id(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Token ID is required")
+        return v.strip()
+
+    @field_validator("node")
+    @classmethod
+    def validate_node(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Node name is required")
+        return v.strip()
 
 
 class SettingsSaveRequest(BaseModel):
@@ -198,6 +228,29 @@ class ConnectionTestRequest(BaseModel):
     verify_ssl: bool = False
     host_id: str | None = None
 
+    @field_validator("proxmox_host")
+    @classmethod
+    def validate_host(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Proxmox host is required")
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("Host must start with http:// or https://")
+        return v.rstrip("/")
+
+    @field_validator("proxmox_token_id")
+    @classmethod
+    def validate_token_id(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Token ID is required")
+        return v.strip()
+
+    @field_validator("proxmox_node")
+    @classmethod
+    def validate_node(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Node name is required")
+        return v.strip()
+
 
 # --- Dependency placeholders ---
 
@@ -305,6 +358,42 @@ class GuestConfigSaveRequest(BaseModel):
     ssh_username: str | None = None
     ssh_key_path: str | None = None
     ssh_password: str | None = None
+
+    @field_validator("port")
+    @classmethod
+    def validate_port(cls, v: int | None) -> int | None:
+        if v is not None and (v < 1 or v > 65535):
+            raise ValueError("Port must be between 1 and 65535")
+        return v
+
+    @field_validator("scheme")
+    @classmethod
+    def validate_scheme(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("http", "https"):
+            raise ValueError("scheme must be 'http' or 'https'")
+        return v
+
+    @field_validator("github_repo")
+    @classmethod
+    def validate_github_repo(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return v
+        if "github.com" in v or v.startswith("http"):
+            raise ValueError("github_repo must be 'owner/repo' format, not a URL")
+        if not re.match(r"^[^\s/]+/[^\s/]+$", v):
+            raise ValueError("github_repo must match 'owner/repo' format")
+        return v
+
+    @field_validator("ssh_version_cmd")
+    @classmethod
+    def validate_ssh_version_cmd(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return v
+        if len(v) > 512:
+            raise ValueError("ssh_version_cmd must not exceed 512 characters")
+        if '\n' in v or '\0' in v:
+            raise ValueError("ssh_version_cmd must not contain newlines or null bytes")
+        return v
 
 
 @router.get("/api/guests/{guest_id}/config")

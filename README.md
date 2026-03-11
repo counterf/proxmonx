@@ -2,7 +2,7 @@
 
 Self-hosted Proxmox monitoring dashboard that continuously discovers LXC containers and VMs, identifies the application running inside each guest, compares the installed version against the latest upstream release on GitHub, and shows a live update-status dashboard — with a built-in setup wizard so you never have to touch a config file.
 
-![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 116 passing](https://img.shields.io/badge/tests-116%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
+![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 136 passing](https://img.shields.io/badge/tests-136%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
 
 <!-- screenshot: dashboard showing guests table with version status badges -->
 

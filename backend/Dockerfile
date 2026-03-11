@@ -1,11 +1,11 @@
-FROM python:3.12-slim
+FROM python:3.12.8-slim
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# Install uv (pinned for reproducible builds)
+COPY --from=ghcr.io/astral-sh/uv:0.6 /uv /usr/local/bin/uv
 
 # Copy dependency files first for layer caching
 COPY pyproject.toml uv.lock ./

@@ -185,7 +185,7 @@ class ConfigStore:
                             except Exception as exc:
                                 logger.warning("Skipping invalid app_config entry '%s': %s", k, exc)
                         else:
-                            merged_apps[k] = v
+                            logger.warning("Skipping non-dict app_config entry '%s'", k)
                     current["app_config"] = merged_apps
             elif key == "guest_config":
                 if isinstance(value, dict):
@@ -197,7 +197,7 @@ class ConfigStore:
                             except Exception as exc:
                                 logger.warning("Skipping invalid guest_config entry '%s': %s", k, exc)
                         else:
-                            merged_guests[k] = v
+                            logger.warning("Skipping non-dict guest_config entry '%s'", k)
                     current["guest_config"] = merged_guests
             elif key == "proxmox_hosts":
                 if isinstance(value, list):
@@ -209,7 +209,7 @@ class ConfigStore:
                             except Exception as exc:
                                 logger.warning("Skipping invalid proxmox_hosts[%d]: %s", i, exc)
                         else:
-                            merged_hosts.append(h)
+                            logger.warning("Skipping non-dict proxmox_hosts[%d]", i)
                     current["proxmox_hosts"] = merged_hosts
             elif key in current and value is not None:
                 current[key] = value
