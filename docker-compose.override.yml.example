@@ -1,25 +1,16 @@
 # Development overrides
 # Copy to docker-compose.override.yml to use
 #
-# Note: In dev mode, Vite serves on port 5173 (mapped to host 3000).
-# In production, nginx serves on port 80 (mapped to host 3000).
+# Mounts backend source for hot-reload during development.
+# Frontend dev: run `npm run dev` in frontend/ separately (Vite on port 5173).
 
 services:
-  backend:
+  proxmon:
     build:
-      context: ./backend
+      context: .
+      dockerfile: Dockerfile
     volumes:
       - ./backend/app:/app/app
     environment:
       - LOG_LEVEL=debug
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-  frontend:
-    build:
-      context: ./frontend
-      target: build
-    volumes:
-      - ./frontend/src:/app/src
-    command: npm run dev -- --host 0.0.0.0 --port 80
-    ports:
-      - "3000:80"
+    command: sh -c "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-3000} --reload"

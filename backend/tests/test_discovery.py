@@ -6,7 +6,7 @@ import pytest
 import httpx
 import respx
 
-from app.config import AppConfig, Settings
+from app.config import AppConfig, ProxmoxHostConfig, Settings
 from app.core.discovery import DiscoveryEngine
 from app.core.github import GitHubClient
 from app.core.proxmox import ProxmoxClient
@@ -90,6 +90,16 @@ def _make_settings(**overrides: Any) -> Settings:
         "proxmox_token_secret": "secret",
         "proxmox_node": "pve",
         "ssh_enabled": False,
+        "proxmox_hosts": [
+            ProxmoxHostConfig(
+                id="default",
+                label="Default",
+                host="https://pve.local:8006",
+                token_id="test@pve!token",
+                token_secret="secret",
+                node="pve",
+            ),
+        ],
     }
     defaults.update(overrides)
     return Settings(**defaults)
@@ -138,24 +148,6 @@ class TestProxmoxClient:
 
     @respx.mock
     @pytest.mark.asyncio
-    async def test_connection_check(self) -> None:
-        respx.get("https://pve.local:8006/api2/json/version").mock(
-            return_value=httpx.Response(200, json={"data": {"version": "8.1.4"}})
-        )
-        client = ProxmoxClient(_make_settings())
-        assert await client.check_connection() is True
-
-    @respx.mock
-    @pytest.mark.asyncio
-    async def test_connection_check_failure(self) -> None:
-        respx.get("https://pve.local:8006/api2/json/version").mock(
-            side_effect=httpx.ConnectError("refused")
-        )
-        client = ProxmoxClient(_make_settings())
-        assert await client.check_connection() is False
-
-    @respx.mock
-    @pytest.mark.asyncio
     async def test_ip_resolution(self) -> None:
         respx.get("https://pve.local:8006/api2/json/nodes/pve/lxc/100/config").mock(
             return_value=httpx.Response(200, json={
@@ -201,11 +193,12 @@ class TestDiscoveryEngine:
             ProxmoxClient(settings),
             GitHubClient(settings),
             SSHClient(settings),
+            settings=settings,
         )
         guests = await engine.run_full_cycle({})
 
-        assert "100" in guests
-        guest = guests["100"]
+        assert "default:100" in guests
+        guest = guests["default:100"]
         assert guest.app_name == "Sonarr"
         assert guest.installed_version == "4.0.14.2939"
         assert guest.latest_version == "4.0.15.3012"
@@ -228,12 +221,13 @@ class TestDiscoveryEngine:
             ProxmoxClient(settings),
             GitHubClient(settings),
             SSHClient(settings),
+            settings=settings,
         )
         guests = await engine.run_full_cycle({})
 
-        assert "101" in guests
-        assert guests["101"].update_status == "unknown"
-        assert guests["101"].app_name is None
+        assert "default:101" in guests
+        assert guests["default:101"].update_status == "unknown"
+        assert guests["default:101"].app_name is None
 
     @respx.mock
     @pytest.mark.asyncio

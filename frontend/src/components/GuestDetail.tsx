@@ -7,21 +7,6 @@ import LoadingSpinner from './LoadingSpinner';
 import ErrorBanner from './ErrorBanner';
 import AppIcon from './AppIcon';
 
-// Map detector names to GitHub repos for release links
-const GITHUB_REPOS: Record<string, string> = {
-  sonarr: 'Sonarr/Sonarr',
-  radarr: 'Radarr/Radarr',
-  bazarr: 'morpheus65535/bazarr',
-  prowlarr: 'Prowlarr/Prowlarr',
-  plex: 'plexinc/pms-docker',
-  immich: 'immich-app/immich',
-  gitea: 'go-gitea/gitea',
-  qbittorrent: 'qbittorrent/qBittorrent',
-  sabnzbd: 'sabnzbd/sabnzbd',
-  traefik: 'traefik/traefik',
-  caddy: 'caddyserver/caddy',
-  ntfy: 'binwiederhier/ntfy',
-};
 
 function InstanceSettings({ guestId, appName }: { guestId: string; appName: string }) {
   const [cfg, setCfg] = useState<AppConfigEntry>({});
@@ -189,8 +174,7 @@ export default function GuestDetail() {
   if (error) return <ErrorBanner message={error} />;
   if (!guest) return <ErrorBanner message="Guest not found" />;
 
-  const githubRepo = guest.github_repo_queried
-    || (guest.detector_used ? GITHUB_REPOS[guest.detector_used] : null);
+  const githubRepo = guest.github_repo_queried;
   const releaseUrl = githubRepo && guest.latest_version
     ? `https://github.com/${githubRepo}/releases`
     : null;

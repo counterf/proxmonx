@@ -2,7 +2,14 @@ export type UpdateStatus = 'up-to-date' | 'outdated' | 'unknown';
 export type GuestType = 'lxc' | 'vm';
 export type GuestStatus = 'running' | 'stopped';
 
-export interface GuestSummary {
+export interface VersionCheck {
+  timestamp: string;
+  installed_version: string | null;
+  latest_version: string | null;
+  update_status: string;
+}
+
+export interface Guest {
   id: string;
   name: string;
   type: GuestType;
@@ -16,30 +23,24 @@ export interface GuestSummary {
   web_url: string | null;
   host_id: string;
   host_label: string;
+  ip: string | null;
   detection_method: string | null;
+  detector_used: string | null;
+  raw_detection_output: Record<string, string | number | boolean | null> | null;
+  version_history: VersionCheck[];
   version_detection_method: string | null;
+  github_repo_queried: string | null;
+  github_lookup_status: string | null;
   latest_version_source: string | null;
   disk_used: number | null;
   disk_total: number | null;
   os_type: string | null;
 }
 
-export interface VersionCheck {
-  timestamp: string;
-  installed_version: string | null;
-  latest_version: string | null;
-  update_status: string;
-}
-
-export interface GuestDetail extends GuestSummary {
-  ip: string | null;
-  detection_method: string | null;
-  detector_used: string | null;
-  raw_detection_output: Record<string, string | number | boolean | null> | null;
-  version_history: VersionCheck[];
-  github_repo_queried: string | null;
-  github_lookup_status: string | null;  // "success" | "failed" | "no_repo" | null
-}
+/** @deprecated Use Guest instead */
+export type GuestSummary = Guest;
+/** @deprecated Use Guest instead */
+export type GuestDetail = Guest;
 
 export interface HealthStatus {
   status: string;
@@ -48,20 +49,6 @@ export interface HealthStatus {
   guest_count: number;
   is_polling: boolean;
   seconds_since_last_poll: number | null;
-}
-
-export interface AppSettings {
-  proxmox_host: string;
-  proxmox_token_id: string;
-  proxmox_node: string;
-  poll_interval_seconds: number;
-  discover_vms: boolean;
-  verify_ssl: boolean;
-  ssh_username: string;
-  ssh_enabled: boolean;
-  github_token_set: boolean;
-  log_level: string;
-  proxmon_enabled: boolean;
 }
 
 export interface SetupStatus {
@@ -120,6 +107,9 @@ export interface FullSettings {
   version_detect_method: string;
   app_config?: Record<string, AppConfigEntry>;
   proxmox_hosts: ProxmoxHost[];
+  auth_mode: 'disabled' | 'forms';
+  auth_username: string;
+  auth_password_set: boolean;
   notifications_enabled: boolean;
   ntfy_url: string | null;
   ntfy_token: string | null;
@@ -127,6 +117,8 @@ export interface FullSettings {
   notify_disk_threshold: number;
   notify_disk_cooldown_minutes: number;
   notify_on_outdated: boolean;
+  proxmon_api_key: string | null;
+  trust_proxy_headers: boolean;
 }
 
 export interface SettingsSaveRequest {
@@ -146,6 +138,10 @@ export interface SettingsSaveRequest {
   version_detect_method: string;
   app_config?: Record<string, AppConfigEntry>;
   proxmox_hosts?: ProxmoxHost[];
+  auth_mode?: 'disabled' | 'forms';
+  auth_username?: string;
+  /** Set initial password when enabling auth (no current password required) */
+  new_password?: string;
   notifications_enabled?: boolean;
   ntfy_url?: string;
   ntfy_token?: string | null;
@@ -153,10 +149,18 @@ export interface SettingsSaveRequest {
   notify_disk_threshold?: number;
   notify_disk_cooldown_minutes?: number;
   notify_on_outdated?: boolean;
+  proxmon_api_key?: string | null;
+  trust_proxy_headers?: boolean;
 }
 
 export interface ConnectionTestResult {
   success: boolean;
   message: string;
   node_info: Record<string, unknown> | null;
+}
+
+export interface AuthStatus {
+  auth_mode: 'disabled' | 'forms';
+  authenticated: boolean;
+  username: string | null;
 }

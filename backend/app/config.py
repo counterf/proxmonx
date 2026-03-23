@@ -1,4 +1,4 @@
-"""Application configuration via environment variables and config file."""
+"""Application configuration via SQLite config store and defaults."""
 
 from __future__ import annotations
 
@@ -40,9 +40,9 @@ class ProxmoxHostConfig(BaseModel):
 
 
 class Settings(BaseSettings):
-    """All settings configurable via environment variables or config file."""
+    """All settings configurable via SQLite config store (UI/wizard)."""
 
-    # Proxmox connection -- legacy flat fields (kept for backward compat)
+    # Proxmox connection (flat fields used by save endpoint and ProxmoxClient)
     proxmox_host: str | None = None
     proxmox_token_id: str | None = None
     proxmox_token_secret: str | None = None
@@ -80,7 +80,6 @@ class Settings(BaseSettings):
 
     # Application
     log_level: str = "info"
-    proxmon_enabled: bool = True
     ssh_enabled: bool = True
 
     # Config file path
@@ -92,6 +91,12 @@ class Settings(BaseSettings):
     # Per-guest overrides keyed by guest ID (e.g. "1773123726644:100")
     guest_config: dict[str, AppConfig] = {}
 
+    # Authentication
+    auth_mode: str = "forms"  # "disabled" | "forms"
+    auth_username: str = "root"
+    # auth_password_hash is stored in the DB JSON blob only — never on Settings,
+    # to prevent accidental serialization of the hash.
+
     # Notifications
     notifications_enabled: bool = False
     ntfy_url: str = ""
@@ -101,56 +106,13 @@ class Settings(BaseSettings):
     notify_disk_cooldown_minutes: int = 60
     notify_on_outdated: bool = True
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    # API key for protecting mutating endpoints
+    proxmon_api_key: str | None = None
+
+    # Trust X-Forwarded-* headers from reverse proxies
+    trust_proxy_headers: bool = False
 
     def get_hosts(self) -> list[ProxmoxHostConfig]:
-        """Return the list of configured hosts.
+        """Return the list of configured Proxmox hosts."""
+        return list(self.proxmox_hosts)
 
-        If ``proxmox_hosts`` is populated, return it directly.
-        Otherwise fall back to the legacy flat fields and wrap them
-        in a single-entry list for backward compatibility.
-        """
-        if self.proxmox_hosts:
-            return list(self.proxmox_hosts)
-        # Fallback: legacy flat fields
-        if self.proxmox_host and self.proxmox_token_id:
-            return [
-                ProxmoxHostConfig(
-                    id="default",
-                    label="Default",
-                    host=self.proxmox_host,
-                    token_id=self.proxmox_token_id,
-                    token_secret=self.proxmox_token_secret or "",
-                    node=self.proxmox_node or "",
-                    verify_ssl=self.verify_ssl,
-                    ssh_username=self.ssh_username,
-                    ssh_password=self.ssh_password or "",
-                    ssh_key_path=self.ssh_key_path or "",
-                )
-            ]
-        return []
-
-    def masked_token_id(self) -> str:
-        """Return token ID with secret portion masked."""
-        if not self.proxmox_token_id:
-            return ""
-        parts = self.proxmox_token_id.split("!")
-        if len(parts) == 2:
-            return f"{parts[0]}!****"
-        return "****"
-
-    def masked_settings(self) -> dict[str, str | int | bool | None]:
-        """Return settings dict with secrets masked."""
-        return {
-            "proxmox_host": self.proxmox_host or "",
-            "proxmox_token_id": self.masked_token_id(),
-            "proxmox_node": self.proxmox_node or "",
-            "poll_interval_seconds": self.poll_interval_seconds,
-            "discover_vms": self.discover_vms,
-            "verify_ssl": self.verify_ssl,
-            "ssh_username": self.ssh_username,
-            "ssh_enabled": self.ssh_enabled,
-            "github_token_set": self.github_token is not None,
-            "log_level": self.log_level,
-            "proxmon_enabled": self.proxmon_enabled,
-        }

@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import re
-import socket
 from pathlib import Path
 
 import paramiko
@@ -97,13 +96,12 @@ class SSHClient:
             return None
 
         try:
-            return await asyncio.to_thread(
+            out, err = await asyncio.to_thread(
                 self._execute_sync, host, command, timeout
             )
-        except (paramiko.AuthenticationException, paramiko.NoValidConnectionsError,
-                socket.timeout, FileNotFoundError) as exc:
-            logger.warning("SSH command failed on %s: %s (%s)", host, command, exc)
-            return None
+            if err:
+                logger.debug("SSH stderr on %s: %s", host, err)
+            return out or None
         except Exception:
             logger.debug("SSH command failed on %s: %s", host, command)
             return None
@@ -144,7 +142,7 @@ class SSHClient:
             return None
 
         try:
-            result = await asyncio.to_thread(
+            out, err = await asyncio.to_thread(
                 self._execute_sync,
                 host,
                 command,
@@ -153,14 +151,14 @@ class SSHClient:
                 key_path=key_path,
                 password=password,
             )
-            if result:
-                logger.info("SSH version cmd on %s returned: %s", host, result[:80])
+            if out:
+                logger.info("SSH version cmd on %s returned: %s", host, out[:80])
             else:
                 logger.warning(
                     "SSH version cmd on %s returned empty output for: %.80s",
                     host, command,
                 )
-            return result
+            return out or None
         except Exception:
             logger.warning("SSH version cmd failed on %s: %.80s", host, command)
             return None
@@ -198,7 +196,7 @@ class SSHClient:
 
         try:
             stdout, stderr = await asyncio.to_thread(
-                self._execute_sync_with_stderr,
+                self._execute_sync,
                 proxmox_host,
                 pct_command,
                 timeout,
@@ -226,69 +224,8 @@ class SSHClient:
         username: str | None = None,
         key_path: str | None = None,
         password: str | None = None,
-    ) -> str | None:
-        """Blocking SSH execution (run in thread).
-
-        Optional credential overrides take priority over instance defaults.
-        """
-        effective_username = username or self._username
-        effective_key_path = key_path or self._key_path
-        effective_password = password or self._password
-
-        client = paramiko.SSHClient()
-        if self._known_hosts_path and Path(self._known_hosts_path).is_file():
-            client.load_host_keys(self._known_hosts_path)
-            client.set_missing_host_key_policy(paramiko.RejectPolicy())
-        else:
-            # WarningPolicy logs unknown host keys instead of silently accepting.
-            # Set SSH_KNOWN_HOSTS_PATH for strict host key verification.
-            client.set_missing_host_key_policy(paramiko.WarningPolicy())
-        try:
-            connect_kwargs: dict[str, str | int | Path | None] = {
-                "hostname": host,
-                "username": effective_username,
-                "timeout": timeout,
-            }
-            if effective_key_path:
-                connect_kwargs["key_filename"] = effective_key_path
-            elif effective_password:
-                connect_kwargs["password"] = effective_password
-            else:
-                logger.debug("No SSH credentials configured")
-                return None
-
-            client.connect(**connect_kwargs)  # type: ignore[arg-type]
-            _, stdout, stderr = client.exec_command(command, timeout=timeout)
-            output = stdout.read().decode("utf-8", errors="replace").strip()
-            err = stderr.read().decode("utf-8", errors="replace").strip()
-            if err:
-                logger.debug("SSH stderr on %s: %s", host, err)
-            return output if output else None
-        except paramiko.AuthenticationException as exc:
-            logger.warning("SSH auth failed to %s: %s", host, exc)
-            return None
-        except paramiko.NoValidConnectionsError as exc:
-            logger.warning("SSH no valid connection to %s: %s", host, exc)
-            return None
-        except (socket.timeout, OSError) as exc:
-            logger.warning("SSH connection error to %s: %s", host, exc)
-            return None
-        except Exception:
-            logger.debug("SSH connection failed to %s", host)
-            return None
-        finally:
-            client.close()
-
-    def _execute_sync_with_stderr(
-        self,
-        host: str,
-        command: str,
-        timeout: int,
-        username: str | None = None,
-        key_path: str | None = None,
-        password: str | None = None,
     ) -> tuple[str, str]:
-        """Like _execute_sync but returns (stdout, stderr) for diagnostic logging."""
+        """Blocking SSH execution (run in thread). Returns (stdout, stderr)."""
         effective_username = username or self._username
         effective_key_path = key_path or self._key_path
         effective_password = password or self._password

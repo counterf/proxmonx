@@ -49,22 +49,19 @@ class DiscoveryEngine:
     ) -> dict[str, GuestInfo]:
         """Run a complete discovery + detection + version check cycle.
 
-        When multiple Proxmox hosts are configured, discovery runs against
-        each host in parallel and the results are merged.  Guest IDs are
-        namespaced as ``{host_id}:{vmid}`` to avoid collisions.
+        Discovery runs against each configured host in parallel and the
+        results are merged.  Guest IDs are namespaced as
+        ``{host_id}:{vmid}`` to avoid collisions.
         """
         hosts = self._settings.get_hosts() if self._settings else []
 
         if not hosts:
-            # Legacy single-host path (no proxmox_hosts configured)
-            return await self._run_single_host_cycle(existing_guests)
+            logger.warning("No Proxmox hosts configured -- skipping discovery")
+            return {}
 
         if len(hosts) == 1:
-            return await self._run_host_cycle(
-                hosts[0], existing_guests,
-            )
+            return await self._run_host_cycle(hosts[0], existing_guests)
 
-        # Multi-host: parallel discovery
         logger.info("Starting multi-host discovery across %d hosts", len(hosts))
         start = datetime.now(timezone.utc)
 
@@ -89,36 +86,6 @@ class DiscoveryEngine:
             len(merged), len(hosts), elapsed,
         )
         return merged
-
-    async def _run_single_host_cycle(
-        self,
-        existing_guests: dict[str, GuestInfo],
-    ) -> dict[str, GuestInfo]:
-        """Legacy single-host discovery cycle (no host namespacing)."""
-        logger.info("Starting full discovery cycle")
-        start = datetime.now(timezone.utc)
-
-        guests = await self._proxmox.list_guests()
-        logger.info("Discovered %d guests", len(guests))
-
-        tasks = [
-            self._process_guest(guest, existing_guests.get(guest.id))
-            for guest in guests
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        updated: dict[str, GuestInfo] = {}
-        for result in results:
-            if isinstance(result, GuestInfo):
-                updated[result.id] = result
-            elif isinstance(result, Exception):
-                logger.error("Guest processing failed: %s", result)
-
-        elapsed = (datetime.now(timezone.utc) - start).total_seconds()
-        logger.info(
-            "Discovery cycle complete: %d guests in %.1fs", len(updated), elapsed
-        )
-        return updated
 
     async def _run_host_cycle(
         self,

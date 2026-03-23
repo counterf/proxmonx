@@ -13,9 +13,6 @@ logger = logging.getLogger(__name__)
 class ProxmoxClient:
     """Read-only async client for the Proxmox VE API."""
 
-    # Safety: only GET requests are allowed
-    ALLOWED_METHODS = frozenset({"GET"})
-
     def __init__(self, settings: Settings, http_client: httpx.AsyncClient | None = None) -> None:
         self._base_url = f"{settings.proxmox_host}/api2/json"
         self._node = settings.proxmox_node
@@ -161,12 +158,3 @@ class ProxmoxClient:
             logger.debug("Could not resolve IP from interfaces for guest %s", vmid)
 
         return None, os_type
-
-    async def check_connection(self) -> bool:
-        """Test connectivity to the Proxmox API."""
-        try:
-            await self._get("/version")
-            return True
-        except Exception:
-            logger.warning("Proxmox API unreachable")
-            return False

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -15,7 +14,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-REQUIRED_FIELDS = ("proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node")
 _HOST_REQUIRED_KEYS = ("host", "token_id", "token_secret", "node")
 
 _CREATE_TABLE = """
@@ -40,8 +38,6 @@ class ConfigStore:
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
-        self._migrate_from_json()
-        self._migrate_multi_host()
 
     @property
     def path(self) -> Path:
@@ -63,54 +59,6 @@ class ConfigStore:
     def _init_db(self) -> None:
         with self._connect() as conn:
             conn.execute(_CREATE_TABLE)
-
-    def _migrate_from_json(self) -> None:
-        """One-time migration: import config.json into SQLite if DB is empty."""
-        with self._connect() as conn:
-            row = conn.execute("SELECT 1 FROM settings WHERE id = 1").fetchone()
-            if row is not None:
-                return
-
-        json_path = self._path.parent / "config.json"
-        if not json_path.exists():
-            return
-
-        try:
-            raw = json_path.read_text(encoding="utf-8")
-            data = json.loads(raw)
-            if not isinstance(data, dict):
-                return
-            self.save(data)
-            logger.info("Migrated config.json \u2192 SQLite (%s)", self._path)
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.error("Failed to migrate config.json: %s", exc)
-
-    def _migrate_multi_host(self) -> None:
-        """Promote legacy flat Proxmox fields to a ``proxmox_hosts`` list."""
-        data = self.load()
-        if not data:
-            return
-        if "proxmox_hosts" in data:
-            return  # already migrated
-        if not data.get("proxmox_host"):
-            return  # nothing to migrate
-
-        host_entry = {
-            "id": "default",
-            "label": "Default",
-            "host": data.get("proxmox_host", ""),
-            "token_id": data.get("proxmox_token_id", ""),
-            "token_secret": data.get("proxmox_token_secret", ""),
-            "node": data.get("proxmox_node", ""),
-            "verify_ssl": data.get("verify_ssl", False),
-            "ssh_username": data.get("ssh_username", "root"),
-            "ssh_password": data.get("ssh_password", ""),
-            "ssh_key_path": data.get("ssh_key_path", ""),
-            "pct_exec_enabled": False,
-        }
-        data["proxmox_hosts"] = [host_entry]
-        self.save(data)
-        logger.info("Migrated single-host config to proxmox_hosts list")
 
     def load(self) -> dict:
         """Read settings from SQLite, return as dict."""
@@ -136,44 +84,40 @@ class ConfigStore:
         logger.info("Settings saved via UI")
 
     def is_configured(self) -> bool:
-        """True if at least one host has all required fields (from DB or env)."""
+        """True if at least one host has all required fields in the DB."""
         return len(self.get_missing_fields()) == 0
 
     def get_missing_fields(self) -> list[str]:
-        """Return names of required fields that are missing or empty.
-
-        Checks ``proxmox_hosts`` first (multi-host); falls back to legacy
-        flat fields for backward compatibility.
-        """
+        """Return names of required fields that are missing or empty."""
         file_data = self.load()
         hosts = file_data.get("proxmox_hosts")
         if isinstance(hosts, list) and hosts:
-            # Check that at least one host has all required keys
             for host in hosts:
                 if isinstance(host, dict) and all(host.get(k) for k in _HOST_REQUIRED_KEYS):
                     return []
-            # None of the hosts are fully configured -- report host-level missing
             first = hosts[0] if hosts else {}
             if isinstance(first, dict):
                 return [k for k in _HOST_REQUIRED_KEYS if not first.get(k)]
             return list(_HOST_REQUIRED_KEYS)
 
-        # Legacy flat fields
-        missing: list[str] = []
-        for field in REQUIRED_FIELDS:
-            value = file_data.get(field) or os.environ.get(field.upper(), "") or os.environ.get(field, "")
-            if not value:
-                missing.append(field)
-        return missing
+        return list(_HOST_REQUIRED_KEYS)
 
     def merge_into_settings(self, settings: Settings) -> Settings:
-        """Return a new Settings instance with DB values taking priority over env/defaults."""
+        """Return a new Settings instance with DB values taking priority over env/defaults.
+
+        Invalid entries inside ``app_config``, ``guest_config``, or
+        ``proxmox_hosts`` are logged and skipped so the application can still
+        start.  A summary is logged at ERROR level when entries are dropped so
+        misconfiguration is clearly visible.
+        """
+        # Avoid circular imports between config_store and config modules.
         from app.config import AppConfig, ProxmoxHostConfig, Settings as SettingsCls
 
         config_data = self.load()
         if not config_data:
             return settings
         current = settings.model_dump()
+        skipped: list[str] = []
         for key, value in config_data.items():
             if key == "app_config":
                 if isinstance(value, dict):
@@ -183,8 +127,10 @@ class ConfigStore:
                             try:
                                 merged_apps[k] = AppConfig(**v)
                             except Exception as exc:
+                                skipped.append(f"app_config[{k}]")
                                 logger.warning("Skipping invalid app_config entry '%s': %s", k, exc)
                         else:
+                            skipped.append(f"app_config[{k}]")
                             logger.warning("Skipping non-dict app_config entry '%s'", k)
                     current["app_config"] = merged_apps
             elif key == "guest_config":
@@ -195,8 +141,10 @@ class ConfigStore:
                             try:
                                 merged_guests[k] = AppConfig(**v)
                             except Exception as exc:
+                                skipped.append(f"guest_config[{k}]")
                                 logger.warning("Skipping invalid guest_config entry '%s': %s", k, exc)
                         else:
+                            skipped.append(f"guest_config[{k}]")
                             logger.warning("Skipping non-dict guest_config entry '%s'", k)
                     current["guest_config"] = merged_guests
             elif key == "proxmox_hosts":
@@ -207,10 +155,18 @@ class ConfigStore:
                             try:
                                 merged_hosts.append(ProxmoxHostConfig(**h))
                             except Exception as exc:
+                                skipped.append(f"proxmox_hosts[{i}]")
                                 logger.warning("Skipping invalid proxmox_hosts[%d]: %s", i, exc)
                         else:
+                            skipped.append(f"proxmox_hosts[{i}]")
                             logger.warning("Skipping non-dict proxmox_hosts[%d]", i)
                     current["proxmox_hosts"] = merged_hosts
             elif key in current and value is not None:
                 current[key] = value
+        if skipped:
+            logger.error(
+                "Config merge dropped %d invalid entries: %s",
+                len(skipped),
+                ", ".join(skipped),
+            )
         return SettingsCls(**current)
