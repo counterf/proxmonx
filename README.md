@@ -71,7 +71,8 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 │  ┌──────▼──────────────────────────────────────────────┐    │
 │  │  DiscoveryEngine                                      │    │
 │  │  • ProxmoxClient (async httpx, GET-only)             │    │
-│  │  • 15 Detector plugins (BaseDetector ABC)            │    │
+│  │  • 15 detectors (config-driven HttpJsonDetector +     │    │
+│  │    specialized: Plex, qBittorrent, SABnzbd, Caddy)   │    │
 │  │  • GitHubClient (releases API + 1h cache)            │    │
 │  │  • SSHClient (paramiko, command whitelist)           │    │
 │  └──────┬──────────────────┬────────────────────┬──────┘    │
@@ -138,7 +139,7 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
   - Proxmox tag matching (`sonarr`, `app:sonarr`)
   - Guest name token matching (`sonarr-lxc` → sonarr)
   - Docker container inspection via SSH (`docker ps`)
-- **15 built-in app detectors** — arr-stack, Plex, Immich, Gitea, Seerr, and more
+- **15 built-in app detectors** — arr-stack, Plex, Immich, Gitea, Seerr, and more; most are config-driven via `http_json.py`; specialized detectors (Plex, qBittorrent, SABnzbd, Caddy) subclass `BaseDetector` directly
 - **Installed version detection** — queries each app's own HTTP API
 - **Latest version lookup** — GitHub Releases API with 1-hour cache
 - **Semantic version comparison** — `packaging.version.Version`, handles build hashes
@@ -1049,63 +1050,74 @@ Total: 169 tests, ~5 seconds
 
 ## 15. Writing a Custom Detector
 
-Detectors are Python classes that inherit from `BaseDetector`. Adding a new one takes about 20 lines.
+There are two paths depending on how the app exposes its version.
 
-### Step 1 — Create the detector file
+### Path A — Simple JSON endpoint (most apps)
+
+Add a `DetectorConfig` entry to `SIMPLE_DETECTOR_CONFIGS` in `backend/app/detectors/http_json.py`. No new file needed.
+
+```python
+# backend/app/detectors/http_json.py  →  SIMPLE_DETECTOR_CONFIGS list
+
+DetectorConfig(
+    name="homebridge",
+    display_name="Homebridge",
+    github_repo="homebridge/homebridge",
+    default_port=8581,
+    path="/api/server",          # GET endpoint that returns JSON with version
+    version_keys=("version",),   # JSON key(s) to extract (dot-notation supported)
+    docker_images=["homebridge/homebridge", "oznu/homebridge"],
+    aliases=["hb"],
+    accepts_api_key=False,
+),
+```
+
+Then register it in `backend/app/detectors/registry.py`:
+
+```python
+ALL_DETECTORS: list[BaseDetector] = [
+    # ... existing entries ...
+    make_detector("homebridge"),  # add this line
+]
+```
+
+### Path B — Non-JSON or custom auth (e.g. Plex XML, qBittorrent cookie auth)
+
+Create a subclass in a new file and register it directly:
 
 ```python
 # backend/app/detectors/homebridge.py
 from app.detectors.base import BaseDetector
 
-
 class HomeBridgeDetector(BaseDetector):
-    # Name used for name/tag matching (lowercase, no spaces)
     name = "homebridge"
-
-    # Human-readable name shown in the UI
     display_name = "Homebridge"
-
-    # GitHub repo for latest version lookup ("owner/repo"), or None to skip
     github_repo = "homebridge/homebridge"
-
-    # Additional name tokens that match this detector (besides `name`)
     aliases: list[str] = ["hb"]
-
-    # Port to connect to when querying the app's local API
     default_port = 8581
-
-    # Docker image substrings for Docker detection
     docker_images: list[str] = ["homebridge/homebridge", "oznu/homebridge"]
 
     async def get_installed_version(
         self, host: str, port: int | None = None, api_key: str | None = None,
         scheme: str = "http",
     ) -> str | None:
-        """Query Homebridge's local REST API for its installed version."""
         p = port or self.default_port
         try:
             resp = await self._http_get(f"{scheme}://{host}:{p}/api/auth/noauth")
             if resp.status_code == 200:
-                data = resp.json()
-                # Homebridge returns version in env.packageVersion
-                return data.get("env", {}).get("packageVersion")
+                return resp.json().get("env", {}).get("packageVersion")
         except Exception:
             pass
         return None
 ```
 
-### Step 2 — Register it
-
 ```python
 # backend/app/detectors/registry.py
-
-from app.detectors.homebridge import HomeBridgeDetector   # add this import
+from app.detectors.homebridge import HomeBridgeDetector
 
 ALL_DETECTORS: list[BaseDetector] = [
-    SonarrDetector(),
-    RadarrDetector(),
-    # ... existing detectors ...
-    HomeBridgeDetector(),   # add to list
+    # ... existing entries ...
+    HomeBridgeDetector(),
 ]
 ```
 
@@ -1115,17 +1127,21 @@ ALL_DETECTORS: list[BaseDetector] = [
 docker compose up -d --build
 ```
 
-### BaseDetector reference
+### DetectorConfig reference
 
-| Attribute / method | Type | Required | Description |
-|---|---|---|---|
-| `name` | `str` | Yes | Primary key for name and tag matching |
-| `display_name` | `str` | Yes | UI display name |
-| `github_repo` | `str \| None` | Yes | `"owner/repo"` for GitHub lookup, `None` to skip |
-| `aliases` | `list[str]` | Yes | Additional name tokens (do not duplicate `name`) |
-| `default_port` | `int` | Yes | Default HTTP port for version probing |
-| `docker_images` | `list[str]` | Yes | Docker image substrings for `docker ps` matching |
-| `get_installed_version(host, port, api_key, scheme)` | `async → str \| None` | Yes | Return version string or `None` on any failure |
+| Field | Type | Description |
+|---|---|---|
+| `name` | `str` | Primary key for name/tag matching (lowercase) |
+| `display_name` | `str` | UI label |
+| `github_repo` | `str \| None` | `"owner/repo"` for latest-version lookup, `None` to skip |
+| `default_port` | `int` | HTTP port for version probe |
+| `path` | `str` | URL path for the version endpoint |
+| `version_keys` | `tuple[str, ...]` | JSON key(s) to try in order; dot-notation for nested (e.g. `"data.version"`) |
+| `docker_images` | `list[str]` | Image name substrings for `docker ps` matching |
+| `aliases` | `list[str]` | Extra name tokens beyond `name` |
+| `accepts_api_key` | `bool` | Whether this app uses an API key header |
+| `auth_header` | `str \| None` | Header name for the API key (e.g. `"X-Api-Key"`) |
+| `strip_v` | `bool` | Strip leading `v` from version string (e.g. `v1.2.3` → `1.2.3`) |
 | `_http_get(url, timeout)` | `async → httpx.Response` | Inherited | HTTP GET helper; uses shared connection pool in production |
 | `detect(guest)` | `→ str \| None` | Inherited | Returns `"tag_match"`, `"name_match"`, or `None` |
 | `match_docker_image(image)` | `→ bool` | Inherited | Returns `True` if `image` matches any entry in `docker_images` |

@@ -11,12 +11,16 @@ Proxmox monitoring dashboard. Discovers LXC/VM guests, detects running apps, com
 ## Key files
 - `backend/app/core/config_store.py` -- SQLite config persistence (single settings row, JSON blob)
 - `backend/app/core/discovery.py` -- main orchestration: guest discovery -> app detection -> version check
-- `backend/app/detectors/` -- one file per app detector (sonarr, radarr, plex, etc.)
-- `backend/app/detectors/registry.py` -- ALL_DETECTORS list, DETECTOR_MAP
+- `backend/app/detectors/http_json.py` -- config-driven detector for JSON version endpoints; add `DetectorConfig` entries here for new simple apps
+- `backend/app/detectors/registry.py` -- ALL_DETECTORS list, DETECTOR_MAP; specialized detectors (Plex, qBittorrent, SABnzbd, Caddy) live in separate files
 - `backend/app/core/github.py` -- GitHub releases API client with 1h TTL cache
 - `backend/app/api/routes.py` -- all API endpoints; `_keep_or_replace()` guards masked secrets
+- `backend/app/api/auth_routes.py` -- login/logout/session endpoints
+- `backend/app/middleware/auth_middleware.py` -- session cookie auth middleware
+- `backend/app/core/session_store.py` -- in-memory session management
+- `backend/app/core/auth.py` -- password hashing and verification
 - `backend/app/config.py` -- Settings (pydantic-settings); AppConfig (per-app port/api_key/scheme/github_repo)
-- `frontend/src/components/Settings.tsx` -- settings form
+- `frontend/src/components/Settings.tsx` -- settings form (delegates to section components)
 - `frontend/src/components/settings/AppConfigSection.tsx` -- per-app config (port, api_key, scheme, github_repo)
 
 ## Architecture
@@ -25,9 +29,13 @@ Proxmox API -> list guests -> detect app (name/tag/docker) -> probe version HTTP
 ```
 
 ## Detector pattern
-Each detector in `backend/app/detectors/` extends `BaseDetector` and implements:
+Most detectors are config-driven: add a `DetectorConfig` entry to `SIMPLE_DETECTOR_CONFIGS` in `backend/app/detectors/http_json.py`. Fields: `name`, `display_name`, `github_repo`, `default_port`, `path`, `docker_images`, `version_keys`, `accepts_api_key`, `auth_header`.
+
+Specialized detectors (non-JSON responses, custom auth) subclass `BaseDetector` directly and implement:
 - `name`, `display_name`, `github_repo`, `aliases`, `default_port`, `docker_images`
 - `get_installed_version(host, port, api_key, scheme)` -- HTTP probe returning version string or None
+
+Register all detectors in `backend/app/detectors/registry.py` via `make_detector("name")` (config-driven) or `SpecialDetector()` (custom class).
 
 ## Config storage
 SQLite at `/app/data/proxmon.db`. Single `settings` table, one row, JSON blob. All config lives in SQLite (only `CONFIG_DB_PATH` env var is recognized, defaults to `/app/data/proxmon.db`).
