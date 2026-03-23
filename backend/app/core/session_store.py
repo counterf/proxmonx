@@ -66,6 +66,18 @@ class SessionStore:
         finally:
             conn.close()
 
+    def revoke_all(self, *, except_token: str | None = None) -> None:
+        """Delete all session tokens, optionally keeping one token."""
+        conn = self._connect()
+        try:
+            if except_token:
+                conn.execute("DELETE FROM sessions WHERE token != ?", (except_token,))
+            else:
+                conn.execute("DELETE FROM sessions")
+            conn.commit()
+        finally:
+            conn.close()
+
     def cleanup_expired(self) -> None:
         """Remove all expired sessions."""
         now = datetime.now(timezone.utc).isoformat()

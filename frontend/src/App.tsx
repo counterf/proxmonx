@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import Dashboard from './components/Dashboard';
 import GuestDetail from './components/GuestDetail';
 import Settings from './components/Settings';
@@ -7,7 +7,7 @@ import SetupWizard from './components/setup/SetupWizard';
 import LoginPage from './components/LoginPage';
 import LoadingSpinner from './components/LoadingSpinner';
 import ProxmonIcon from './components/icons/ProxmonIcon';
-import { fetchSetupStatus, fetchAuthStatus, logout } from './api/client';
+import { fetchSetupStatus, fetchAuthStatus, logout, AUTH_UNAUTHORIZED_EVENT } from './api/client';
 import type { AuthStatus } from './types';
 
 function App() {
@@ -46,6 +46,21 @@ function App() {
     checkSetup();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setAuthStatus((prev) => {
+        if (prev?.auth_mode === 'forms') {
+          return { auth_mode: 'forms', authenticated: false, username: null };
+        }
+        return prev;
+      });
+      setShowUserMenu(false);
+      navigate('/login', { replace: true });
+    };
+    window.addEventListener(AUTH_UNAUTHORIZED_EVENT, handleUnauthorized);
+    return () => window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, handleUnauthorized);
+  }, [navigate]);
+
   // Close user menu on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -70,7 +85,7 @@ function App() {
 
   const handleLogout = useCallback(async () => {
     await logout();
-    setAuthStatus({ auth_mode: 'forms', authenticated: false });
+    setAuthStatus({ auth_mode: 'forms', authenticated: false, username: null });
     setShowUserMenu(false);
     navigate('/login', { replace: true });
   }, [navigate]);
@@ -105,6 +120,11 @@ function App() {
   }
 
   const showUserIcon = authStatus?.auth_mode === 'forms' && authStatus.authenticated;
+
+  // When auth is disabled, /login is irrelevant — redirect immediately so login is never shown
+  if (authStatus?.auth_mode === 'disabled' && location.pathname === '/login') {
+    return <Navigate to="/" replace />;
+  }
 
   // Configured: normal app
   return (
@@ -145,7 +165,7 @@ function App() {
               {showUserMenu && (
                 <div className="absolute right-0 mt-2 w-44 rounded bg-surface border border-gray-700 shadow-lg py-1 z-50">
                   <div className="px-3 py-2 text-xs text-gray-400 border-b border-gray-700">
-                    {authStatus?.auth_mode === 'forms' ? 'root' : ''}
+                    {authStatus?.auth_mode === 'forms' ? (authStatus.username ?? 'root') : ''}
                   </div>
                   <button
                     type="button"

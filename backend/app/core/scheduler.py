@@ -27,7 +27,6 @@ class Scheduler:
         alert_manager: AlertManager | None = None,
     ) -> None:
         self._interval = settings.poll_interval_seconds
-        self._enabled = settings.proxmon_enabled
         self._engine = engine
         self._alert_manager = alert_manager
         self._guests: dict[str, GuestInfo] = {}
@@ -51,9 +50,6 @@ class Scheduler:
 
     def start(self) -> None:
         """Start the background polling loop."""
-        if not self._enabled:
-            logger.info("Proxmon polling disabled via PROXMON_ENABLED=false")
-            return
         self._task = asyncio.create_task(self._loop())
         logger.info("Scheduler started with %ds interval", self._interval)
 

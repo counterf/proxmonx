@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import ProxmonIcon from './icons/ProxmonIcon';
-import { login } from '../api/client';
+import { login, HttpError } from '../api/client';
 
 interface LoginPageProps {
   onSuccess: () => void;
@@ -19,8 +19,12 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
     try {
       await login(username, password);
       onSuccess();
-    } catch {
-      setError('Invalid username or password');
+    } catch (err) {
+      if (err instanceof HttpError && err.status === 429) {
+        setError('Too many login attempts. Please wait and try again.');
+      } else {
+        setError('Invalid username or password');
+      }
     } finally {
       setLoading(false);
     }

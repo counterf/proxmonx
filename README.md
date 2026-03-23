@@ -2,7 +2,7 @@
 
 Self-hosted Proxmox monitoring dashboard that continuously discovers LXC containers and VMs, identifies the application running inside each guest, compares the installed version against the latest upstream release on GitHub, and shows a live update-status dashboard — with a built-in setup wizard so you never have to touch a config file.
 
-![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 136 passing](https://img.shields.io/badge/tests-136%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
+![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 169 passing](https://img.shields.io/badge/tests-169%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
 
 <!-- screenshot: dashboard showing guests table with version status badges -->
 
@@ -18,17 +18,18 @@ Self-hosted Proxmox monitoring dashboard that continuously discovers LXC contain
 6. [Proxmox API Token Setup](#6-proxmox-api-token-setup)
 7. [Configuration Reference](#7-configuration-reference)
 8. [Setup Wizard & Settings UI](#8-setup-wizard--settings-ui)
-9. [App Detection Logic](#9-app-detection-logic)
-10. [Version Checking Details](#10-version-checking-details)
-11. [SSH Integration](#11-ssh-integration)
-12. [API Reference](#12-api-reference)
-13. [Development Setup](#13-development-setup)
-14. [Writing a Custom Detector](#14-writing-a-custom-detector)
-15. [Project Structure](#15-project-structure)
-16. [Security Considerations](#16-security-considerations)
-17. [Troubleshooting](#17-troubleshooting)
-18. [Roadmap](#18-roadmap)
-19. [License](#19-license)
+9. [Login & Authentication](#9-login--authentication)
+10. [App Detection Logic](#10-app-detection-logic)
+11. [Version Checking Details](#11-version-checking-details)
+12. [SSH Integration](#12-ssh-integration)
+13. [API Reference](#13-api-reference)
+14. [Development Setup](#14-development-setup)
+15. [Writing a Custom Detector](#15-writing-a-custom-detector)
+16. [Project Structure](#16-project-structure)
+17. [Security Considerations](#17-security-considerations)
+18. [Troubleshooting](#18-troubleshooting)
+19. [Roadmap](#19-roadmap)
+20. [License](#20-license)
 
 ---
 
@@ -38,7 +39,7 @@ Homelabs tend to accumulate services. A Proxmox node with 20 LXC containers runn
 
 **proxmon** solves this by connecting directly to the Proxmox API, enumerating every LXC container and VM, fingerprinting the application inside each one (by guest name, Proxmox tag, or Docker image), querying the app's own API for its installed version, and comparing that against the latest GitHub release. The result is a single dashboard showing every guest, what's running inside it, and whether it's up to date.
 
-No agents are installed on guests. No configuration is required on the guest side. proxmon connects to Proxmox read-only, optionally SSHs into guests to inspect Docker containers, and makes outbound HTTPS calls to GitHub. It runs entirely as a Docker Compose stack.
+No agents are installed on guests. No configuration is required on the guest side. proxmon connects to Proxmox read-only, optionally SSHs into guests to inspect Docker containers, and makes outbound HTTPS calls to GitHub. It runs as a single Docker container.
 
 ### How it works at a glance
 
@@ -59,13 +60,8 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 └─────────────────────┬───────────────────────────────────────┘
                       │ HTTP  :3000
 ┌─────────────────────▼───────────────────────────────────────┐
-│  nginx (frontend container)                                   │
-│  • serves compiled React SPA                                  │
-│  • proxies /api/* and /health → backend:8000                 │
-└─────────────────────┬───────────────────────────────────────┘
-                      │ HTTP (internal Docker network)
-┌─────────────────────▼───────────────────────────────────────┐
-│  FastAPI backend (Python 3.12)                               │
+│  Single Docker container (Python 3.12)                       │
+│  Uvicorn serves API + built React SPA                        │
 │                                                               │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
 │  │  Scheduler   │  │  API routes  │  │  ConfigStore     │  │
@@ -98,7 +94,7 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 | **Detector plugins** | One class per app; matches guests by name/tag/Docker image; queries the app's local HTTP API for its version |
 | **GitHubClient** | Fetches the latest release tag from GitHub Releases API; caches results for 1 hour; handles rate limits gracefully |
 | **SSHClient** | Connects to guests via paramiko; runs `docker ps` to identify running containers; executes version commands via SSH or `pct exec`; enforces a command whitelist and metacharacter guard |
-| **ConfigStore** | Reads/writes `/app/data/proxmon.db` (SQLite); single-row settings table with JSON blob; auto-migrates from `config.json`; database takes priority over environment variables |
+| **ConfigStore** | Reads/writes `/app/data/proxmon.db` (SQLite); single-row settings table with JSON blob; all application config lives in the database |
 | **FastAPI routes** | REST API serving guests, settings, setup status, and connection test; dependency injection via `app.dependency_overrides` |
 | **React frontend** | Dashboard, per-guest detail, editable settings, 5-step setup wizard; polls `/api/guests` every 60 s |
 
@@ -163,9 +159,9 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 - **Version detection cascade** — API probe first, then CLI fallback via pct exec or SSH (configurable: `pct_first`, `ssh_first`, `ssh_only`, `pct_only`)
 - **ntfy notifications** — push alerts when disk usage exceeds a threshold or an app becomes outdated; configurable cooldown
 - **App logo in header** — clickable app names link to the app's web UI; responsive mobile layout
-- **SQLite-backed config store** — settings persisted in SQLite (`/app/data/proxmon.db`); auto-migrates from `config.json` on first start
-- **GitHub Actions CI** — auto-builds and pushes Docker images to `ghcr.io` on every push to main
-- **Backward compatible** — existing `.env` deployments continue to work
+- **SQLite-backed config store** — settings persisted in SQLite (`/app/data/proxmon.db`)
+- **GitHub Actions CI** — auto-builds and pushes a single Docker image to `ghcr.io` on every push to main
+- **SQLite-only config** — all settings stored in SQLite; no `.env` file needed
 
 ### Phase 2 — Planned
 
@@ -227,26 +223,34 @@ open http://localhost:3000
 
 On first launch, proxmon starts in **unconfigured mode** and automatically redirects to the setup wizard. Fill in your Proxmox credentials, test the connection, and click **Save & Start**. The dashboard loads once the first discovery cycle completes (typically 5–15 seconds).
 
-> **Using an existing `.env` file?**
-> Copy it to the project root as `.env` — Docker Compose will load it automatically and proxmon will skip the wizard:
-> ```bash
-> cp backend/.env.example .env
-> # edit .env with real values
-> docker compose up -d
-> ```
+> **Note:** All configuration is stored in the SQLite database (`/app/data/proxmon.db`). No `.env` file is needed — just run `docker compose up -d` and complete the setup wizard in your browser.
 
 ### Expected first-run output
 
 ```
-proxmon-backend   | Starting proxmon
-proxmon-backend   | proxmon starting in unconfigured mode -- visit the UI to configure
+proxmon  | Starting proxmon
+proxmon  | proxmon starting in unconfigured mode -- visit the UI to configure
 # (after wizard completes)
-proxmon-backend   | Starting proxmon
-proxmon-backend   | Settings saved via UI
-proxmon-backend   | Discovered 12 LXC containers
-proxmon-backend   | Detected sonarr on guest 101 (sonarr-lxc) via name_match
-proxmon-backend   | Detected radarr on guest 102 (radarr-lxc) via name_match
-proxmon-backend   | Discovery cycle complete: 12 guests, 9 detected, 3 unknown
+proxmon  | Starting proxmon
+proxmon  | Settings saved via UI
+proxmon  | Discovered 12 LXC containers
+proxmon  | Detected sonarr on guest 101 (sonarr-lxc) via name_match
+proxmon  | Detected radarr on guest 102 (radarr-lxc) via name_match
+proxmon  | Discovery cycle complete: 12 guests, 9 detected, 3 unknown
+```
+
+### Custom port
+
+By default proxmon listens on port **3000**. To use a different port, set the `PORT` environment variable and match it in your port mapping:
+
+```yaml
+# docker-compose.override.yml
+services:
+  proxmon:
+    environment:
+      PORT: 8080
+    ports:
+      - "8080:8080"
 ```
 
 ### Updating
@@ -259,7 +263,7 @@ docker compose build         # if building from source
 docker compose up -d
 ```
 
-Pre-built images are pushed to `ghcr.io/counterf/proxmonx-backend:latest` and `ghcr.io/counterf/proxmonx-frontend:latest` on every push to main via GitHub Actions.
+Pre-built images are pushed to `ghcr.io/counterf/proxmon:latest` on every push to main via GitHub Actions.
 
 ---
 
@@ -309,89 +313,37 @@ curl -sk "https://<proxmox-host>:8006/api2/json/version" \
 proxmon reads configuration from two sources, in priority order:
 
 ```
-/app/data/proxmon.db    ← highest priority (SQLite, written by setup wizard / settings UI)
-environment variables   ← fallback (from .env file or docker-compose env_file)
+/app/data/proxmon.db    ← SQLite database (written by setup wizard / settings UI)
 built-in defaults       ← lowest priority
 ```
 
-When you configure proxmon via the UI, settings are saved to the SQLite database. Environment variables continue to work for all fields — useful for secret management via Docker secrets or CI/CD pipelines.
+All application configuration is stored in the SQLite database. Configure everything via the setup wizard or Settings UI.
 
-> **Migration from config.json**: If upgrading from an earlier version that used `config.json`, proxmon automatically imports it into SQLite on first start. No manual migration needed.
+### Environment variables
 
-### All configuration variables
+Only two environment variables are recognized (both optional):
 
-| Variable | Default | Required | Description |
-|---|---|---|---|
-| `PROXMOX_HOST` | — | **Yes** | Full URL including port, e.g. `https://192.168.1.10:8006` |
-| `PROXMOX_TOKEN_ID` | — | **Yes** | API token ID, format `user@realm!tokenname` |
-| `PROXMOX_TOKEN_SECRET` | — | **Yes** | UUID secret from Proxmox token creation |
-| `PROXMOX_NODE` | — | **Yes** | Node name shown in Proxmox UI, e.g. `pve` |
-| `POLL_INTERVAL_SECONDS` | `300` | No | Seconds between discovery cycles (min: 30, max: 3600) |
-| `DISCOVER_VMS` | `false` | No | Set `true` to also enumerate QEMU VMs |
-| `VERIFY_SSL` | `false` | No | Set `true` to verify Proxmox TLS certificate (requires a valid cert) |
-| `SSH_ENABLED` | `true` | No | Enable SSH-based Docker container inspection |
-| `SSH_USERNAME` | `root` | No | Username for SSH connections to guests |
-| `SSH_KEY_PATH` | — | No | Absolute path to SSH private key file (inside container) |
-| `SSH_PASSWORD` | — | No | SSH password (key auth preferred; only used if `SSH_KEY_PATH` unset) |
-| `SSH_KNOWN_HOSTS_PATH` | — | No | Path to known_hosts file; enables strict host key verification |
-| `GITHUB_TOKEN` | — | No | GitHub personal access token; increases rate limit from 60 to 5,000 req/hr |
-| `CORS_ORIGINS` | `http://localhost:3000,http://frontend` | No | Allowed CORS origins (comma-separated or JSON array) |
-| `LOG_LEVEL` | `info` | No | `debug` / `info` / `warning` / `error` |
-| `PROXMON_ENABLED` | `true` | No | Master switch; set `false` to pause all polling |
-| `VERSION_DETECT_METHOD` | `pct_first` | No | CLI fallback strategy: `pct_first`, `ssh_first`, `ssh_only`, `pct_only` |
-| `PROXMON_API_KEY` | — | No | API key for protecting mutating endpoints (POST settings, refresh) |
-| `CONFIG_DB_PATH` | `/app/data/proxmon.db` | No | Override path for SQLite config database |
-| `NOTIFICATIONS_ENABLED` | `false` | No | Enable ntfy push notifications |
-| `NTFY_URL` | — | No | Full ntfy topic URL, e.g. `https://ntfy.sh/proxmon-alerts` |
-| `NTFY_TOKEN` | — | No | ntfy access token (for private topics) |
-| `NTFY_PRIORITY` | `3` | No | Default ntfy priority (1 = min, 5 = max) |
-| `NOTIFY_DISK_THRESHOLD` | `95` | No | Disk usage percent that triggers an alert (50–100) |
-| `NOTIFY_DISK_COOLDOWN_MINUTES` | `60` | No | Minutes between repeated disk alerts for the same guest (15–1440) |
-| `NOTIFY_ON_OUTDATED` | `true` | No | Send notification when an app transitions from "ok" to "outdated" |
+| Variable | Default | Description |
+|---|---|---|
+| `CONFIG_DB_PATH` | `/app/data/proxmon.db` | Override path for the SQLite config database |
+| `PORT` | `3000` | Port the app listens on inside the container |
+
+All other settings (Proxmox hosts, SSH, GitHub token, notifications, API key, etc.) are configured through the **Settings UI** and persisted in the SQLite database.
 
 ### SSH key mount example
 
-If using key-based SSH authentication, mount the key into the backend container:
+If using key-based SSH authentication, mount the key into the container and set the path in Settings → SSH:
 
 ```yaml
 # docker-compose.override.yml
 services:
-  backend:
+  proxmon:
     volumes:
       - ./data:/app/data
       - ~/.ssh/id_ed25519:/app/ssh/id_ed25519:ro
-    environment:
-      SSH_KEY_PATH: /app/ssh/id_ed25519
 ```
 
-### `.env.example`
-
-```bash
-# Required (or configure via wizard)
-PROXMOX_HOST=https://192.168.1.10:8006
-PROXMOX_TOKEN_ID=root@pam!proxmon
-PROXMOX_TOKEN_SECRET=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-PROXMOX_NODE=pve
-
-# Discovery
-POLL_INTERVAL_SECONDS=300
-DISCOVER_VMS=false
-VERIFY_SSL=false
-
-# SSH (for Docker detection)
-SSH_USERNAME=root
-SSH_KEY_PATH=/app/ssh/id_rsa
-SSH_ENABLED=true
-# SSH_PASSWORD=         # alternative to key auth
-# SSH_KNOWN_HOSTS_PATH=/app/ssh/known_hosts
-
-# GitHub (recommended)
-# GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
-# Application
-LOG_LEVEL=info
-PROXMON_ENABLED=true
-```
+Then set **SSH Key Path** to `/app/ssh/id_ed25519` in the Settings UI.
 
 ### Per-app configuration
 
@@ -466,15 +418,72 @@ Key behaviors:
 
 ### Config persistence
 
-Settings saved via the UI are stored in a SQLite database at `/app/data/proxmon.db` (mounted as `./data:/app/data` in Docker Compose). The database uses a single `settings` table with one row containing a JSON blob. On restart, the database is loaded first; env vars fill in anything not in the database.
-
-**Migration from config.json**: if upgrading from a version that used `config.json`, proxmon automatically imports it into SQLite on first start. The original file is left in place but is no longer read after migration.
-
-**Backward compatibility**: if you already have a working `.env` file and no database exists, proxmon reads all settings from env vars and skips the wizard. No migration needed.
+Settings are stored in a SQLite database at `/app/data/proxmon.db` (mounted as `./data:/app/data` in Docker Compose). The database uses a single `settings` table with one row containing a JSON blob.
 
 ---
 
-## 9. App Detection Logic
+## 9. Login & Authentication
+
+proxmon ships with a built-in forms-based authentication system enabled by default. On first start, a default admin account is automatically created.
+
+### Default credentials
+
+| Field | Value |
+|---|---|
+| Username | `root` |
+| Password | `proxmon!` |
+
+**Change the default password immediately** via Settings → Security → Change Password.
+
+### How it works
+
+- Sessions are stored in the same SQLite database (`/app/data/proxmon.db`) using UUID tokens with a 24-hour TTL
+- The session token is set as an `HttpOnly`, `SameSite=Lax` cookie (`proxmon_session`)
+- Password hashing uses **scrypt** (stdlib, no extra dependencies) with a random salt per password
+- All `/api/*` routes (except `/api/auth/*` and `/api/setup/status`) require a valid session when `auth_mode=forms`
+
+### Changing your password
+
+1. Log in to the dashboard
+2. Go to **Settings → Security**
+3. Enter a new password (minimum 8 characters) and click **Change Password**
+
+Alternatively, via API:
+```bash
+curl -X POST http://localhost:3000/api/auth/change-password \
+  -H "Content-Type: application/json" \
+  -b "proxmon_session=<your-token>" \
+  -d '{"current_password": "your-current-password", "new_password": "my-new-password"}'
+```
+
+### Disabling authentication
+
+If proxmon runs in a fully trusted network and you don't want to log in every session, set `auth_mode=disabled` in Settings → Security. This bypasses all session checks — any request to `/api/*` is treated as authenticated.
+
+### Auth API endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/auth/login` | Validate credentials, set session cookie |
+| `POST` | `/api/auth/logout` | Revoke session, clear cookie |
+| `GET` | `/api/auth/status` | Return `{auth_mode, authenticated}` |
+| `POST` | `/api/auth/change-password` | Change password (session required) |
+
+### API key bypass
+
+For automation and scripts, set the **API Key** in Settings → Security and pass it as an `X-Api-Key` header. API key access bypasses session auth for all regular API routes but **cannot** be used for `change-password` (session required).
+
+```bash
+curl -H "X-Api-Key: my-secret-api-key" http://localhost:3000/api/guests
+```
+
+### Rate limiting
+
+Login attempts are rate-limited to **10 requests per 60 seconds per IP** to prevent brute-force attacks. Exceeded limits return `HTTP 429`.
+
+---
+
+## 10. App Detection Logic
 
 Each guest goes through a three-stage detection pipeline. The first stage to produce a match wins.
 
@@ -542,7 +551,7 @@ Once a detector is matched:
 
 ---
 
-## 10. Version Checking Details
+## 11. Version Checking Details
 
 ### GitHub API
 
@@ -588,7 +597,7 @@ installed <  latest       →  update_status = "outdated"
 
 ---
 
-## 11. SSH Integration
+## 12. SSH Integration
 
 SSH is used for Docker container detection (Stage 3 of the detection pipeline) and as a fallback for version detection when the app's HTTP API probe fails. The version detection cascade (configurable via `VERSION_DETECT_METHOD`) tries API first, then `pct exec` or SSH depending on the strategy. SSH is optional — disable it with `SSH_ENABLED=false` if your guests don't run Docker or you prefer not to grant SSH access.
 
@@ -635,8 +644,7 @@ To enable strict host key verification:
 # On the proxmon host, scan your Proxmox guests:
 ssh-keyscan 192.168.1.100 192.168.1.101 ... >> ./data/known_hosts
 
-# In .env or settings:
-SSH_KNOWN_HOSTS_PATH=/app/data/known_hosts
+# Then set SSH Known Hosts Path to /app/data/known_hosts in Settings UI
 ```
 
 ### Authentication
@@ -655,9 +663,9 @@ SSH_USERNAME=root
 
 ---
 
-## 12. API Reference
+## 13. API Reference
 
-All endpoints are served by the FastAPI backend. In production (Docker Compose), the frontend nginx container proxies `/api/*` and `/health` to the backend. In development, Vite's dev server does the same.
+All endpoints are served by the FastAPI backend. In production, the same process serves the API and the frontend SPA. In development, Vite's dev server proxies `/api/*` and `/health` to the backend.
 
 ### `GET /health`
 
@@ -768,7 +776,7 @@ Returns the per-guest configuration override for a specific guest instance.
 }
 ```
 
-Returns `404` if no per-guest config exists.
+Returns an empty object (`{}`) if no per-guest config exists.
 
 ---
 
@@ -787,7 +795,7 @@ Request body:
 
 Response:
 ```json
-{"success": true, "message": "Guest config saved"}
+{"status": "saved"}
 ```
 
 ---
@@ -798,7 +806,7 @@ Removes all per-guest configuration overrides for a guest.
 
 Response:
 ```json
-{"success": true, "message": "Guest config deleted"}
+{"status": "cleared"}
 ```
 
 ---
@@ -813,28 +821,6 @@ Response:
 ```
 
 Returns `{"success": false, "message": "..."}` if notifications are disabled or the ntfy server is unreachable.
-
----
-
-### `GET /api/settings`
-
-Returns current settings with all secrets masked.
-
-```json
-{
-  "proxmox_host": "https://192.168.1.10:8006",
-  "proxmox_token_id": "root@pam!****",
-  "proxmox_node": "pve",
-  "poll_interval_seconds": 300,
-  "discover_vms": false,
-  "verify_ssl": false,
-  "ssh_username": "root",
-  "ssh_enabled": true,
-  "github_token_set": true,
-  "log_level": "info",
-  "proxmon_enabled": true
-}
-```
 
 ---
 
@@ -968,7 +954,7 @@ Returns whether the app is fully configured and which required fields are missin
 
 ---
 
-## 13. Development Setup
+## 14. Development Setup
 
 ### Prerequisites
 
@@ -985,10 +971,6 @@ cd backend
 # Install dependencies (creates .venv automatically)
 uv sync --all-extras
 
-# Copy and edit config
-cp .env.example .env
-# Edit .env with your Proxmox credentials
-
 # Run development server (auto-reload)
 uv run uvicorn app.main:app --reload --port 8000
 
@@ -999,7 +981,7 @@ uv run --extra dev pytest -v
 uv run --extra dev pytest --cov=app --cov-report=term-missing
 ```
 
-The backend reads `.env` from the `backend/` directory when run locally.
+The backend stores all configuration in SQLite. On first launch, complete the setup wizard at `http://localhost:3000`.
 
 ### Frontend
 
@@ -1031,10 +1013,10 @@ server: {
 }
 ```
 
-### Docker Compose (both services)
+### Docker Compose
 
 ```bash
-# Production build
+# Production build (single container)
 docker compose up -d --build
 
 # Tail logs
@@ -1042,13 +1024,7 @@ docker compose logs -f
 
 # Rebuild after code changes
 docker compose build && docker compose up -d
-
-# Dev overrides (hot reload)
-cp docker-compose.override.yml.example docker-compose.override.yml
-docker compose up -d
 ```
-
-The `docker-compose.override.yml.example` mounts source directories for hot-reload in development.
 
 ### Running tests
 
@@ -1059,19 +1035,19 @@ uv run --extra dev pytest -v
 
 ```
 tests/test_alerting.py        17 tests  — disk threshold, cooldown, outdated transitions, enable/disable
-tests/test_config_store.py     8 tests  — load, save, migration, merge, is_configured
+tests/test_config_store.py     6 tests  — load, save, merge, is_configured
 tests/test_detectors.py       37 tests  — detection matching + version fetching for all 15 apps
 tests/test_discovery.py       16 tests  — Proxmox parsing, IP resolution, config resolution, full cycle
 tests/test_github.py           8 tests  — caching, v-prefix stripping, rate limit, auth header
 tests/test_notifier.py         8 tests  — ntfy send, auth, priority, error handling, shared client
 tests/test_ssh_version_cmd.py 22 tests  — SSH version command safety validation
 ─────────────────────────────────────────────────────
-Total: 116 tests, ~2 seconds
+Total: 169 tests, ~5 seconds
 ```
 
 ---
 
-## 14. Writing a Custom Detector
+## 15. Writing a Custom Detector
 
 Detectors are Python classes that inherit from `BaseDetector`. Adding a new one takes about 20 lines.
 
@@ -1136,7 +1112,7 @@ ALL_DETECTORS: list[BaseDetector] = [
 ### Step 3 — Rebuild
 
 ```bash
-docker compose up -d --build backend
+docker compose up -d --build
 ```
 
 ### BaseDetector reference
@@ -1170,7 +1146,7 @@ docker compose up -d --build backend
 
 ---
 
-## 15. Project Structure
+## 16. Project Structure
 
 ```
 proxmon/
@@ -1199,7 +1175,6 @@ proxmon/
 │   │   │   ├── __init__.py
 │   │   │   ├── config_store.py       /app/data/proxmon.db SQLite read/write
 │   │   │   │                         • single settings row, JSON blob
-│   │   │   │                         • auto-migrates config.json on first start
 │   │   │   │                         • merge_into_settings(settings) → Settings
 │   │   │   │                         • is_configured() / get_missing_fields()
 │   │   │   │
@@ -1280,16 +1255,16 @@ proxmon/
 │   ├── tests/
 │   │   ├── __init__.py
 │   │   ├── test_alerting.py          disk/outdated alert logic, cooldowns
-│   │   ├── test_config_store.py      config store: load, save, migration, merge
+│   │   ├── test_config_store.py      config store: load, save, merge, is_configured
 │   │   ├── test_detectors.py         detection matching + version fetching (all 15 apps)
 │   │   ├── test_discovery.py         Proxmox parsing, IP resolution, config resolution, full cycle
 │   │   ├── test_github.py            caching, normalization, rate limits
 │   │   ├── test_notifier.py          ntfy send, auth, errors, shared client
 │   │   └── test_ssh_version_cmd.py   SSH command whitelist + metacharacter guard
 │   │
-│   ├── Dockerfile                    Python 3.12-slim + uv + curl (healthcheck)
+│   ├── Dockerfile                    Backend-only build (dev use only)
 │   ├── pyproject.toml                hatchling build, uv deps, pytest config
-│   └── .env.example                  documented env var template
+│   └── .env.example                  documents CONFIG_DB_PATH (the only env var)
 │
 ├── frontend/                         React 18 + TypeScript + Vite + Tailwind CSS
 │   ├── src/
@@ -1381,8 +1356,8 @@ proxmon/
 │   │       ├── ErrorBanner.tsx       Dismissible error with retry
 │   │       └── LoadingSpinner.tsx    Centered spinner with optional text
 │   │
-│   ├── Dockerfile                    Node 20 build stage → nginx:alpine serve stage
-│   ├── nginx.conf                    SPA fallback + /api proxy + gzip
+│   ├── Dockerfile                    Standalone frontend build (dev use only)
+│   ├── nginx.conf                    Dev nginx config (not used in production)
 │   ├── package.json
 │   ├── tsconfig.json
 │   ├── vite.config.ts
@@ -1400,10 +1375,10 @@ proxmon/
 │
 ├── .github/
 │   └── workflows/
-│       └── docker-build.yml          CI: build & push to ghcr.io on push to main
+│       └── docker-build.yml          CI: build & push single image to ghcr.io on push to main
 │
-├── docker-compose.yml                Production: backend (internal) + frontend (:3000)
-├── docker-compose.override.yml.example  Dev: hot reload mounts
+├── Dockerfile                        Multi-stage: builds frontend + backend into one image
+├── docker-compose.yml                Single service: proxmon on port 3000
 ├── CLAUDE.md                         Claude Code project context
 ├── .gitignore
 └── README.md
@@ -1411,7 +1386,7 @@ proxmon/
 
 ---
 
-## 16. Security Considerations
+## 17. Security Considerations
 
 ### Proxmox access
 
@@ -1433,9 +1408,10 @@ proxmon/
 
 ### Network
 
-- Backend is **not exposed** on the host network; only the frontend (nginx, port 3000) is published
-- CORS is configured with explicit allowed origins, no wildcard
-- No authentication on the web UI — designed for local network use; do not expose port 3000 to the public internet
+- The app listens on port 3000 by default (configurable via `PORT` env var)
+- CORS is configured with explicit allowed origins for local development; production uses same-origin
+- Forms-based authentication is enabled by default (see [§9 Login & Authentication](#9-login--authentication)); set `auth_mode=disabled` only on trusted local networks
+- Default password is `proxmon!` — change it immediately after first login
 
 ### GitHub API
 
@@ -1444,7 +1420,7 @@ proxmon/
 
 ---
 
-## 17. Troubleshooting
+## 18. Troubleshooting
 
 ### Connection issues
 
@@ -1454,7 +1430,7 @@ proxmon/
 | "Authentication failed" | Wrong token ID or secret | Regenerate token in Proxmox; check format `user@realm!tokenname` |
 | "Authorization denied" | Insufficient token permissions | Add `PVEAuditor` role to the token at path `/` |
 | SSL errors with `VERIFY_SSL=true` | Self-signed certificate | Set `VERIFY_SSL=false` or install a valid cert on Proxmox |
-| Wizard shows even after setting `.env` | `.env` not found by Docker Compose | Ensure `.env` is in the project root (same directory as `docker-compose.yml`) |
+| Wizard keeps showing | No valid config in SQLite database | Complete the setup wizard or check that `./data` volume is mounted |
 
 ### Detection issues
 
@@ -1491,29 +1467,26 @@ If GitHub API calls return 401 Unauthorized after saving settings, the masked pl
 | Symptom | Cause | Fix |
 |---|---|---|
 | Config lost after `docker compose down` | `./data` volume not mounted | Default `docker-compose.yml` includes `./data:/app/data`; config is in `proxmon.db` |
-| Backend fails to start | Missing required env vars (`.env` mode) | Check logs: `docker compose logs backend` |
-| Frontend shows "Failed to fetch" | Backend not running or unhealthy | Check: `docker compose ps`, `docker compose logs backend` |
-| Port 3000 already in use | Another service on the host | Change the port mapping in `docker-compose.yml`: `"3001:80"` |
+| App fails to start | Corrupted config database or missing volume | Check logs: `docker compose logs proxmon` |
+| Frontend shows "Failed to fetch" | Container not running or unhealthy | Check: `docker compose ps`, `docker compose logs proxmon` |
+| Port 3000 already in use | Another service on the host | Set `PORT=3001` and change port mapping to `"3001:3001"` |
 
 ### Viewing logs
 
 ```bash
-# All services
+# Follow logs
 docker compose logs -f
 
-# Backend only
-docker compose logs -f backend
-
 # With timestamps
-docker compose logs -f -t backend
+docker compose logs -f -t
 
 # Last 100 lines
-docker compose logs --tail=100 backend
+docker compose logs --tail=100
 ```
 
 ---
 
-## 18. Roadmap
+## 19. Roadmap
 
 ### Phase 2 (planned)
 
@@ -1539,7 +1512,7 @@ docker compose logs --tail=100 backend
 
 ---
 
-## 19. License
+## 20. License
 
 MIT License — see [LICENSE](LICENSE) for details.
 

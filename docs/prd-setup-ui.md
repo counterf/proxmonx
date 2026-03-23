@@ -231,8 +231,7 @@ Fields that are `null` or omitted retain their current value (important for `pro
   "ssh_key_path": "/app/ssh/id_rsa",
   "ssh_password": null,
   "github_token_set": true,
-  "log_level": "info",
-  "proxmon_enabled": true
+  "log_level": "info"
 }
 ```
 

@@ -86,17 +86,15 @@ class TestExecuteVersionCmd:
     @pytest.mark.asyncio
     async def test_returns_first_line_stripped(self, ssh_client: SSHClient) -> None:
         with patch.object(
-            ssh_client, "_execute_sync", return_value="  1.2.3\n4.5.6\n"
+            ssh_client, "_execute_sync", return_value=("  1.2.3\n4.5.6\n", "")
         ):
             result = await ssh_client.execute_version_cmd("10.0.0.1", "app --version")
             assert result == "  1.2.3\n4.5.6\n"
-            # The caller (discovery.py) does the strip/splitlines — execute_version_cmd
-            # returns raw output from _execute_sync
 
     @pytest.mark.asyncio
     async def test_passes_credential_overrides(self, ssh_client: SSHClient) -> None:
         with patch.object(
-            ssh_client, "_execute_sync", return_value="2.0.0"
+            ssh_client, "_execute_sync", return_value=("2.0.0", "")
         ) as mock_exec:
             await ssh_client.execute_version_cmd(
                 "10.0.0.1",

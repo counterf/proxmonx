@@ -42,3 +42,4 @@ htmlcov/
 
 # Config data
 data/
+.cursor/

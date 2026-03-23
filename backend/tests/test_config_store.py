@@ -1,7 +1,5 @@
 """Tests for ConfigStore: SQLite-backed config persistence."""
 
-import json
-import os
 from pathlib import Path
 
 import pytest
@@ -39,27 +37,26 @@ class TestSaveLoadRoundTrip:
 
 
 class TestIsConfigured:
-    def test_false_when_empty(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
-        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
-                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
-            monkeypatch.delenv(f, raising=False)
+    def test_false_when_empty(self, store: ConfigStore) -> None:
         assert store.is_configured() is False
 
-    def test_true_when_required_fields_present(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
-        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
-                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
-            monkeypatch.delenv(f, raising=False)
-        store.save(_FULL_CONFIG)
+    def test_true_when_host_fully_configured(self, store: ConfigStore) -> None:
+        store.save({
+            "proxmox_hosts": [{
+                "id": "pve1", "label": "PVE1",
+                "host": "https://10.0.0.1:8006",
+                "token_id": "root@pam!test",
+                "token_secret": "secret-uuid",
+                "node": "pve",
+            }],
+        })
         assert store.is_configured() is True
 
 
 class TestGetMissingFields:
-    def test_returns_all_when_empty(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
-        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
-                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
-            monkeypatch.delenv(f, raising=False)
+    def test_returns_all_when_empty(self, store: ConfigStore) -> None:
         assert set(store.get_missing_fields()) == {
-            "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node",
+            "host", "token_id", "token_secret", "node",
         }
 
 
@@ -72,49 +69,14 @@ class TestSaveIdempotent:
         assert data["b"] == 2
 
 
-class TestMigration:
-    def test_migrates_config_json_if_db_empty(self, tmp_path: Path) -> None:
-        json_path = tmp_path / "config.json"
-        json_path.write_text(json.dumps(_FULL_CONFIG))
-
-        db_path = tmp_path / "proxmon.db"
-        store = ConfigStore(str(db_path))
-        loaded = store.load()
-        # config.json flat fields are preserved; multi-host migration also runs
-        for key, value in _FULL_CONFIG.items():
-            assert loaded[key] == value
-        # multi-host migration wraps the single host into proxmox_hosts
-        assert "proxmox_hosts" in loaded
-        assert loaded["proxmox_hosts"][0]["host"] == _FULL_CONFIG["proxmox_host"]
-        assert loaded["proxmox_hosts"][0]["id"] == "default"
-
-    def test_migration_skipped_if_settings_row_exists(self, tmp_path: Path) -> None:
-        db_path = tmp_path / "proxmon.db"
-        store = ConfigStore(str(db_path))
-        store.save({"existing": "data"})
-
-        # Now write a config.json — it should NOT be migrated
-        json_path = tmp_path / "config.json"
-        json_path.write_text(json.dumps(_FULL_CONFIG))
-
-        store2 = ConfigStore(str(db_path))
-        assert store2.load() == {"existing": "data"}
-
-
 class TestMergeIntoSettings:
-    def test_merges_basic_fields(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
-        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
-                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
-            monkeypatch.delenv(f, raising=False)
+    def test_merges_basic_fields(self, store: ConfigStore) -> None:
         store.save({**_FULL_CONFIG, "poll_interval_seconds": 120})
         result = store.merge_into_settings(Settings())
         assert result.proxmox_host == "https://10.0.0.1:8006"
         assert result.poll_interval_seconds == 120
 
-    def test_merges_app_config(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
-        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
-                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
-            monkeypatch.delenv(f, raising=False)
+    def test_merges_app_config(self, store: ConfigStore) -> None:
         store.save({
             **_FULL_CONFIG,
             "app_config": {"sonarr": {"port": 9999, "api_key": "abc123"}},
@@ -125,10 +87,7 @@ class TestMergeIntoSettings:
         assert result.app_config["sonarr"].port == 9999
         assert result.app_config["sonarr"].api_key == "abc123"
 
-    def test_merges_guest_config(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
-        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
-                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
-            monkeypatch.delenv(f, raising=False)
+    def test_merges_guest_config(self, store: ConfigStore) -> None:
         store.save({
             **_FULL_CONFIG,
             "guest_config": {"pve1:100": {"port": 8080, "scheme": "https"}},
@@ -139,10 +98,7 @@ class TestMergeIntoSettings:
         assert result.guest_config["pve1:100"].port == 8080
         assert result.guest_config["pve1:100"].scheme == "https"
 
-    def test_merges_proxmox_hosts(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
-        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
-                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
-            monkeypatch.delenv(f, raising=False)
+    def test_merges_proxmox_hosts(self, store: ConfigStore) -> None:
         store.save({
             **_FULL_CONFIG,
             "proxmox_hosts": [{
@@ -157,10 +113,7 @@ class TestMergeIntoSettings:
         assert isinstance(result.proxmox_hosts[0], ProxmoxHostConfig)
         assert result.proxmox_hosts[0].id == "pve1"
 
-    def test_skips_invalid_app_config_entries(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
-        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
-                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
-            monkeypatch.delenv(f, raising=False)
+    def test_skips_invalid_app_config_entries(self, store: ConfigStore) -> None:
         store.save({
             **_FULL_CONFIG,
             "app_config": {
@@ -171,13 +124,9 @@ class TestMergeIntoSettings:
         result = store.merge_into_settings(Settings())
         assert "sonarr" in result.app_config
         assert result.app_config["sonarr"].port == 8989
-        # Non-dict entry is dropped, does not crash
         assert "bad_entry" not in result.app_config
 
-    def test_skips_invalid_proxmox_host_entries(self, store: ConfigStore, monkeypatch: pytest.MonkeyPatch) -> None:
-        for f in ("PROXMOX_HOST", "PROXMOX_TOKEN_ID", "PROXMOX_TOKEN_SECRET", "PROXMOX_NODE",
-                   "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node"):
-            monkeypatch.delenv(f, raising=False)
+    def test_skips_invalid_proxmox_host_entries(self, store: ConfigStore) -> None:
         store.save({
             **_FULL_CONFIG,
             "proxmox_hosts": [
@@ -187,7 +136,6 @@ class TestMergeIntoSettings:
             ],
         })
         result = store.merge_into_settings(Settings())
-        # Valid host is included, non-dict is dropped
         assert len(result.proxmox_hosts) == 1
         assert result.proxmox_hosts[0].id == "pve1"
 

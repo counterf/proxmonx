@@ -30,16 +30,19 @@ Each detector in `backend/app/detectors/` extends `BaseDetector` and implements:
 - `get_installed_version(host, port, api_key, scheme)` -- HTTP probe returning version string or None
 
 ## Config storage
-SQLite at `/app/data/proxmon.db`. Single `settings` table, one row, JSON blob. Auto-migrates `config.json` on first start.
+SQLite at `/app/data/proxmon.db`. Single `settings` table, one row, JSON blob. All config lives in SQLite (only `CONFIG_DB_PATH` env var is recognized, defaults to `/app/data/proxmon.db`).
 
 ## Tests
-`cd backend && pytest tests/` -- 136 tests across test_detectors.py, test_discovery.py, test_github.py, test_config_store.py, test_ssh_version_cmd.py, test_notifier.py, test_alerting.py, test_routes_helpers.py
+`cd backend && pytest tests/` -- 169 tests across test_detectors.py, test_discovery.py, test_github.py, test_config_store.py, test_ssh_version_cmd.py, test_notifier.py, test_alerting.py, test_routes_helpers.py, test_auth_routes.py
 
 ## Deploy
+Single container serves both API and frontend on port 3000 (configurable via `PORT` env var).
 ```bash
 docker compose build && docker compose up -d
 ```
-CI auto-builds to `ghcr.io/counterf/proxmonx-{backend,frontend}:latest` on push to main.
+CI auto-builds to `ghcr.io/counterf/proxmon:latest` on push to main.
+
+**After any code changes, always rebuild and restart Docker** so the running stack reflects the changes: `docker compose build --no-cache && docker compose up -d`.
 
 ## Common pitfalls
 - GitHub token and SSH password must NOT be pre-populated with `"***"` -- `_keep_or_replace()` in routes.py handles this

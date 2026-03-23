@@ -2,7 +2,6 @@ import type {
   GuestSummary,
   GuestDetail,
   HealthStatus,
-  AppSettings,
   SetupStatus,
   FullSettings,
   SettingsSaveRequest,
@@ -13,6 +12,7 @@ import type {
 } from '../types';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
+export const AUTH_UNAUTHORIZED_EVENT = 'proxmon:unauthorized';
 
 export class HttpError extends Error {
   constructor(public readonly status: number, message: string) {
@@ -33,6 +33,13 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
       signal: controller.signal,
     });
     if (!response.ok) {
+      if (
+        response.status === 401
+        && path !== '/api/auth/login'
+        && path !== '/api/auth/status'
+      ) {
+        window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT));
+      }
       throw new HttpError(response.status, `HTTP ${response.status}: ${response.statusText}`);
     }
     try {
@@ -60,10 +67,6 @@ export async function fetchGuest(id: string): Promise<GuestDetail> {
 
 export async function triggerRefresh(): Promise<{ status: string }> {
   return fetchJson<{ status: string }>('/api/refresh', { method: 'POST' });
-}
-
-export async function fetchSettings(): Promise<AppSettings> {
-  return fetchJson<AppSettings>('/api/settings');
 }
 
 export async function fetchHealth(): Promise<HealthStatus> {
@@ -155,10 +158,10 @@ export async function logout(): Promise<void> {
   });
 }
 
-export async function changePassword(newPassword: string): Promise<{ success: boolean }> {
+export async function changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean }> {
   return fetchJson<{ success: boolean }>('/api/auth/change-password', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ new_password: newPassword }),
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   });
 }
