@@ -148,7 +148,7 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 - **Per-guest version history** — last 10 checks retained in memory
 - **Dashboard** — filterable, sortable table with configurable columns; status badges, disk usage bars, OS type, detection method
 - **Configurable columns** — add/remove dashboard columns; selection persisted in browser
-- **Disk usage monitoring** — color-coded bars per guest (blue < 50%, green 50–75%, amber 76–90%, red 90%+)
+- **Disk usage monitoring** — color-coded bars per guest (blue < 50%, green 50–75%, amber 76–90%, red 90%+); LXC disk from Proxmox API; VM disk from QEMU guest agent (`agent/get-fsinfo`, root filesystem only)
 - **OS type display** — shows the guest OS (Alpine, Debian, Ubuntu, etc.) from Proxmox config
 - **App icons** — icons from [selfhst/icons](https://github.com/selfhst/icons) displayed next to app names
 - **Per-guest detail page** — all metadata, version history, raw detection output, instance settings
@@ -159,7 +159,8 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 - **Config persistence** — settings saved to SQLite at `/app/data/proxmon.db` (Docker volume)
 - **Multi-host support** — monitor guests across multiple Proxmox VE nodes from a single dashboard
 - **Per-app configuration** — override port, API key, scheme, GitHub repo, and SSH settings per app
-- **Per-guest configuration** — override port, API key, scheme, GitHub repo, and monitored app for individual guest instances (guest > app > detector defaults)
+- **Per-guest configuration** — override port, API key, scheme, GitHub repo, version hostname, and monitored app for individual guest instances (guest > app > detector defaults)
+- **Version probe observability** — guest detail page shows the exact URL attempted and a human-readable error reason (e.g. `HTTP 401 — check API key`) when version detection fails
 - **Version detection cascade** — API probe first, then CLI fallback via pct exec or SSH (configurable: `pct_first`, `ssh_first`, `ssh_only`, `pct_only`)
 - **ntfy notifications** — push alerts when disk usage exceeds a threshold or an app becomes outdated; configurable cooldown
 - **App logo in header** — clickable app names link to the app's web UI; responsive mobile layout
@@ -372,6 +373,19 @@ Per-app overrides are configured in the Settings UI under the **App Configuratio
 ### Per-guest configuration
 
 When multiple instances of the same app exist, per-guest overrides take precedence over per-app overrides. Configure them via the "Instance Settings" panel on each guest's detail page, or via API.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `port` | `int` | Detector default | Override the HTTP port used for version probing |
+| `api_key` | `string` | — | API key for authenticated endpoints |
+| `scheme` | `string` | `http` | Protocol scheme: `http` or `https` |
+| `github_repo` | `string` | Detector default | Override the GitHub `owner/repo` for latest version lookup |
+| `ssh_version_cmd` | `string` | — | Custom SSH command for CLI-based version detection |
+| `ssh_username` | `string` | Global default | Override SSH username for this guest |
+| `ssh_key_path` | `string` | — | Override SSH private key path for this guest |
+| `ssh_password` | `string` | — | Override SSH password for this guest |
+| `version_host` | `string` | Auto-detected IP | Override the hostname/IP used for version probing and the web URL link. Useful when the Proxmox-resolved IP is not reachable (e.g. different VLAN). |
+| `forced_detector` | `string` | — | Force a specific detector (overrides auto-detection) |
 
 Configuration priority: **guest-specific > app-specific > detector defaults**.
 

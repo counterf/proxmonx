@@ -56,6 +56,8 @@ CI auto-builds to `ghcr.io/counterf/proxmon:latest` on push to main.
 ## Common pitfalls
 - GitHub token and SSH password must NOT be pre-populated with `"***"` -- `_keep_or_replace()` in routes.py handles this
 - All detectors default to `http://`; use per-app `scheme=https` for HTTPS-only apps
-- Version probes fail silently (WARNING log) if API key is missing for *arr apps
+- `HttpJsonDetector.get_installed_version` raises `ProbeError` on HTTP/connection failures; `_check_version` in discovery.py catches it and stores the message in `guest.probe_error`; the guest detail UI surfaces this to the user
 - Custom app detectors are injected into `ALL_DETECTORS`/`DETECTOR_MAP` at runtime via `load_custom_detectors()`; called at startup (main.py lifespan) and after every CRUD save
-- `forced_detector` lives on `AppConfig` (shared model) but is semantically guest-only; only the guest config save path uses it
+- `forced_detector` and `version_host` live on `AppConfig` (shared model) but are semantically guest-only; only the guest config save path uses them
+- `version_host` overrides both the version probe IP and the clickable web URL link for a guest
+- VM disk usage is fetched via `agent/get-fsinfo` (QEMU guest agent); LXC disk comes from the Proxmox list endpoint directly. VMs without the guest agent show blank disk.
