@@ -141,20 +141,43 @@ class ProxmoxClient:
             return ip, os_type
 
         # Fallback: live interface list (handles DHCP-assigned IPs)
-        try:
-            ifaces_data = await self._get(
-                f"/nodes/{self._node}/{endpoint}/{vmid}/interfaces"
-            )
-            ifaces = ifaces_data.get("data", [])
-            if isinstance(ifaces, list):
-                for iface in ifaces:
-                    name = str(iface.get("name", ""))
-                    inet = str(iface.get("inet", ""))
-                    if inet and name != "lo" and not inet.startswith("127."):
-                        candidate = inet.split("/")[0]
-                        if candidate:
-                            return candidate, os_type
-        except Exception:
-            logger.debug("Could not resolve IP from interfaces for guest %s", vmid)
+        if guest_type == "lxc":
+            # LXC: /lxc/{vmid}/interfaces — flat list with inet field
+            try:
+                ifaces_data = await self._get(
+                    f"/nodes/{self._node}/lxc/{vmid}/interfaces"
+                )
+                ifaces = ifaces_data.get("data", [])
+                if isinstance(ifaces, list):
+                    for iface in ifaces:
+                        name = str(iface.get("name", ""))
+                        inet = str(iface.get("inet", ""))
+                        if inet and name != "lo" and not inet.startswith("127."):
+                            candidate = inet.split("/")[0]
+                            if candidate:
+                                return candidate, os_type
+            except Exception:
+                logger.debug("Could not resolve IP from interfaces for guest %s", vmid)
+        else:
+            # VM: /qemu/{vmid}/agent/network-get-interfaces — requires QEMU guest agent
+            try:
+                data = await self._get(
+                    f"/nodes/{self._node}/qemu/{vmid}/agent/network-get-interfaces"
+                )
+                result = data.get("data", {})
+                if isinstance(result, dict):
+                    result = result.get("result", [])
+                if isinstance(result, list):
+                    for iface in result:
+                        name = str(iface.get("name", ""))
+                        if name == "lo":
+                            continue
+                        for addr in iface.get("ip-addresses", []):
+                            if addr.get("ip-address-type") == "ipv4":
+                                candidate = str(addr.get("ip-address", ""))
+                                if candidate and not candidate.startswith("127."):
+                                    return candidate, os_type
+            except Exception:
+                logger.debug("Could not resolve IP from guest agent for VM %s", vmid)
 
         return None, os_type
