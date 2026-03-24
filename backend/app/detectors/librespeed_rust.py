@@ -15,7 +15,7 @@ class LibreSpeedRustDetector(BaseDetector):
     """
 
     name = "librespeed-rust"
-    display_name = "LibreSpeed (Rust)"
+    display_name = "LibreSpeed"
     github_repo = "librespeed/speedtest-rust"
     aliases = ["librespeed_rust", "speedtest-rust", "speedtest_rust"]
     default_port = 8080
