@@ -322,12 +322,12 @@ class DiscoveryEngine:
         self, detector_name: str, guest_id: str,
     ) -> tuple[
         int | None, str | None, str,
-        str | None, str | None, str | None, str | None, str | None,
+        str | None, str | None, str | None, str | None, str | None, str | None,
     ]:
         """Resolve effective config: guest_config -> app_config -> defaults.
 
         Returns (port, api_key, scheme, github_repo, ssh_version_cmd,
-                 ssh_username, ssh_key_path, ssh_password).
+                 ssh_username, ssh_key_path, ssh_password, version_host).
         """
         port: int | None = None
         api_key: str | None = None
@@ -337,6 +337,7 @@ class DiscoveryEngine:
         ssh_user: str | None = None
         ssh_key: str | None = None
         ssh_pass: str | None = None
+        version_host: str | None = None
 
         # Layer 1: app-level defaults
         if self._settings and self._settings.app_config:
@@ -372,13 +373,15 @@ class DiscoveryEngine:
                     ssh_key = guest_cfg.ssh_key_path
                 if guest_cfg.ssh_password is not None:
                     ssh_pass = guest_cfg.ssh_password
+                if guest_cfg.version_host is not None:
+                    version_host = guest_cfg.version_host
 
         logger.debug(
-            "Resolved config for %s (guest %s): port=%s, api_key=%s, scheme=%s",
+            "Resolved config for %s (guest %s): port=%s, api_key=%s, scheme=%s, version_host=%s",
             detector_name, guest_id,
-            port or "default", "set" if api_key else "none", scheme,
+            port or "default", "set" if api_key else "none", scheme, version_host or "none",
         )
-        return port, api_key, scheme, github_repo, ssh_cmd, ssh_user, ssh_key, ssh_pass
+        return port, api_key, scheme, github_repo, ssh_cmd, ssh_user, ssh_key, ssh_pass, version_host
 
     async def _check_version(
         self,
@@ -394,7 +397,7 @@ class DiscoveryEngine:
 
         # Resolve config: guest-level -> app-level -> detector defaults
         port_override, api_key, scheme, github_repo_override, \
-            ssh_version_cmd, ssh_username, ssh_key_path, ssh_password = \
+            ssh_version_cmd, ssh_username, ssh_key_path, ssh_password, version_host = \
             self._resolve_config(detector.name, guest.id)
 
         # Store the effective port and scheme so GuestInfo._web_url() (in guest.py)
@@ -412,9 +415,10 @@ class DiscoveryEngine:
                 logger.warning("Invalid version_detect_method '%s', using pct_first", method)
 
         # HTTP probe always runs first regardless of method (it's the primary source)
+        probe_host = version_host or guest.ip
         try:
             guest.installed_version = await detector.get_installed_version(
-                guest.ip, port=port_override, api_key=api_key, scheme=scheme,
+                probe_host, port=port_override, api_key=api_key, scheme=scheme,
                 http_client=self._http_client,
             )
             if guest.installed_version:

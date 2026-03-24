@@ -147,7 +147,7 @@ function InstanceSettings({ guestId, appName, detectorUsed }: { guestId: string;
       </button>
       {!expanded && (
         <p className="text-xs text-gray-600 mt-1">
-          Override port, API key, scheme, or GitHub repo for this {appName} instance.
+          Override port, API key, scheme, version hostname, or GitHub repo for this {appName} instance.
         </p>
       )}
       {expanded && (
@@ -231,6 +231,22 @@ function InstanceSettings({ guestId, appName, detectorUsed }: { guestId: string;
                 className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
+          </div>
+
+          {/* Version hostname override */}
+          <div>
+            <label htmlFor="gc-version-host" className="text-xs text-gray-500">Version check hostname / IP</label>
+            <input
+              id="gc-version-host"
+              type="text"
+              value={cfg.version_host ?? ''}
+              placeholder="Auto-detected from Proxmox"
+              onChange={(e) => setCfg({ ...cfg, version_host: e.target.value || null })}
+              className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <p className="text-xs text-gray-600 mt-0.5">
+              Override the IP proxmon probes for this guest's version endpoint. Useful when the auto-detected IP is not reachable.
+            </p>
           </div>
 
           {/* GitHub repo override */}

@@ -37,6 +37,7 @@ class _AppConfigBase(BaseModel):
     ssh_username: str | None = None
     ssh_key_path: str | None = None
     ssh_password: str | None = None
+    version_host: str | None = None
 
     @field_validator("ssh_version_cmd")
     @classmethod
@@ -387,6 +388,8 @@ async def save_guest_config(
 
     if body.forced_detector:
         merged["forced_detector"] = body.forced_detector
+    if body.version_host is not None and body.version_host != "":
+        merged["version_host"] = body.version_host
     # None means "clear" — not added to merged, stripped below
 
     # Strip None values

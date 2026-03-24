@@ -65,6 +65,7 @@ export interface AppConfigEntry {
   ssh_username?: string | null;
   ssh_key_path?: string | null;
   ssh_password?: string | null;
+  version_host?: string | null;
 }
 
 export interface AppConfigDefault {

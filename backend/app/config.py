@@ -59,6 +59,7 @@ class AppConfig(BaseModel):
     ssh_key_path: str | None = None
     ssh_password: str | None = None
     forced_detector: str | None = None  # guest config only: override auto-detection
+    version_host: str | None = None  # guest config only: override IP/hostname for version probe
 
 
 class ProxmoxHostConfig(BaseModel):
