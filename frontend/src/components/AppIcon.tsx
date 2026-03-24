@@ -2,15 +2,40 @@ import { useState } from 'react';
 
 const ICON_BASE = 'https://cdn.jsdelivr.net/gh/selfhst/icons/png';
 
+/** When detector id does not match a selfhst/icons PNG basename. */
+const DETECTOR_ICON_ALIASES: Record<string, string> = {
+  'librespeed-rust': 'librespeed',
+};
+
 interface AppIconProps {
   appName: string | null;
+  /** Stable detector id from API (preferred for CDN slug). */
+  detectorKey?: string | null;
   size?: number;
   className?: string;
 }
 
-export default function AppIcon({ appName, size = 20, className = '' }: AppIconProps) {
+function resolveIconSlug(appName: string | null, detectorKey: string | null | undefined): string | null {
+  const dk = detectorKey?.trim().toLowerCase();
+  if (dk) {
+    return DETECTOR_ICON_ALIASES[dk] ?? dk;
+  }
+  if (!appName) return null;
+  let s = appName.toLowerCase().trim();
+  s = s.replace(/\s*\([^)]*\)/g, ' ').trim();
+  s = s.replace(/\s+/g, '-');
+  s = s.replace(/[^a-z0-9-]/g, '');
+  return s || null;
+}
+
+export default function AppIcon({
+  appName,
+  detectorKey = null,
+  size = 20,
+  className = '',
+}: AppIconProps) {
   const [failed, setFailed] = useState(false);
-  const slug = appName ? appName.toLowerCase() : null;
+  const slug = resolveIconSlug(appName, detectorKey);
 
   if (!slug || failed) return null;
 

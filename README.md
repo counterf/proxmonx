@@ -2,7 +2,7 @@
 
 Self-hosted Proxmox monitoring dashboard that continuously discovers LXC containers and VMs, identifies the application running inside each guest, compares the installed version against the latest upstream release on GitHub, and shows a live update-status dashboard — with a built-in setup wizard so you never have to touch a config file.
 
-![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 169 passing](https://img.shields.io/badge/tests-169%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
+![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 235 passing](https://img.shields.io/badge/tests-235%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
 
 <!-- screenshot: dashboard showing guests table with version status badges -->
 
@@ -71,8 +71,8 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 │  ┌──────▼──────────────────────────────────────────────┐    │
 │  │  DiscoveryEngine                                      │    │
 │  │  • ProxmoxClient (async httpx, GET-only)             │    │
-│  │  • 15 detectors (config-driven HttpJsonDetector +     │    │
-│  │    specialized: Plex, qBittorrent, SABnzbd, Caddy)   │    │
+│  │  • 19 built-in detectors + user-defined custom apps   │    │
+│  │    (config-driven HttpJsonDetector + specialized)     │    │
 │  │  • GitHubClient (releases API + 1h cache)            │    │
 │  │  • SSHClient (paramiko, command whitelist)           │    │
 │  └──────┬──────────────────┬────────────────────┬──────┘    │
@@ -139,9 +139,11 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
   - Proxmox tag matching (`sonarr`, `app:sonarr`)
   - Guest name token matching (`sonarr-lxc` → sonarr)
   - Docker container inspection via SSH (`docker ps`)
-- **15 built-in app detectors** — arr-stack, Plex, Immich, Gitea, Seerr, and more; most are config-driven via `http_json.py`; specialized detectors (Plex, qBittorrent, SABnzbd, Caddy) subclass `BaseDetector` directly
+- **19 built-in app detectors** — arr-stack (Sonarr, Radarr, Bazarr, Prowlarr, Lidarr, Readarr, Whisparr), Plex, Immich, Gitea, Seerr, Overseerr, qBittorrent, SABnzbd, Jackett, LibreSpeed, Traefik, Caddy, ntfy; most are config-driven via `http_json.py`; specialized detectors (Plex, qBittorrent, SABnzbd, Caddy, Jackett, LibreSpeed) subclass `BaseDetector` directly
+- **Custom app definitions** — define your own apps in the UI (display name, port, version endpoint, GitHub repo, aliases, docker image patterns); stored persistently in SQLite; appear alongside built-in apps in detection and version tracking
 - **Installed version detection** — queries each app's own HTTP API
-- **Latest version lookup** — GitHub Releases API with 1-hour cache
+- **Latest version lookup** — GitHub Releases API with 1-hour cache; 3-level fallback (releases/latest → releases list → tags)
+- **GitHub repo override per guest** — override which GitHub repo is used for latest-version lookup on a specific guest; accepts full URLs or `owner/repo`; inline Check button validates the repo before saving
 - **Semantic version comparison** — `packaging.version.Version`, handles build hashes
 - **Per-guest version history** — last 10 checks retained in memory
 - **Dashboard** — filterable, sortable table with configurable columns; status badges, disk usage bars, OS type, detection method
@@ -150,13 +152,14 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 - **OS type display** — shows the guest OS (Alpine, Debian, Ubuntu, etc.) from Proxmox config
 - **App icons** — icons from [selfhst/icons](https://github.com/selfhst/icons) displayed next to app names
 - **Per-guest detail page** — all metadata, version history, raw detection output, instance settings
+- **Monitored app override** — manually assign any built-in or custom app to a guest from the Instance Settings panel; overrides auto-detection
 - **Manual refresh** — POST `/api/refresh` triggers an immediate cycle
 - **Setup wizard** — 5-step guided first-run configuration (no `.env` editing required)
 - **Editable settings page** — live connection test, dirty tracking, field descriptions, save without restart
 - **Config persistence** — settings saved to SQLite at `/app/data/proxmon.db` (Docker volume)
 - **Multi-host support** — monitor guests across multiple Proxmox VE nodes from a single dashboard
 - **Per-app configuration** — override port, API key, scheme, GitHub repo, and SSH settings per app
-- **Per-guest configuration** — override API key, port, and scheme for individual guest instances (guest > app > detector defaults)
+- **Per-guest configuration** — override port, API key, scheme, GitHub repo, and monitored app for individual guest instances (guest > app > detector defaults)
 - **Version detection cascade** — API probe first, then CLI fallback via pct exec or SSH (configurable: `pct_first`, `ssh_first`, `ssh_only`, `pct_only`)
 - **ntfy notifications** — push alerts when disk usage exceeds a threshold or an app becomes outdated; configurable cooldown
 - **App logo in header** — clickable app names link to the app's web UI; responsive mobile layout
@@ -184,12 +187,17 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 | **Radarr** | `radarr` | `GET /api/v3/system/status` → `version` | Radarr/Radarr | 7878 |
 | **Bazarr** | `bazarr` | `GET /api/bazarr/api/v1/system/status` → `bazarr_version` | morpheus65535/bazarr | 6767 |
 | **Prowlarr** | `prowlarr` | `GET /api/v1/system/status` → `version` | Prowlarr/Prowlarr | 9696 |
+| **Lidarr** | `lidarr` | `GET /api/v1/system/status` → `version` | Lidarr/Lidarr | 8686 |
+| **Readarr** | `readarr` | `GET /api/v1/system/status` → `version` | Readarr/Readarr | 8787 |
+| **Whisparr** | `whisparr` | `GET /api/v3/system/status` → `version` | Whisparr/Whisparr | 6969 |
 | **Overseerr** | `overseerr` | `GET /api/v1/status` → `version` | sct/overseerr | 5055 |
 | **Plex** | `plex`, `plexmediaserver`, `pms` | `GET /identity` (XML attr) | plexinc/pms-docker | 32400 |
 | **Immich** | `immich` | `GET /api/server/about` → `version` (requires API key with `server.about` permission) | immich-app/immich | 2283 |
 | **Gitea** | `gitea` | `GET /api/v1/version` → `version` | go-gitea/gitea | 3000 |
 | **qBittorrent** | `qbittorrent`, `qbit` | `GET /api/v2/app/version` (plain text) | qbittorrent/qBittorrent | 8080 |
 | **SABnzbd** | `sabnzbd`, `sab` | `GET /api?mode=version&output=json` → `version` | sabnzbd/sabnzbd | 8085 |
+| **Jackett** | `jackett` | `GET /api/v2.0/server/config` → `AppVersion` | Jackett/Jackett | 9117 |
+| **LibreSpeed** | `librespeed`, `librespeed-rust` | `GET /api/version` → `version` | librespeed/speedtest-rust | 8080 |
 | **Traefik** | `traefik` | `GET /api/version` → `version` | traefik/traefik | 8080 |
 | **Caddy** | `caddy` | `GET :2019/config/` (admin API) | caddyserver/caddy | 2019 |
 | **ntfy** | `ntfy` | `GET /v1/info` → `version` | binwiederhier/ntfy | 80 |

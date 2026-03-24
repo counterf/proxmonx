@@ -9,6 +9,8 @@ import type {
   AppConfigDefault,
   AppConfigEntry,
   AuthStatus,
+  CustomAppDef,
+  GitHubTestResult,
 } from '../types';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -163,5 +165,39 @@ export async function changePassword(currentPassword: string, newPassword: strin
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+}
+
+export async function testGithubRepo(repo: string): Promise<GitHubTestResult> {
+  return fetchJson<GitHubTestResult>('/api/github/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo }),
+  });
+}
+
+export async function fetchCustomApps(): Promise<CustomAppDef[]> {
+  return fetchJson<CustomAppDef[]>('/api/custom-apps');
+}
+
+export async function createCustomApp(data: CustomAppDef): Promise<CustomAppDef> {
+  return fetchJson<CustomAppDef>('/api/custom-apps', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateCustomApp(name: string, data: CustomAppDef): Promise<CustomAppDef> {
+  return fetchJson<CustomAppDef>(`/api/custom-apps/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteCustomApp(name: string): Promise<{ status: string }> {
+  return fetchJson<{ status: string }>(`/api/custom-apps/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
   });
 }

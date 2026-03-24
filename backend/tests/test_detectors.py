@@ -47,6 +47,46 @@ class TestDetection:
         guest = GuestInfo(id="103", name="indexer", type="lxc", status="running", tags=["prowlarr"])
         assert d.detect(guest) == "tag_match"
 
+    def test_lidarr_name_match(self) -> None:
+        d = DETECTOR_MAP["lidarr"]
+        guest = GuestInfo(id="104", name="lidarr", type="lxc", status="running")
+        assert d.detect(guest) == "name_match"
+
+    def test_readarr_name_match(self) -> None:
+        d = DETECTOR_MAP["readarr"]
+        guest = GuestInfo(id="105", name="readarr-lxc", type="lxc", status="running")
+        assert d.detect(guest) == "name_match"
+
+    def test_whisparr_name_match(self) -> None:
+        d = DETECTOR_MAP["whisparr"]
+        guest = GuestInfo(id="106", name="whisparr", type="lxc", status="running")
+        assert d.detect(guest) == "name_match"
+
+    def test_jackett_name_match(self) -> None:
+        d = DETECTOR_MAP["jackett"]
+        guest = GuestInfo(id="107", name="jackett", type="lxc", status="running")
+        assert d.detect(guest) == "name_match"
+
+    def test_jackett_docker_image_match(self) -> None:
+        d = DETECTOR_MAP["jackett"]
+        assert d.match_docker_image("linuxserver/jackett:latest") is True
+
+    def test_librespeed_rust_name_match(self) -> None:
+        d = DETECTOR_MAP["librespeed-rust"]
+        guest = GuestInfo(id="108", name="librespeed-rust", type="lxc", status="running")
+        assert d.detect(guest) == "name_match"
+
+    def test_librespeed_rust_tag_match(self) -> None:
+        d = DETECTOR_MAP["librespeed-rust"]
+        guest = GuestInfo(
+            id="109", name="speedtest", type="lxc", status="running", tags=["app:librespeed-rust"]
+        )
+        assert d.detect(guest) == "tag_match"
+
+    def test_librespeed_rust_docker_image_match(self) -> None:
+        d = DETECTOR_MAP["librespeed-rust"]
+        assert d.match_docker_image("ghcr.io/librespeed/speedtest-rust:latest") is True
+
 
 # -- Installed version detection --
 
@@ -195,6 +235,57 @@ class TestInstalledVersion:
 
     @respx.mock
     @pytest.mark.asyncio
+    async def test_lidarr_version(self) -> None:
+        respx.get("http://10.0.0.16:8686/api/v1/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "2.5.3.4971"})
+        )
+        d = DETECTOR_MAP["lidarr"]
+        version = await d.get_installed_version("10.0.0.16")
+        assert version == "2.5.3.4971"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_readarr_version(self) -> None:
+        respx.get("http://10.0.0.17:8787/api/v1/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "0.4.16.2715"})
+        )
+        d = DETECTOR_MAP["readarr"]
+        version = await d.get_installed_version("10.0.0.17")
+        assert version == "0.4.16.2715"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_whisparr_version(self) -> None:
+        respx.get("http://10.0.0.18:6969/api/v3/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "2.0.0.1234"})
+        )
+        d = DETECTOR_MAP["whisparr"]
+        version = await d.get_installed_version("10.0.0.18")
+        assert version == "2.0.0.1234"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_jackett_version_with_api_key(self) -> None:
+        route = respx.get("http://10.0.0.19:9117/api/v2.0/server/config").mock(
+            return_value=httpx.Response(
+                200,
+                json={"app_version": "v0.22.1423"},
+                headers={"content-type": "application/json"},
+            )
+        )
+        d = DETECTOR_MAP["jackett"]
+        version = await d.get_installed_version("10.0.0.19", api_key="jk-secret")
+        assert version == "0.22.1423"
+        assert "apikey=jk-secret" in str(route.calls[0].request.url)
+
+    @pytest.mark.asyncio
+    async def test_jackett_no_api_key_returns_none(self) -> None:
+        d = DETECTOR_MAP["jackett"]
+        version = await d.get_installed_version("10.0.0.19")
+        assert version is None
+
+    @respx.mock
+    @pytest.mark.asyncio
     async def test_version_timeout(self) -> None:
         respx.get("http://10.0.0.99:8989/api/v3/system/status").mock(
             side_effect=httpx.ConnectTimeout("timeout")
@@ -213,6 +304,12 @@ class TestInstalledVersion:
         version = await d.get_installed_version("10.0.0.13")
         assert version == "1.33.2"
 
+    @pytest.mark.asyncio
+    async def test_librespeed_rust_no_http_version(self) -> None:
+        d = DETECTOR_MAP["librespeed-rust"]
+        version = await d.get_installed_version("10.0.0.20")
+        assert version is None
+
 
 # -- API key support --
 
@@ -227,6 +324,10 @@ class TestApiKeySupport:
         assert DETECTOR_MAP["seerr"].accepts_api_key is True
         assert DETECTOR_MAP["plex"].accepts_api_key is False
         assert DETECTOR_MAP["immich"].accepts_api_key is True
+        assert DETECTOR_MAP["lidarr"].accepts_api_key is True
+        assert DETECTOR_MAP["readarr"].accepts_api_key is True
+        assert DETECTOR_MAP["whisparr"].accepts_api_key is True
+        assert DETECTOR_MAP["jackett"].accepts_api_key is True
 
     @respx.mock
     @pytest.mark.asyncio

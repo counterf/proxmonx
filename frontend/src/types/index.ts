@@ -164,3 +164,26 @@ export interface AuthStatus {
   authenticated: boolean;
   username: string | null;
 }
+
+export interface GitHubTestResult {
+  ok: boolean;
+  repo: string;
+  version: string | null;
+  source: string | null;
+  reason: string | null;
+}
+
+export interface CustomAppDef {
+  name: string;
+  display_name: string;
+  default_port: number;
+  scheme: string;
+  version_path: string | null;
+  github_repo: string | null;
+  aliases: string[];
+  docker_images: string[];
+  accepts_api_key: boolean;
+  auth_header: string | null;
+  version_keys: string[];
+  strip_v: boolean;
+}

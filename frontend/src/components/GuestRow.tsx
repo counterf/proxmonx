@@ -89,7 +89,9 @@ function AppNameCell({ guest }: { guest: GuestSummary }) {
   if (!guest.app_name) {
     return <span className="text-gray-500">{'\u2014'}</span>;
   }
-  const icon = <AppIcon appName={guest.app_name} size={18} className="mr-1.5" />;
+  const icon = (
+    <AppIcon appName={guest.app_name} detectorKey={guest.detector_used} size={18} className="mr-1.5" />
+  );
   if (guest.web_url) {
     return (
       <a

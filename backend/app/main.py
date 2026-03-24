@@ -95,6 +95,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _settings = settings
         app.state.settings = settings
 
+    # Load custom app detectors from persisted definitions
+    from app.detectors.registry import load_custom_detectors
+    load_custom_detectors(settings.custom_app_defs)
+
     _configure_logging(settings.log_level)
 
     logger = logging.getLogger(__name__)

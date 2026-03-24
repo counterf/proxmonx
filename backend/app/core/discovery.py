@@ -13,7 +13,7 @@ from app.core.github import GitHubClient
 from app.core.proxmox import ProxmoxClient
 from app.core.ssh import SSHClient
 from app.detectors.base import BaseDetector
-from app.detectors.registry import ALL_DETECTORS, DOCKER_DETECTOR
+from app.detectors.registry import ALL_DETECTORS, DETECTOR_MAP, DOCKER_DETECTOR
 from app.models.guest import GuestInfo, VersionCheck
 
 logger = logging.getLogger(__name__)
@@ -233,6 +233,25 @@ class DiscoveryEngine:
         host_config: ProxmoxHostConfig | None = None,
     ) -> None:
         """Attempt to detect which app a guest is running."""
+        if self._settings and self._settings.guest_config:
+            guest_cfg = self._settings.guest_config.get(guest.id)
+            forced = guest_cfg.forced_detector if guest_cfg else None
+            if forced and forced in DETECTOR_MAP:
+                detector = DETECTOR_MAP[forced]
+                guest.app_name = detector.display_name
+                guest.detector_used = detector.name
+                guest.detection_method = "manual"
+                guest.raw_detection_output = {
+                    "detector": detector.name,
+                    "method": "manual",
+                }
+                logger.debug(
+                    "Forced detector %s for guest %s (manual override)",
+                    detector.name,
+                    guest.name,
+                )
+                return
+
         # Strategy 1 & 2: Name and tag matching
         for detector in ALL_DETECTORS:
             method = detector.detect(guest)

@@ -2,12 +2,49 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings
 
 VersionDetectMethod = Literal["pct_first", "ssh_first", "ssh_only", "pct_only"]
+
+_CUSTOM_APP_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
+
+
+class CustomAppDef(BaseModel):
+    """User-defined app definition for version monitoring."""
+
+    name: str
+    display_name: str
+    default_port: int
+    scheme: Literal["http", "https"] = "http"
+    version_path: str | None = None
+    github_repo: str | None = None
+    aliases: list[str] = []
+    docker_images: list[str] = []
+    accepts_api_key: bool = False
+    auth_header: str | None = None
+    version_keys: list[str] = ["version"]
+    strip_v: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not _CUSTOM_APP_NAME_RE.match(v):
+            raise ValueError(
+                "name must be 2-32 lowercase alphanumeric characters or hyphens, "
+                "starting with a letter"
+            )
+        return v
+
+    @field_validator("default_port")
+    @classmethod
+    def validate_port(cls, v: int) -> int:
+        if v < 1 or v > 65535:
+            raise ValueError("default_port must be between 1 and 65535")
+        return v
 
 
 class AppConfig(BaseModel):
@@ -21,6 +58,7 @@ class AppConfig(BaseModel):
     ssh_username: str | None = None
     ssh_key_path: str | None = None
     ssh_password: str | None = None
+    forced_detector: str | None = None  # guest config only: override auto-detection
 
 
 class ProxmoxHostConfig(BaseModel):
@@ -90,6 +128,9 @@ class Settings(BaseSettings):
 
     # Per-guest overrides keyed by guest ID (e.g. "1773123726644:100")
     guest_config: dict[str, AppConfig] = {}
+
+    # Custom app definitions (user-defined detectors)
+    custom_app_defs: list[CustomAppDef] = []
 
     # Authentication
     auth_mode: str = "forms"  # "disabled" | "forms"

@@ -1,27 +1,63 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import type { GuestDetail as GuestDetailType, AppConfigEntry } from '../types';
-import { fetchGuest, fetchGuestConfig, saveGuestConfig, deleteGuestConfig, triggerRefresh } from '../api/client';
+import type { GuestDetail as GuestDetailType, AppConfigEntry, AppConfigDefault, CustomAppDef, GitHubTestResult } from '../types';
+import { fetchGuest, fetchGuestConfig, saveGuestConfig, deleteGuestConfig, triggerRefresh, fetchAppConfigDefaults, fetchCustomApps, testGithubRepo } from '../api/client';
 import StatusBadge from './StatusBadge';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorBanner from './ErrorBanner';
 import AppIcon from './AppIcon';
 
 
-function InstanceSettings({ guestId, appName }: { guestId: string; appName: string }) {
-  const [cfg, setCfg] = useState<AppConfigEntry>({});
+const SOURCE_LABELS: Record<string, string> = {
+  'releases/latest': 'latest release',
+  releases_list: 'releases list',
+  tags: 'tags',
+};
+const REASON_LABELS: Record<string, string> = {
+  invalid_url: 'Invalid URL or repo format.',
+  not_found: 'Repository not found. Private repos require a GitHub token — add one in Settings.',
+  rate_limited: 'GitHub rate limit reached. Configure a token in Settings to increase the limit.',
+  no_releases_or_tags: 'No releases or tags found in this repository.',
+  network_error: 'Network or timeout error.',
+  unknown: 'Unknown error.',
+};
+
+function InstanceSettings({ guestId, appName, detectorUsed }: { guestId: string; appName: string; detectorUsed?: string | null }) {
+  const [cfg, setCfg] = useState<AppConfigEntry & { forced_detector?: string | null }>({});
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [appDefaults, setAppDefaults] = useState<AppConfigDefault[]>([]);
+  const [customApps, setCustomApps] = useState<CustomAppDef[]>([]);
+  const [testResult, setTestResult] = useState<GitHubTestResult | null>(null);
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
-    fetchGuestConfig(guestId)
-      .then((data) => { setCfg(data); setLoaded(true); })
+    Promise.all([
+      fetchGuestConfig(guestId),
+      fetchAppConfigDefaults(),
+      fetchCustomApps(),
+    ])
+      .then(([data, defaults, customs]) => {
+        setCfg(data);
+        setAppDefaults(defaults);
+        setCustomApps(customs);
+        setLoaded(true);
+      })
       .catch(() => setLoaded(true));
   }, [guestId]);
 
   const hasOverrides = loaded && Object.values(cfg).some((v) => v != null && v !== '');
+
+  const customNames = new Set(customApps.map((c) => c.name));
+  const builtinDefaults = appDefaults.filter((d) => !customNames.has(d.name));
+  const customDefaults = appDefaults.filter((d) => customNames.has(d.name));
+  const inheritedGithubRepo = appDefaults.find((d) => d.name === detectorUsed)?.github_repo ?? null;
+
+  const allKnownNames = new Set(appDefaults.map((d) => d.name));
+  const forcedDetector = (cfg as Record<string, unknown>).forced_detector as string | null | undefined;
+  const isStaleForcedDetector = forcedDetector && !allKnownNames.has(forcedDetector);
 
   const handleSave = async () => {
     setSaving(true);
@@ -54,6 +90,37 @@ function InstanceSettings({ guestId, appName }: { guestId: string; appName: stri
     }
   };
 
+  const handleTest = async () => {
+    if (!cfg.github_repo) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await testGithubRepo(cfg.github_repo);
+      setTestResult(result);
+    } catch {
+      setTestResult({ ok: false, repo: cfg.github_repo ?? '', version: null, source: null, reason: 'network_error' });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleClearStaleForcedDetector = async () => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const updated = { ...cfg, forced_detector: null };
+      await saveGuestConfig(guestId, updated);
+      setCfg(updated);
+      setMessage('Cleared. Refreshing...');
+      await triggerRefresh();
+      setMessage('Cleared successfully.');
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Clear failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!loaded) return null;
 
   return (
@@ -80,11 +147,55 @@ function InstanceSettings({ guestId, appName }: { guestId: string; appName: stri
       </button>
       {!expanded && (
         <p className="text-xs text-gray-600 mt-1">
-          Override port, API key, or scheme for this {appName} instance.
+          Override port, API key, scheme, or GitHub repo for this {appName} instance.
         </p>
       )}
       {expanded && (
         <div className="mt-3 space-y-3">
+          {/* Monitored app dropdown */}
+          <div>
+            <label htmlFor="gc-forced-detector" className="text-xs text-gray-500">Monitored app</label>
+            {isStaleForcedDetector ? (
+              <div className="mt-1 p-2 rounded bg-amber-900/20 border border-amber-800/50 text-sm text-amber-400 flex items-center gap-2">
+                <span>Previously assigned app no longer exists -- reassign or clear.</span>
+                <button
+                  type="button"
+                  onClick={handleClearStaleForcedDetector}
+                  disabled={saving}
+                  className="px-2 py-1 text-xs rounded bg-amber-600 hover:bg-amber-500 text-white disabled:opacity-50"
+                >
+                  Clear
+                </button>
+              </div>
+            ) : (
+              <>
+                <select
+                  id="gc-forced-detector"
+                  value={forcedDetector ?? ''}
+                  onChange={(e) => setCfg({ ...cfg, forced_detector: e.target.value || null } as typeof cfg)}
+                  className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="">None -- use auto-detection only</option>
+                  <optgroup label="Built-in apps">
+                    {builtinDefaults.map((d) => (
+                      <option key={d.name} value={d.name}>{d.display_name}</option>
+                    ))}
+                  </optgroup>
+                  {customDefaults.length > 0 && (
+                    <optgroup label="Custom apps">
+                      {customDefaults.map((d) => (
+                        <option key={d.name} value={d.name}>{d.display_name}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  Leave as 'None' if auto-detection is working. Only set this to override or when detection fails.
+                </p>
+              </>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label htmlFor="gc-port" className="text-xs text-gray-500">Port override</label>
@@ -120,6 +231,48 @@ function InstanceSettings({ guestId, appName }: { guestId: string; appName: stri
                 className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
+          </div>
+
+          {/* GitHub repo override */}
+          <div>
+            <label htmlFor="gc-github-repo" className="text-xs text-gray-500">GitHub repo override</label>
+            <div className="flex items-center gap-2 mt-0.5">
+              <input
+                id="gc-github-repo"
+                type="text"
+                value={cfg.github_repo ?? ''}
+                placeholder={inheritedGithubRepo ? `Inherited: ${inheritedGithubRepo}` : 'owner/repo or full GitHub URL'}
+                onChange={(e) => { setCfg({ ...cfg, github_repo: e.target.value || null }); setTestResult(null); }}
+                className="flex-1 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              {cfg.github_repo && (
+                <button
+                  type="button"
+                  aria-label="Clear GitHub repo override"
+                  onClick={() => { setCfg({ ...cfg, github_repo: null }); setTestResult(null); }}
+                  className="text-gray-500 hover:text-white text-lg leading-none"
+                >×</button>
+              )}
+              <button
+                type="button"
+                onClick={handleTest}
+                disabled={testing || !cfg.github_repo}
+                className="px-3 py-1.5 text-sm rounded border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-40 transition-colors"
+              >
+                {testing ? 'Checking…' : 'Check'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-600 mt-0.5">
+              owner/repo or full GitHub URL accepted.
+              {inheritedGithubRepo && ` Overrides the detector default (${inheritedGithubRepo}).`}
+            </p>
+            {testResult && (
+              <p className={`text-xs mt-1 ${testResult.ok ? 'text-green-400' : 'text-red-400'}`}>
+                {testResult.ok
+                  ? `Latest release: ${testResult.version} (found via ${SOURCE_LABELS[testResult.source ?? ''] ?? testResult.source ?? 'unknown source'})`
+                  : (REASON_LABELS[testResult.reason ?? ''] ?? REASON_LABELS['unknown'])}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2 pt-1">
             <button
@@ -261,9 +414,7 @@ export default function GuestDetail() {
       </div>
 
       {/* Instance Settings (per-guest overrides) */}
-      {guest.app_name && guest.detector_used && (
-        <InstanceSettings guestId={guest.id} appName={guest.app_name} />
-      )}
+      <InstanceSettings guestId={guest.id} appName={guest.app_name || guest.name} detectorUsed={guest.detector_used} />
 
       {/* Version Status panel */}
       <div className="p-4 rounded bg-surface border border-gray-800">

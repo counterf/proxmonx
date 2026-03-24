@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.config import AppConfig, ProxmoxHostConfig, Settings
+from app.config import AppConfig, CustomAppDef, ProxmoxHostConfig, Settings
 from app.core.config_store import ConfigStore
 
 
@@ -143,6 +143,32 @@ class TestMergeIntoSettings:
         original = Settings()
         result = store.merge_into_settings(original)
         assert result.poll_interval_seconds == original.poll_interval_seconds
+
+    def test_merges_custom_app_defs(self, store: ConfigStore) -> None:
+        store.save({
+            **_FULL_CONFIG,
+            "custom_app_defs": [
+                {"name": "mealie", "display_name": "Mealie", "default_port": 9925},
+            ],
+        })
+        result = store.merge_into_settings(Settings())
+        assert len(result.custom_app_defs) == 1
+        assert isinstance(result.custom_app_defs[0], CustomAppDef)
+        assert result.custom_app_defs[0].name == "mealie"
+        assert result.custom_app_defs[0].default_port == 9925
+
+    def test_skips_invalid_custom_app_defs(self, store: ConfigStore) -> None:
+        store.save({
+            **_FULL_CONFIG,
+            "custom_app_defs": [
+                {"name": "good-app", "display_name": "Good", "default_port": 8080},
+                "not-a-dict",
+                {"name": "BAD_NAME", "display_name": "Bad", "default_port": 80},
+            ],
+        })
+        result = store.merge_into_settings(Settings())
+        assert len(result.custom_app_defs) == 1
+        assert result.custom_app_defs[0].name == "good-app"
 
 
 class TestGetMissingFieldsMultiHost:

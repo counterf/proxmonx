@@ -8,6 +8,7 @@ import respx
 
 from app.config import AppConfig, ProxmoxHostConfig, Settings
 from app.core.discovery import DiscoveryEngine
+from app.models.guest import GuestInfo
 from app.core.github import GitHubClient
 from app.core.proxmox import ProxmoxClient
 from app.core.ssh import SSHClient
@@ -81,6 +82,64 @@ class TestResolveConfig:
         )
         _, api_key, *_ = engine._resolve_config("sonarr", "default:100")
         assert api_key is None
+
+
+class TestForcedDetector:
+    """Manual forced_detector on guest config skips auto app detection."""
+
+    @pytest.mark.asyncio
+    async def test_forced_detector_skips_name_matching(self) -> None:
+        settings = _make_settings(
+            guest_config={
+                "default:102": AppConfig(forced_detector="radarr"),
+            },
+        )
+        engine = DiscoveryEngine(
+            ProxmoxClient(settings),
+            GitHubClient(settings),
+            SSHClient(settings),
+            settings=settings,
+        )
+        guest = GuestInfo(
+            id="default:102",
+            name="mystery-box",
+            type="lxc",
+            status="running",
+            ip="10.0.0.50",
+            tags=["unrelated"],
+        )
+        await engine._detect_app(guest)
+        assert guest.detector_used == "radarr"
+        assert guest.app_name == "Radarr"
+        assert guest.detection_method == "manual"
+        assert guest.raw_detection_output == {
+            "detector": "radarr",
+            "method": "manual",
+        }
+
+    @pytest.mark.asyncio
+    async def test_invalid_forced_detector_ignored(self) -> None:
+        settings = _make_settings(
+            guest_config={
+                "default:103": AppConfig(forced_detector="not-a-real-detector"),
+            },
+        )
+        engine = DiscoveryEngine(
+            ProxmoxClient(settings),
+            GitHubClient(settings),
+            SSHClient(settings),
+            settings=settings,
+        )
+        guest = GuestInfo(
+            id="default:103",
+            name="sonarr",
+            type="lxc",
+            status="running",
+            ip="10.0.0.50",
+        )
+        await engine._detect_app(guest)
+        assert guest.detector_used == "sonarr"
+        assert guest.detection_method == "name_match"
 
 
 def _make_settings(**overrides: Any) -> Settings:

@@ -6,6 +6,7 @@ import LoadingSpinner from './LoadingSpinner';
 import ErrorBanner from './ErrorBanner';
 import SuccessToast from './setup/SuccessToast';
 import AppConfigSection from './settings/AppConfigSection';
+import CustomAppsSection from './settings/CustomAppsSection';
 import DiscoverySection from './settings/DiscoverySection';
 import GitHubSection from './settings/GitHubSection';
 import NotificationsSection from './settings/NotificationsSection';
@@ -468,6 +469,9 @@ export default function Settings() {
         changedKeys={changedApiKeys}
         disabled={saving}
       />
+
+      {/* Custom Apps */}
+      <CustomAppsSection />
 
       {/* Plugins */}
       {detectors.length > 0 && (

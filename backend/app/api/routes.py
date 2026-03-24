@@ -11,10 +11,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field, field_validator
 
-from app.config import Settings
+from app.config import CustomAppDef, Settings, _CUSTOM_APP_NAME_RE
 from app.core.auth import hash_password
+from app.core.github import GitHubClient, parse_github_repo
 from app.core.notifier import NtfyNotifier
-from app.detectors.registry import ALL_DETECTORS, DETECTOR_MAP
+from app.detectors.registry import ALL_DETECTORS, DETECTOR_MAP, _BUILTIN_NAMES, load_custom_detectors
 from app.models.guest import GuestInfo
 
 logger = logging.getLogger(__name__)
@@ -49,11 +50,10 @@ class _AppConfigBase(BaseModel):
     def validate_github_repo(cls, v: str | None) -> str | None:
         if v is None or v == "":
             return v
-        if "github.com" in v or v.startswith("http"):
-            raise ValueError("github_repo must be 'owner/repo' format, not a URL")
-        if not re.match(r"^[^\s/]+/[^\s/]+$", v):
-            raise ValueError("github_repo must match 'owner/repo' format")
-        return v
+        try:
+            return parse_github_repo(v)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class AppConfigEntry(_AppConfigBase):
@@ -173,6 +173,18 @@ class SettingsSaveRequest(BaseModel):
             if key not in DETECTOR_MAP:
                 raise ValueError(f"Unknown app: {key}")
         return v
+
+
+class GitHubTestRequest(BaseModel):
+    repo: str
+
+
+class GitHubTestResponse(BaseModel):
+    ok: bool
+    repo: str
+    version: str | None = None
+    source: str | None = None
+    reason: str | None = None
 
 
 class ConnectionTestRequest(BaseModel):
@@ -309,7 +321,16 @@ async def get_guest(guest_id: str, scheduler=Depends(_get_scheduler)) -> GuestIn
 
 
 class GuestConfigSaveRequest(_AppConfigBase):
-    pass
+    forced_detector: str | None = None
+
+    @field_validator("forced_detector")
+    @classmethod
+    def validate_forced_detector(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return None
+        if v not in DETECTOR_MAP:
+            raise ValueError(f"Unknown detector: {v!r}")
+        return v
 
 
 @router.get("/api/guests/{guest_id}/config")
@@ -363,6 +384,10 @@ async def save_guest_config(
     merged["api_key"] = _keep_or_replace(body.api_key, prev.get("api_key"))
     merged["ssh_key_path"] = _keep_or_replace(body.ssh_key_path, prev.get("ssh_key_path"))
     merged["ssh_password"] = _keep_or_replace(body.ssh_password, prev.get("ssh_password"))
+
+    if body.forced_detector:
+        merged["forced_detector"] = body.forced_detector
+    # None means "clear" — not added to merged, stripped below
 
     # Strip None values
     merged = {k: v for k, v in merged.items() if v is not None}
@@ -515,6 +540,19 @@ async def test_connection(
         msg = f"Connection error: {exc}"
         logger.warning("Connection test failed: %s", msg)
         return {"success": False, "message": msg, "node_info": None}
+
+
+@router.post("/api/github/test", dependencies=[Depends(_require_api_key)])
+async def github_test_repo(body: GitHubTestRequest, request: Request) -> GitHubTestResponse:
+    settings: Settings = request.app.state.settings
+    result = await GitHubClient(settings).test_repo(body.repo)
+    return GitHubTestResponse(
+        ok=result.ok,
+        repo=result.repo,
+        version=result.version,
+        source=result.source,
+        reason=result.reason,
+    )
 
 
 @router.get("/api/app-config/defaults")
@@ -752,6 +790,11 @@ async def save_settings(
     if existing_guest_config:
         config_data["guest_config"] = existing_guest_config
 
+    # Always preserve custom_app_defs (managed via /api/custom-apps)
+    existing_custom_apps = current_file.get("custom_app_defs")
+    if existing_custom_apps:
+        config_data["custom_app_defs"] = existing_custom_apps
+
     # Write to config file
     try:
         config_store.save(config_data)
@@ -806,3 +849,170 @@ async def test_notification(
     if sent:
         return {"success": True, "message": "Test notification sent successfully"}
     return {"success": False, "message": "Failed to send notification -- check ntfy URL and token"}
+
+
+# --- Custom App Definitions ---
+
+
+class CustomAppDefRequest(BaseModel):
+    """Request model for creating/updating a custom app definition."""
+
+    name: str
+    display_name: str
+    default_port: int = Field(ge=1, le=65535)
+    scheme: Literal["http", "https"] = "http"
+    version_path: str | None = None
+    github_repo: str | None = None
+    aliases: list[str] = []
+    docker_images: list[str] = []
+    accepts_api_key: bool = False
+    auth_header: str | None = None
+    version_keys: list[str] = ["version"]
+    strip_v: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not _CUSTOM_APP_NAME_RE.match(v):
+            raise ValueError(
+                "name must be 2-32 lowercase alphanumeric characters or hyphens, "
+                "starting with a letter"
+            )
+        if v in _BUILTIN_NAMES:
+            raise ValueError(f"'{v}' conflicts with a built-in app name")
+        return v
+
+    @field_validator("github_repo")
+    @classmethod
+    def validate_github_repo(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return v
+        try:
+            return parse_github_repo(v)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+
+
+def _reload_custom_detectors(
+    request: Request, config_store, data: dict | None = None
+) -> None:
+    """Reload custom detectors from the DB and seed app_config for https apps.
+
+    Pass *data* (already-loaded config dict) to avoid a redundant DB read.
+    """
+    if data is None:
+        data = config_store.load()
+    defs_raw = data.get("custom_app_defs", [])
+    defs = []
+    for i, item in enumerate(defs_raw):
+        if isinstance(item, dict):
+            try:
+                defs.append(CustomAppDef(**item))
+            except Exception as exc:
+                logger.warning("Skipping invalid custom_app_defs[%d]: %s", i, exc)
+                continue
+    load_custom_detectors(defs)
+
+    # Seed app_config for custom apps with scheme != "http"
+    app_config = data.get("app_config", {})
+    changed = False
+    for defn in defs:
+        if defn.scheme != "http" and defn.name not in app_config:
+            app_config[defn.name] = {"scheme": defn.scheme}
+            changed = True
+    if changed:
+        data["app_config"] = app_config
+        config_store.save(data)
+
+    # Reload settings into engine
+    _reload_settings_into_engine(request, config_store)
+
+
+@router.get("/api/custom-apps")
+async def list_custom_apps(
+    config_store=Depends(_get_config_store),
+) -> list[dict]:
+    """List all custom app definitions."""
+    data = config_store.load()
+    return data.get("custom_app_defs", [])
+
+
+@router.post("/api/custom-apps", status_code=201, dependencies=[Depends(_require_api_key)])
+async def create_custom_app(
+    body: CustomAppDefRequest,
+    request: Request,
+    config_store=Depends(_get_config_store),
+) -> dict:
+    """Create a new custom app definition."""
+    data = config_store.load()
+    existing: list[dict] = data.get("custom_app_defs", [])
+
+    # Check for duplicate name
+    for item in existing:
+        if isinstance(item, dict) and item.get("name") == body.name:
+            raise HTTPException(status_code=409, detail=f"Custom app '{body.name}' already exists")
+
+    new_def = body.model_dump()
+    existing.append(new_def)
+    data["custom_app_defs"] = existing
+    config_store.save(data)
+    _reload_custom_detectors(request, config_store, data=data)
+    return new_def
+
+
+@router.put("/api/custom-apps/{name}", dependencies=[Depends(_require_api_key)])
+async def update_custom_app(
+    name: str,
+    body: CustomAppDefRequest,
+    request: Request,
+    config_store=Depends(_get_config_store),
+) -> dict:
+    """Update an existing custom app definition."""
+    data = config_store.load()
+    existing: list[dict] = data.get("custom_app_defs", [])
+
+    for i, item in enumerate(existing):
+        if isinstance(item, dict) and item.get("name") == name:
+            updated = body.model_dump()
+            updated["name"] = name  # preserve original name
+            existing[i] = updated
+            data["custom_app_defs"] = existing
+            config_store.save(data)
+            _reload_custom_detectors(request, config_store, data=data)
+            return updated
+
+    raise HTTPException(status_code=404, detail=f"Custom app '{name}' not found")
+
+
+@router.delete("/api/custom-apps/{name}", dependencies=[Depends(_require_api_key)])
+async def delete_custom_app(
+    name: str,
+    request: Request,
+    config_store=Depends(_get_config_store),
+) -> dict[str, str]:
+    """Delete a custom app definition and clear references in guest_config."""
+    data = config_store.load()
+    existing: list[dict] = data.get("custom_app_defs", [])
+
+    found = False
+    new_list = []
+    for item in existing:
+        if isinstance(item, dict) and item.get("name") == name:
+            found = True
+        else:
+            new_list.append(item)
+
+    if not found:
+        raise HTTPException(status_code=404, detail=f"Custom app '{name}' not found")
+
+    data["custom_app_defs"] = new_list
+
+    # Clear forced_detector references in guest_config
+    guest_config: dict = data.get("guest_config", {})
+    for gid, gcfg in guest_config.items():
+        if isinstance(gcfg, dict) and gcfg.get("forced_detector") == name:
+            gcfg.pop("forced_detector", None)
+
+    config_store.save(data)
+    _reload_custom_detectors(request, config_store, data=data)
+    return {"status": "deleted"}

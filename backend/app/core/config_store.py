@@ -111,7 +111,7 @@ class ConfigStore:
         misconfiguration is clearly visible.
         """
         # Avoid circular imports between config_store and config modules.
-        from app.config import AppConfig, ProxmoxHostConfig, Settings as SettingsCls
+        from app.config import AppConfig, CustomAppDef, ProxmoxHostConfig, Settings as SettingsCls
 
         config_data = self.load()
         if not config_data:
@@ -147,6 +147,20 @@ class ConfigStore:
                             skipped.append(f"guest_config[{k}]")
                             logger.warning("Skipping non-dict guest_config entry '%s'", k)
                     current["guest_config"] = merged_guests
+            elif key == "custom_app_defs":
+                if isinstance(value, list):
+                    merged_custom: list = []
+                    for i, item in enumerate(value):
+                        if isinstance(item, dict):
+                            try:
+                                merged_custom.append(CustomAppDef(**item))
+                            except Exception as exc:
+                                skipped.append(f"custom_app_defs[{i}]")
+                                logger.warning("Skipping invalid custom_app_defs[%d]: %s", i, exc)
+                        else:
+                            skipped.append(f"custom_app_defs[{i}]")
+                            logger.warning("Skipping non-dict custom_app_defs[%d]", i)
+                    current["custom_app_defs"] = merged_custom
             elif key == "proxmox_hosts":
                 if isinstance(value, list):
                     merged_hosts: list = []

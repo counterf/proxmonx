@@ -56,6 +56,24 @@ SIMPLE_DETECTOR_CONFIGS: list[DetectorConfig] = [
         accepts_api_key=True, auth_header="X-Api-Key",
     ),
     DetectorConfig(
+        name="lidarr", display_name="Lidarr", github_repo="Lidarr/Lidarr",
+        default_port=8686, path="/api/v1/system/status",
+        docker_images=["lidarr", "linuxserver/lidarr", "hotio/lidarr"],
+        accepts_api_key=True, auth_header="X-Api-Key",
+    ),
+    DetectorConfig(
+        name="readarr", display_name="Readarr", github_repo="Readarr/Readarr",
+        default_port=8787, path="/api/v1/system/status",
+        docker_images=["readarr", "linuxserver/readarr", "hotio/readarr"],
+        accepts_api_key=True, auth_header="X-Api-Key",
+    ),
+    DetectorConfig(
+        name="whisparr", display_name="Whisparr", github_repo="Whisparr/Whisparr",
+        default_port=6969, path="/api/v3/system/status",
+        docker_images=["whisparr", "linuxserver/whisparr", "hotio/whisparr"],
+        accepts_api_key=True, auth_header="X-Api-Key",
+    ),
+    DetectorConfig(
         name="immich", display_name="Immich", github_repo="immich-app/immich",
         default_port=2283, path="/api/server/about",
         docker_images=["immich", "ghcr.io/immich-app/immich-server"],
