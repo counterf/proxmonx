@@ -36,19 +36,23 @@ def _build_web_url(
     detector_used: str | None,
     effective_port: int | None,
     scheme: str = "http",
+    version_host: str | None = None,
 ) -> str | None:
-    """Construct web URL from guest IP and detected port.
+    """Construct web URL from guest IP (or version_host override) and detected port.
 
     Returns None when IP is missing, no app detected, or guest is stopped.
     """
-    if not ip or not app_name or status != "running":
-        return None
-    if not _is_valid_ip(ip):
+    if not app_name or status != "running":
         return None
     if effective_port is None:
         return None
 
-    host = _format_host(ip)
+    if version_host:
+        host = version_host
+    elif ip and _is_valid_ip(ip):
+        host = _format_host(ip)
+    else:
+        return None
 
     if effective_port == 443:
         return f"https://{host}"
@@ -98,6 +102,7 @@ class GuestInfo(BaseModel):
     os_type: str | None = None
     probe_url: str | None = None
     probe_error: str | None = None
+    version_host: str | None = None  # override hostname/IP used for version probe and web URL
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -105,5 +110,5 @@ class GuestInfo(BaseModel):
         return _build_web_url(
             self.ip, self.app_name, self.status,
             self.detector_used, self.effective_port,
-            self.scheme,
+            self.scheme, self.version_host,
         )

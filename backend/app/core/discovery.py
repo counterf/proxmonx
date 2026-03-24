@@ -418,6 +418,7 @@ class DiscoveryEngine:
         from app.detectors.http_json import ProbeError
 
         probe_host = version_host or guest.ip
+        guest.version_host = version_host or None
         effective_port = port_override or detector.default_port
         probe_path = getattr(detector, '_path', '')
         guest.probe_url = f"{scheme}://{probe_host}:{effective_port}{probe_path}"
