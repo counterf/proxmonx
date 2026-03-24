@@ -43,3 +43,6 @@ htmlcov/
 # Config data
 data/
 .cursor/
+
+# Planning docs
+plans/
