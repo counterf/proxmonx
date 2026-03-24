@@ -167,15 +167,18 @@ class DiscoveryEngine:
         """Process a single guest: resolve IP, detect app, check versions."""
         async with self._semaphore:
             try:
-                # Resolve IP -- need the correct proxmox client for this host
-                if not guest.ip:
+                # Resolve IP -- need the correct proxmox client for this host.
+                # VMs always need the client (also used for disk usage via guest agent).
+                raw_vmid = guest.id.split(":")[-1] if ":" in guest.id else guest.id
+                proxmox: ProxmoxClient | None = None
+                if not guest.ip or guest.type == "vm":
                     if host_config:
                         settings = self._build_host_settings(host_config)
                         proxmox = ProxmoxClient(settings, http_client=host_http_client)
                     else:
                         proxmox = self._proxmox
-                    # Extract raw vmid from namespaced ID
-                    raw_vmid = guest.id.split(":")[-1] if ":" in guest.id else guest.id
+
+                if proxmox and not guest.ip:
                     guest.ip, guest.os_type = await proxmox.get_guest_network(
                         raw_vmid, guest.type
                     )
@@ -196,6 +199,10 @@ class DiscoveryEngine:
                     )
                     guest.version_history = guest.version_history[-MAX_VERSION_HISTORY:]
                     return guest
+
+                # Fetch disk usage for VMs via guest agent (LXCs get it from the list endpoint)
+                if proxmox and guest.type == "vm":
+                    guest.disk_used, guest.disk_total = await proxmox.get_vm_disk_usage(raw_vmid)
 
                 # Detect app
                 await self._detect_app(guest, host_config=host_config)

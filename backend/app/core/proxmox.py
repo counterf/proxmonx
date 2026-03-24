@@ -87,7 +87,12 @@ class ProxmoxClient:
             tags_raw = str(raw.get("tags", ""))
             tags = [t.strip() for t in tags_raw.replace(";", ",").split(",") if t.strip()]
 
-            disk_used = int(raw.get("disk", 0)) or None
+            # For LXCs, "disk" is actual used bytes; for VMs it's cumulative I/O — unusable.
+            # VM disk usage is populated later from agent/get-fsinfo in _process_guest.
+            if guest_type == "lxc":
+                disk_used = int(raw.get("disk", 0)) or None
+            else:
+                disk_used = None
             disk_total = int(raw.get("maxdisk", 0)) or None
 
             return GuestInfo(
@@ -181,3 +186,41 @@ class ProxmoxClient:
                 logger.debug("Could not resolve IP from guest agent for VM %s", vmid)
 
         return None, os_type
+
+    async def get_vm_disk_usage(self, vmid: str) -> tuple[int | None, int | None]:
+        """Return (used_bytes, total_bytes) for a VM via agent/get-fsinfo.
+
+        Uses the root filesystem ('/') only. Returns (None, None) if the
+        guest agent is unavailable or no root filesystem is reported.
+        """
+        try:
+            data = await self._get(
+                f"/nodes/{self._node}/qemu/{vmid}/agent/get-fsinfo"
+            )
+            result = data.get("data", {})
+            if isinstance(result, dict):
+                result = result.get("result", [])
+            if not isinstance(result, list):
+                return None, None
+
+            VIRTUAL_TYPES = {"tmpfs", "devtmpfs", "proc", "sysfs",
+                             "cgroup", "cgroup2", "overlay", "squashfs", "devpts"}
+
+            fs = next(
+                (
+                    f for f in result
+                    if f.get("mountpoint") == "/"
+                    and f.get("type", "").lower() not in VIRTUAL_TYPES
+                    and int(f.get("total-bytes", 0)) > 0
+                ),
+                None,
+            )
+            if fs is None:
+                return None, None
+
+            used = int(fs.get("used-bytes", 0)) or None
+            total = int(fs.get("total-bytes", 0)) or None
+            return used, total
+        except Exception:
+            logger.debug("Could not get disk usage from guest agent for VM %s", vmid)
+            return None, None
