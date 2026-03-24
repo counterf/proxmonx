@@ -287,12 +287,14 @@ class TestInstalledVersion:
     @respx.mock
     @pytest.mark.asyncio
     async def test_version_timeout(self) -> None:
+        from app.detectors.http_json import ProbeError
+
         respx.get("http://10.0.0.99:8989/api/v3/system/status").mock(
             side_effect=httpx.ConnectTimeout("timeout")
         )
         d = DETECTOR_MAP["sonarr"]
-        version = await d.get_installed_version("10.0.0.99")
-        assert version is None
+        with pytest.raises(ProbeError, match="Connection failed"):
+            await d.get_installed_version("10.0.0.99")
 
     @respx.mock
     @pytest.mark.asyncio
@@ -343,12 +345,14 @@ class TestApiKeySupport:
     @respx.mock
     @pytest.mark.asyncio
     async def test_sonarr_401_without_key(self) -> None:
+        from app.detectors.http_json import ProbeError
+
         respx.get("http://10.0.0.1:8989/api/v3/system/status").mock(
             return_value=httpx.Response(401, json={"error": "Unauthorized"})
         )
         d = DETECTOR_MAP["sonarr"]
-        version = await d.get_installed_version("10.0.0.1")
-        assert version is None
+        with pytest.raises(ProbeError, match="HTTP 401"):
+            await d.get_installed_version("10.0.0.1")
 
     @respx.mock
     @pytest.mark.asyncio

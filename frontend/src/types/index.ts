@@ -35,6 +35,8 @@ export interface Guest {
   disk_used: number | null;
   disk_total: number | null;
   os_type: string | null;
+  probe_url: string | null;
+  probe_error: string | null;
 }
 
 /** @deprecated Use Guest instead */

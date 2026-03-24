@@ -96,6 +96,8 @@ class GuestInfo(BaseModel):
     disk_used: int | None = None
     disk_total: int | None = None
     os_type: str | None = None
+    probe_url: str | None = None
+    probe_error: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property

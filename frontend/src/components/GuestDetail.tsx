@@ -539,6 +539,18 @@ export default function GuestDetail() {
                   </span>
                 </div>
               )}
+              {guest.probe_url && (
+                <div>
+                  <span className="text-gray-500">Probe URL:</span>{' '}
+                  <span className="text-gray-300 font-mono text-xs break-all">{guest.probe_url}</span>
+                </div>
+              )}
+              {guest.probe_error && (
+                <div>
+                  <span className="text-gray-500">Probe error:</span>{' '}
+                  <span className="text-amber-400 text-xs">{guest.probe_error}</span>
+                </div>
+              )}
             </div>
           </div>
         );

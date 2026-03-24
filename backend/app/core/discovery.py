@@ -415,7 +415,13 @@ class DiscoveryEngine:
                 logger.warning("Invalid version_detect_method '%s', using pct_first", method)
 
         # HTTP probe always runs first regardless of method (it's the primary source)
+        from app.detectors.http_json import ProbeError
+
         probe_host = version_host or guest.ip
+        effective_port = port_override or detector.default_port
+        probe_path = getattr(detector, '_path', '')
+        guest.probe_url = f"{scheme}://{probe_host}:{effective_port}{probe_path}"
+        guest.probe_error = None
         try:
             guest.installed_version = await detector.get_installed_version(
                 probe_host, port=port_override, api_key=api_key, scheme=scheme,
@@ -423,7 +429,13 @@ class DiscoveryEngine:
             )
             if guest.installed_version:
                 guest.version_detection_method = "http"
+        except ProbeError as exc:
+            guest.probe_error = str(exc)
+            logger.warning(
+                "Version probe failed for %s on %s: %s", detector.name, guest.name, exc
+            )
         except Exception:
+            guest.probe_error = "Unexpected error during version probe"
             logger.warning(
                 "Version probe failed for %s on %s", detector.name, guest.name
             )

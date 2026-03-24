@@ -12,6 +12,10 @@ from app.detectors.base import BaseDetector
 logger = logging.getLogger(__name__)
 
 
+class ProbeError(Exception):
+    """Raised when a version probe fails with a diagnosable reason."""
+
+
 @dataclass(frozen=True)
 class DetectorConfig:
     """Declarative config for a JSON-based version detector."""
@@ -160,15 +164,16 @@ class HttpJsonDetector(BaseDetector):
                 version = self._extract_version(data)
                 if version and self._strip_v:
                     version = version.lstrip("v")
-                return version or None
+                if version:
+                    return version
+                raise ProbeError("Version key not found in response")
             if resp.status_code == 401:
-                logger.warning(
-                    "Auth failed for %s on %s:%d -- check API key",
-                    self.name, host, port,
-                )
-        except Exception:
-            logger.debug("Failed to get %s version from %s:%d", self.display_name, host, port)
-        return None
+                raise ProbeError("HTTP 401 -- check API key")
+            raise ProbeError(f"HTTP {resp.status_code}")
+        except ProbeError:
+            raise
+        except Exception as exc:
+            raise ProbeError(f"Connection failed: {exc}") from exc
 
     def _extract_version(self, data: dict) -> str | None:
         """Walk version_keys (dot-separated paths) and return first match."""
