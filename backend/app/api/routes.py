@@ -556,7 +556,7 @@ async def github_test_repo(body: GitHubTestRequest, request: Request) -> GitHubT
 
 
 @router.get("/api/app-config/defaults")
-async def get_app_config_defaults() -> list[dict[str, str | int | bool]]:
+async def get_app_config_defaults() -> list[dict[str, str | int | bool | None]]:
     """Return the list of supported apps with default ports and API key support."""
     return [
         {
