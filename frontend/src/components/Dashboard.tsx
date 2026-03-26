@@ -12,7 +12,7 @@ import { useColumnVisibility, COLUMN_DEFS, type ColumnKey } from '../hooks/useCo
 type SortColumn = ColumnKey;
 type SortDirection = 'asc' | 'desc';
 
-function compareSemver(a: string, b: string): number {
+export function compareSemver(a: string, b: string): number {
   const pa = a.replace(/^v/i, '').split('.').map(Number);
   const pb = b.replace(/^v/i, '').split('.').map(Number);
   if (pa.some(isNaN) || pb.some(isNaN)) {
@@ -26,12 +26,12 @@ function compareSemver(a: string, b: string): number {
   return 0;
 }
 
-function diskPercent(g: GuestSummary): number | null {
+export function diskPercent(g: GuestSummary): number | null {
   if (g.disk_used == null || g.disk_total == null || g.disk_total === 0) return null;
   return g.disk_used / g.disk_total;
 }
 
-function compareGuests(a: GuestSummary, b: GuestSummary, col: SortColumn, dir: SortDirection): number {
+export function compareGuests(a: GuestSummary, b: GuestSummary, col: SortColumn, dir: SortDirection): number {
   if (col === 'disk') {
     const da = diskPercent(a);
     const db = diskPercent(b);

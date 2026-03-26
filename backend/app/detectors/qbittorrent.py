@@ -5,6 +5,7 @@ import logging
 import httpx
 
 from app.detectors.base import BaseDetector
+from app.detectors.utils import normalize_version
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ class QBittorrentDetector(BaseDetector):
             if resp.status_code == 200:
                 # Returns plain text like "v4.6.3"
                 version = resp.text.strip()
-                return version.lstrip("v") if version else None
+                return normalize_version(version, strip_v=True) if version else None
         except Exception:
             logger.debug("Failed to get qBittorrent version from %s:%d", host, port)
         return None

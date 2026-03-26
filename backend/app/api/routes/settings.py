@@ -1,0 +1,684 @@
+"""Settings-related API endpoints."""
+
+import logging
+from datetime import datetime, timezone
+from typing import Any, Literal
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field, field_validator
+
+from app.config import Settings
+from app.core.auth import hash_password
+from app.core.github import GitHubClient
+from app.core.notifier import NtfyNotifier
+from app.detectors.registry import ALL_DETECTORS, DETECTOR_MAP
+
+from app.api.helpers import (
+    _AppConfigBase,
+    _EXCLUDED_FIELDS,
+    _NESTED_SECRET_FIELDS,
+    _TOP_SECRET_FIELDS,
+    _get_config_store,
+    _get_scheduler,
+    _get_settings,
+    _keep_or_replace,
+    _mask,
+    _require_api_key,
+)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+# --- Request/Response models ---
+
+
+class AppConfigEntry(_AppConfigBase):
+    """Per-app config entry sent by the frontend."""
+
+
+class ProxmoxHostSaveEntry(BaseModel):
+    id: str
+    label: str
+    host: str
+    token_id: str
+    token_secret: str | None = None  # None / "***" = keep current
+    node: str
+    verify_ssl: bool = False
+    ssh_username: str = "root"
+    ssh_password: str | None = None
+    ssh_key_path: str | None = None
+    pct_exec_enabled: bool = False
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Host ID is required")
+        if len(v) > 64:
+            raise ValueError("Host ID must not exceed 64 characters")
+        return v.strip()
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Host label is required")
+        return v.strip()
+
+    @field_validator("host")
+    @classmethod
+    def validate_host_url(cls, v: str) -> str:
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("Host must start with http:// or https://")
+        return v.rstrip("/")
+
+    @field_validator("token_id")
+    @classmethod
+    def validate_token_id(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Token ID is required")
+        return v.strip()
+
+    @field_validator("node")
+    @classmethod
+    def validate_node(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Node name is required")
+        return v.strip()
+
+
+class SettingsSaveRequest(BaseModel):
+    proxmox_host: str
+    proxmox_token_id: str
+    proxmox_token_secret: str | None = None
+    proxmox_node: str
+    poll_interval_seconds: int = Field(default=300, ge=30, le=3600)
+    discover_vms: bool = False
+    verify_ssl: bool = False
+    ssh_enabled: bool = True
+    ssh_username: str = "root"
+    ssh_key_path: str | None = None
+    ssh_password: str | None = None
+    github_token: str | None = None
+    log_level: str = "info"
+    version_detect_method: Literal["pct_first", "ssh_first", "ssh_only", "pct_only"] = "pct_first"
+    app_config: dict[str, AppConfigEntry] | None = None
+    proxmox_hosts: list[ProxmoxHostSaveEntry] | None = None
+    auth_mode: Literal["disabled", "forms"] | None = None
+    auth_username: str | None = None
+    new_password: str | None = Field(default=None, min_length=8, max_length=1024)
+    notifications_enabled: bool | None = None
+    ntfy_url: str | None = None
+    ntfy_token: str | None = None
+    ntfy_priority: int | None = Field(default=None, ge=1, le=5)
+    notify_disk_threshold: int | None = Field(default=None, ge=50, le=100)
+    notify_disk_cooldown_minutes: int | None = Field(default=None, ge=15, le=1440)
+    notify_on_outdated: bool | None = None
+    proxmon_api_key: str | None = None
+    trust_proxy_headers: bool | None = None
+
+    @field_validator("proxmox_host")
+    @classmethod
+    def validate_host(cls, v: str) -> str:
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("Host must start with http:// or https://")
+        return v.rstrip("/")
+
+    @field_validator("proxmox_token_id")
+    @classmethod
+    def validate_token_id(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Token ID is required")
+        return v.strip()
+
+    @field_validator("proxmox_node")
+    @classmethod
+    def validate_node(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Node name is required")
+        return v.strip()
+
+    @field_validator("app_config")
+    @classmethod
+    def validate_app_config(
+        cls, v: dict[str, AppConfigEntry] | None,
+    ) -> dict[str, AppConfigEntry] | None:
+        if v is None:
+            return v
+        for key in v:
+            if key not in DETECTOR_MAP:
+                raise ValueError(f"Unknown app: {key}")
+        return v
+
+
+class GitHubTestRequest(BaseModel):
+    repo: str
+
+
+class GitHubTestResponse(BaseModel):
+    ok: bool
+    repo: str
+    version: str | None = None
+    source: str | None = None
+    reason: str | None = None
+
+
+class ConnectionTestRequest(BaseModel):
+    proxmox_host: str
+    proxmox_token_id: str
+    proxmox_token_secret: str
+    proxmox_node: str
+    verify_ssl: bool = False
+    host_id: str | None = None
+
+    @field_validator("proxmox_host")
+    @classmethod
+    def validate_host(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Proxmox host is required")
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("Host must start with http:// or https://")
+        return v.rstrip("/")
+
+    @field_validator("proxmox_token_id")
+    @classmethod
+    def validate_token_id(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Token ID is required")
+        return v.strip()
+
+    @field_validator("proxmox_node")
+    @classmethod
+    def validate_node(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Node name is required")
+        return v.strip()
+
+
+# --- Merge helpers ---
+
+
+def _merge_proxmox_hosts(
+    body: SettingsSaveRequest, existing: dict[str, Any],
+) -> list[dict[str, Any]] | None:
+    """Merge proxmox_hosts from the request with existing persisted hosts.
+
+    Returns the merged list, or None if the payload omitted hosts
+    (caller should preserve existing data).
+    """
+    if body.proxmox_hosts is None or len(body.proxmox_hosts) == 0:
+        return None
+
+    existing_hosts: list[dict] = existing.get("proxmox_hosts", [])
+    saved_hosts = []
+    for entry in body.proxmox_hosts:
+        prev = next((h for h in existing_hosts if h.get("id") == entry.id), {})
+        saved_hosts.append({
+            "id": entry.id,
+            "label": entry.label,
+            "host": entry.host,
+            "token_id": entry.token_id,
+            "token_secret": _keep_or_replace(entry.token_secret, prev.get("token_secret")),
+            "node": entry.node,
+            "verify_ssl": entry.verify_ssl,
+            "ssh_username": entry.ssh_username,
+            "ssh_password": _keep_or_replace(entry.ssh_password, prev.get("ssh_password")),
+            "ssh_key_path": entry.ssh_key_path or prev.get("ssh_key_path") or "",
+            "pct_exec_enabled": entry.pct_exec_enabled,
+        })
+    return saved_hosts
+
+
+def _merge_app_config(
+    body: SettingsSaveRequest, existing: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Merge per-app config entries, preserving secrets masked with '***'.
+
+    Returns the merged app_config dict to persist.
+    """
+    if body.app_config is None:
+        return existing.get("app_config", {})
+
+    existing_app_config: dict[str, dict[str, Any]] = existing.get("app_config", {})
+    merged_app_config: dict[str, dict[str, Any]] = dict(existing_app_config)
+
+    for app_name, entry in body.app_config.items():
+        prev = existing_app_config.get(app_name, {})
+        merged_entry: dict[str, Any] = {}
+        # Port: None means "use default" (omit)
+        if entry.port is not None:
+            merged_entry["port"] = entry.port
+        # API key: None means "keep current", "" means "clear", "***" means "keep"
+        if entry.api_key is None or entry.api_key == "***":
+            if prev.get("api_key"):
+                merged_entry["api_key"] = prev["api_key"]
+        elif entry.api_key == "":
+            pass  # Explicit clear
+        else:
+            merged_entry["api_key"] = entry.api_key
+        # Scheme: None means "keep current / use default"
+        if entry.scheme is not None:
+            merged_entry["scheme"] = entry.scheme
+        elif prev.get("scheme"):
+            merged_entry["scheme"] = prev["scheme"]
+        # GitHub repo: None means "keep current", "" means "clear", value means "set"
+        if entry.github_repo is None:
+            if prev.get("github_repo"):
+                merged_entry["github_repo"] = prev["github_repo"]
+        elif entry.github_repo == "":
+            pass  # Explicit clear
+        else:
+            merged_entry["github_repo"] = entry.github_repo
+        # ssh_version_cmd: plain value, None = keep, empty = clear
+        if entry.ssh_version_cmd is None:
+            if prev.get("ssh_version_cmd"):
+                merged_entry["ssh_version_cmd"] = prev["ssh_version_cmd"]
+        elif entry.ssh_version_cmd == "":
+            pass  # clear
+        else:
+            merged_entry["ssh_version_cmd"] = entry.ssh_version_cmd
+        # ssh_username: plain value
+        if entry.ssh_username is None:
+            if prev.get("ssh_username"):
+                merged_entry["ssh_username"] = prev["ssh_username"]
+        elif entry.ssh_username == "":
+            pass  # clear
+        else:
+            merged_entry["ssh_username"] = entry.ssh_username
+        # ssh_key_path: plain value
+        if entry.ssh_key_path is None:
+            if prev.get("ssh_key_path"):
+                merged_entry["ssh_key_path"] = prev["ssh_key_path"]
+        elif entry.ssh_key_path == "":
+            pass  # clear
+        else:
+            merged_entry["ssh_key_path"] = entry.ssh_key_path
+        # ssh_password: treat like api_key (masked)
+        if entry.ssh_password is None or entry.ssh_password == "***":
+            if prev.get("ssh_password"):
+                merged_entry["ssh_password"] = prev["ssh_password"]
+        elif entry.ssh_password == "":
+            pass  # clear
+        else:
+            merged_entry["ssh_password"] = entry.ssh_password
+        if merged_entry:
+            merged_app_config[app_name] = merged_entry
+        elif app_name in merged_app_config:
+            del merged_app_config[app_name]
+
+    changed_apps = list(body.app_config.keys())
+    if changed_apps:
+        logger.info("App config updated for: %s", ", ".join(changed_apps))
+
+    return merged_app_config
+
+
+def _apply_auth_settings(
+    body: SettingsSaveRequest,
+    existing: dict[str, Any],
+    config_data: dict[str, Any],
+) -> None:
+    """Apply auth-related fields (mode, username, password hash) to config_data.
+
+    Preserves existing values when the request omits them.
+    """
+    if body.auth_mode is not None:
+        config_data["auth_mode"] = body.auth_mode
+    else:
+        config_data["auth_mode"] = existing.get("auth_mode", "forms")
+    if body.auth_username is not None:
+        config_data["auth_username"] = body.auth_username
+    else:
+        config_data["auth_username"] = existing.get("auth_username", "root")
+    # Password hash: set from new_password when provided, otherwise preserve existing.
+    existing_hash = existing.get("auth_password_hash", "")
+    target_auth_mode = config_data.get("auth_mode", "forms")
+    if target_auth_mode == "forms" and body.new_password:
+        config_data["auth_password_hash"] = hash_password(body.new_password)
+    elif existing_hash:
+        config_data["auth_password_hash"] = existing_hash
+
+
+def _apply_notification_settings(
+    body: SettingsSaveRequest,
+    existing: dict[str, Any],
+    config_data: dict[str, Any],
+) -> None:
+    """Apply notification-related fields to config_data.
+
+    Preserves existing values when the request omits them.
+    """
+    if body.notifications_enabled is not None:
+        config_data["notifications_enabled"] = body.notifications_enabled
+    else:
+        config_data["notifications_enabled"] = existing.get("notifications_enabled", False)
+    if body.ntfy_url is not None:
+        config_data["ntfy_url"] = body.ntfy_url
+    else:
+        config_data["ntfy_url"] = existing.get("ntfy_url", "")
+    config_data["ntfy_token"] = _keep_or_replace(
+        body.ntfy_token, existing.get("ntfy_token"),
+    ) or ""
+    if body.ntfy_priority is not None:
+        config_data["ntfy_priority"] = body.ntfy_priority
+    else:
+        config_data["ntfy_priority"] = existing.get("ntfy_priority", 3)
+    if body.notify_disk_threshold is not None:
+        config_data["notify_disk_threshold"] = body.notify_disk_threshold
+    else:
+        config_data["notify_disk_threshold"] = existing.get("notify_disk_threshold", 95)
+    if body.notify_disk_cooldown_minutes is not None:
+        config_data["notify_disk_cooldown_minutes"] = body.notify_disk_cooldown_minutes
+    else:
+        config_data["notify_disk_cooldown_minutes"] = existing.get("notify_disk_cooldown_minutes", 60)
+    if body.notify_on_outdated is not None:
+        config_data["notify_on_outdated"] = body.notify_on_outdated
+    else:
+        config_data["notify_on_outdated"] = existing.get("notify_on_outdated", True)
+
+
+# --- Endpoints ---
+
+
+@router.get("/health")
+async def health(
+    scheduler=Depends(_get_scheduler),
+    config_store=Depends(_get_config_store),
+) -> dict[str, str | int | float | bool | None]:
+    """Health check endpoint."""
+    configured = config_store.is_configured()
+    if not configured or scheduler is None:
+        return {
+            "status": "unconfigured",
+            "configured": False,
+            "last_poll": None,
+            "guest_count": 0,
+            "is_polling": False,
+            "seconds_since_last_poll": None,
+        }
+
+    uptime_seconds = 0.0
+    if scheduler.last_poll:
+        uptime_seconds = (datetime.now(timezone.utc) - scheduler.last_poll).total_seconds()
+    return {
+        "status": "ok",
+        "configured": True,
+        "last_poll": scheduler.last_poll.isoformat() if scheduler.last_poll else None,
+        "guest_count": len(scheduler.guests),
+        "is_polling": scheduler.is_running,
+        "seconds_since_last_poll": round(uptime_seconds, 1) if scheduler.last_poll else None,
+    }
+
+
+@router.get("/api/setup/status")
+async def setup_status(
+    config_store=Depends(_get_config_store),
+) -> dict[str, bool | list[str]]:
+    """Return whether the app is configured and which fields are missing."""
+    return {
+        "configured": config_store.is_configured(),
+        "missing_fields": config_store.get_missing_fields(),
+    }
+
+
+@router.get("/api/settings/full")
+async def get_full_settings(
+    settings=Depends(_get_settings),
+    config_store=Depends(_get_config_store),
+) -> dict[str, Any]:
+    """Return all settings with secrets masked."""
+    result = _mask(settings.model_dump(), _TOP_SECRET_FIELDS)
+    for key in _EXCLUDED_FIELDS:
+        result.pop(key, None)
+
+    result["app_config"] = {
+        name: _mask(cfg.model_dump(), _NESTED_SECRET_FIELDS)
+        for name, cfg in settings.app_config.items()
+    }
+    result["guest_config"] = {
+        gid: _mask(cfg.model_dump(), _NESTED_SECRET_FIELDS)
+        for gid, cfg in settings.guest_config.items()
+    }
+    result["proxmox_hosts"] = [
+        _mask(h.model_dump(), _NESTED_SECRET_FIELDS)
+        for h in settings.proxmox_hosts
+    ]
+    result["auth_password_set"] = bool(
+        config_store.load().get("auth_password_hash", "")
+    )
+    return result
+
+
+@router.post("/api/settings/test-connection", dependencies=[Depends(_require_api_key)])
+async def test_connection(
+    body: ConnectionTestRequest,
+) -> dict[str, bool | str | dict[str, str | int | float | bool | None] | None]:
+    """Test Proxmox connectivity without saving settings."""
+    base_url = f"{body.proxmox_host.rstrip('/')}/api2/json"
+    headers = {
+        "Authorization": f"PVEAPIToken={body.proxmox_token_id}={body.proxmox_token_secret}",
+    }
+    try:
+        async with httpx.AsyncClient(verify=body.verify_ssl, timeout=10.0) as client:
+            # Test with /version endpoint
+            resp = await client.get(f"{base_url}/version", headers=headers)
+            resp.raise_for_status()
+            version_data = resp.json().get("data", {})
+
+            # Also check the node exists
+            node_resp = await client.get(
+                f"{base_url}/nodes/{body.proxmox_node}/status",
+                headers=headers,
+            )
+            node_resp.raise_for_status()
+            node_data = node_resp.json().get("data", {})
+
+            pve_version = version_data.get("version", "unknown") if isinstance(version_data, dict) else "unknown"
+
+            return {
+                "success": True,
+                "message": f"Connected to Proxmox {pve_version} on node {body.proxmox_node}",
+                "node_info": {
+                    "pve_version": pve_version,
+                    "node": body.proxmox_node,
+                    "uptime": node_data.get("uptime") if isinstance(node_data, dict) else None,
+                },
+            }
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if status == 401:
+            msg = "Authentication failed: invalid token ID or secret"
+        elif status == 403:
+            msg = "Authorization denied: token lacks required permissions"
+        else:
+            msg = f"Proxmox API returned HTTP {status}"
+        logger.warning("Connection test failed: %s", msg)
+        return {"success": False, "message": msg, "node_info": None}
+    except httpx.ConnectError:
+        msg = f"Connection refused: {body.proxmox_host}"
+        logger.warning("Connection test failed: %s", msg)
+        return {"success": False, "message": msg, "node_info": None}
+    except httpx.TimeoutException:
+        msg = f"Connection timed out: {body.proxmox_host}"
+        logger.warning("Connection test failed: %s", msg)
+        return {"success": False, "message": msg, "node_info": None}
+    except Exception as exc:
+        msg = f"Connection error: {exc}"
+        logger.warning("Connection test failed: %s", msg)
+        return {"success": False, "message": msg, "node_info": None}
+
+
+@router.post("/api/github/test", dependencies=[Depends(_require_api_key)])
+async def github_test_repo(body: GitHubTestRequest, request: Request) -> GitHubTestResponse:
+    settings: Settings = request.app.state.settings
+    result = await GitHubClient(settings).test_repo(body.repo)
+    return GitHubTestResponse(
+        ok=result.ok,
+        repo=result.repo,
+        version=result.version,
+        source=result.source,
+        reason=result.reason,
+    )
+
+
+@router.get("/api/app-config/defaults")
+async def get_app_config_defaults() -> list[dict[str, str | int | bool | None]]:
+    """Return the list of supported apps with default ports and API key support."""
+    return [
+        {
+            "name": d.name,
+            "display_name": d.display_name,
+            "default_port": d.default_port,
+            "accepts_api_key": d.accepts_api_key,
+            "default_scheme": "http",
+            "github_repo": d.github_repo,
+        }
+        for d in ALL_DETECTORS
+    ]
+
+
+@router.post("/api/settings", dependencies=[Depends(_require_api_key)])
+async def save_settings(
+    body: SettingsSaveRequest,
+    request: Request,
+    settings=Depends(_get_settings),
+    config_store=Depends(_get_config_store),
+    scheduler=Depends(_get_scheduler),
+) -> dict[str, bool | str]:
+    """Save settings to config file, reload, and restart scheduler."""
+    # Read existing config once to avoid TOCTOU and preserve values
+    current_file = config_store.load()
+
+    # If token_secret is None, empty, or masked sentinel, keep current value
+    token_secret = _keep_or_replace(
+        body.proxmox_token_secret,
+        current_file.get("proxmox_token_secret") or settings.proxmox_token_secret,
+    )
+    if not token_secret:
+        raise HTTPException(
+            status_code=422,
+            detail="Token secret is required (no existing value found)",
+        )
+
+    # Build config data to persist
+    config_data: dict[str, Any] = {
+        "proxmox_host": body.proxmox_host,
+        "proxmox_token_id": body.proxmox_token_id,
+        "proxmox_token_secret": token_secret,
+        "proxmox_node": body.proxmox_node,
+        "poll_interval_seconds": body.poll_interval_seconds,
+        "discover_vms": body.discover_vms,
+        "verify_ssl": body.verify_ssl,
+        "ssh_enabled": body.ssh_enabled,
+        "ssh_username": body.ssh_username,
+        "ssh_key_path": body.ssh_key_path,
+        "ssh_password": _keep_or_replace(body.ssh_password, current_file.get("ssh_password")),
+        "github_token": _keep_or_replace(body.github_token, current_file.get("github_token")),
+        "log_level": body.log_level,
+        "version_detect_method": body.version_detect_method,
+    }
+
+    # Auth settings
+    _apply_auth_settings(body, current_file, config_data)
+
+    # Notification settings
+    _apply_notification_settings(body, current_file, config_data)
+
+    # API key (mask-aware) and trust proxy headers
+    config_data["proxmon_api_key"] = _keep_or_replace(
+        body.proxmon_api_key, current_file.get("proxmon_api_key"),
+    )
+    if body.trust_proxy_headers is not None:
+        config_data["trust_proxy_headers"] = body.trust_proxy_headers
+    else:
+        config_data["trust_proxy_headers"] = current_file.get("trust_proxy_headers", False)
+
+    # Multi-host support
+    merged_hosts = _merge_proxmox_hosts(body, current_file)
+    if merged_hosts is not None:
+        config_data["proxmox_hosts"] = merged_hosts
+        # Sync first host to flat fields used by ProxmoxClient constructor
+        if merged_hosts:
+            first = merged_hosts[0]
+            config_data["proxmox_host"] = first["host"]
+            config_data["proxmox_token_id"] = first["token_id"]
+            config_data["proxmox_token_secret"] = first["token_secret"]
+            config_data["proxmox_node"] = first["node"]
+
+    # Preserve existing proxmox_hosts when payload omits them
+    if "proxmox_hosts" not in config_data:
+        existing_hosts_data = current_file.get("proxmox_hosts")
+        if existing_hosts_data:
+            config_data["proxmox_hosts"] = existing_hosts_data
+
+    # Merge app_config
+    config_data["app_config"] = _merge_app_config(body, current_file)
+
+    # Always preserve guest_config (managed via /api/guests/{id}/config)
+    existing_guest_config = current_file.get("guest_config")
+    if existing_guest_config:
+        config_data["guest_config"] = existing_guest_config
+
+    # Always preserve custom_app_defs (managed via /api/custom-apps)
+    existing_custom_apps = current_file.get("custom_app_defs")
+    if existing_custom_apps:
+        config_data["custom_app_defs"] = existing_custom_apps
+
+    # Write to config file
+    try:
+        config_store.save(config_data)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # Reload settings: config file values take priority over env/defaults
+    new_settings = config_store.merge_into_settings(Settings())
+
+    # Stop existing scheduler if running
+    if scheduler is not None:
+        await scheduler.stop()
+
+    old_client: httpx.AsyncClient | None = getattr(request.app.state, "http_client", None)
+
+    from app.main import build_runtime
+    new_client, new_scheduler = build_runtime(new_settings)
+    try:
+        new_scheduler.start()
+        request.app.state.http_client = new_client
+        request.app.state.scheduler = new_scheduler
+        request.app.dependency_overrides[_get_scheduler] = lambda: new_scheduler
+        request.app.dependency_overrides[_get_settings] = lambda: new_settings
+        request.app.state.settings = new_settings
+    except Exception as exc:
+        await new_client.aclose()
+        raise HTTPException(status_code=500, detail=f"Failed to start scheduler: {exc}") from exc
+    finally:
+        if old_client is not None:
+            await old_client.aclose()
+
+    return {"success": True, "message": "Settings saved"}
+
+
+@router.post("/api/notifications/test", dependencies=[Depends(_require_api_key)])
+async def test_notification(
+    settings=Depends(_get_settings),
+) -> dict[str, bool | str]:
+    """Send a test notification to verify ntfy connectivity."""
+    if not settings.ntfy_url:
+        return {"success": False, "message": "ntfy URL is not configured"}
+
+    notifier = NtfyNotifier(
+        url=settings.ntfy_url,
+        token=settings.ntfy_token,
+        priority=settings.ntfy_priority,
+    )
+    sent = await notifier.send(
+        title="proxmon Test",
+        message="This is a test notification from proxmon.",
+        tags="white_check_mark",
+    )
+    if sent:
+        return {"success": True, "message": "Test notification sent successfully"}
+    return {"success": False, "message": "Failed to send notification -- check ntfy URL and token"}

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { CustomAppDef } from '../../types';
 import { fetchCustomApps, createCustomApp, updateCustomApp, deleteCustomApp } from '../../api/client';
 import { HttpError } from '../../api/client';
+import { validateCustomApp, type FormData, type FormErrors } from './customAppsValidation';
 
 function slugify(name: string): string {
   return name
@@ -20,20 +21,6 @@ function uniqueSlug(base: string, existingNames: string[]): string {
   let i = 2;
   while (existingNames.includes(`${truncated}-${i}`)) i++;
   return `${truncated}-${i}`;
-}
-
-interface FormData {
-  display_name: string;
-  default_port: string;
-  scheme: string;
-  version_path: string;
-  github_repo: string;
-  accepts_api_key: boolean;
-  auth_header: string;
-  aliases: string;
-  docker_images: string;
-  version_keys: string;
-  strip_v: boolean;
 }
 
 const EMPTY_FORM: FormData = {
@@ -64,10 +51,6 @@ function defToForm(def: CustomAppDef): FormData {
     version_keys: def.version_keys.join(', '),
     strip_v: def.strip_v,
   };
-}
-
-interface FormErrors {
-  [key: string]: string | undefined;
 }
 
 export default function CustomAppsSection() {
@@ -118,43 +101,10 @@ export default function CustomAppsSection() {
   };
 
   const validate = (): boolean => {
-    const errs: FormErrors = {};
-    const warns: FormErrors = {};
-
-    if (!form.display_name.trim()) {
-      errs.display_name = 'Display name is required.';
-    } else {
-      const dup = apps.find(
-        (a) => a.display_name.toLowerCase() === form.display_name.trim().toLowerCase()
-          && a.name !== editingName
-      );
-      if (dup) warns.display_name = 'Another custom app has this display name. Consider a more specific name.';
-    }
-
-    const port = parseInt(form.default_port, 10);
-    if (!form.default_port || isNaN(port) || port < 1 || port > 65535) {
-      errs.default_port = 'Port must be a number between 1 and 65535.';
-    }
-
-    if (form.version_path && !form.version_path.startsWith('/')) {
-      errs.version_path = 'Path must start with /. Example: /api/version';
-    }
-
-    if (form.github_repo) {
-      const repo = form.github_repo.trim();
-      // Backend accepts full GitHub URLs (normalizes to owner/repo); only reject garbage
-      if (!repo.includes('github.com') && !repo.startsWith('http') && !/^[^\s/]+\/[^\s/]+$/.test(repo)) {
-        errs.github_repo = "Use owner/repo format or a full GitHub URL. Example: mealie-recipes/mealie";
-      }
-    }
-
-    if (form.accepts_api_key && !form.auth_header.trim()) {
-      errs.auth_header = 'Enter the header name, or uncheck the checkbox.';
-    }
-
-    setErrors(errs);
-    setWarnings(warns);
-    return Object.keys(errs).length === 0;
+    const result = validateCustomApp(form, apps, editingName);
+    setErrors(result.errors);
+    setWarnings(result.warnings);
+    return result.valid;
   };
 
   const handleCreate = () => {

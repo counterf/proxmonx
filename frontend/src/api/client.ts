@@ -12,6 +12,7 @@ import type {
   CustomAppDef,
   GitHubTestResult,
 } from '../types';
+import { API_PATHS } from './paths';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 export const AUTH_UNAUTHORIZED_EVENT = 'proxmon:unauthorized';
@@ -37,8 +38,8 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
     if (!response.ok) {
       if (
         response.status === 401
-        && path !== '/api/auth/login'
-        && path !== '/api/auth/status'
+        && path !== API_PATHS.AUTH_LOGIN
+        && path !== API_PATHS.AUTH_STATUS
       ) {
         window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT));
       }
@@ -60,27 +61,27 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export async function fetchGuests(): Promise<GuestSummary[]> {
-  return fetchJson<GuestSummary[]>('/api/guests');
+  return fetchJson<GuestSummary[]>(API_PATHS.GUESTS);
 }
 
 export async function fetchGuest(id: string): Promise<GuestDetail> {
-  return fetchJson<GuestDetail>(`/api/guests/${id}`);
+  return fetchJson<GuestDetail>(API_PATHS.GUEST(id));
 }
 
 export async function triggerRefresh(): Promise<{ status: string }> {
-  return fetchJson<{ status: string }>('/api/refresh', { method: 'POST' });
+  return fetchJson<{ status: string }>(API_PATHS.REFRESH, { method: 'POST' });
 }
 
 export async function fetchHealth(): Promise<HealthStatus> {
-  return fetchJson<HealthStatus>('/health');
+  return fetchJson<HealthStatus>(API_PATHS.HEALTH);
 }
 
 export async function fetchSetupStatus(): Promise<SetupStatus> {
-  return fetchJson<SetupStatus>('/api/setup/status');
+  return fetchJson<SetupStatus>(API_PATHS.SETUP_STATUS);
 }
 
 export async function fetchFullSettings(): Promise<FullSettings> {
-  return fetchJson<FullSettings>('/api/settings/full');
+  return fetchJson<FullSettings>(API_PATHS.SETTINGS_FULL);
 }
 
 export async function testConnection(
@@ -92,7 +93,7 @@ export async function testConnection(
     verify_ssl: boolean;
   },
 ): Promise<ConnectionTestResult> {
-  return fetchJson<ConnectionTestResult>('/api/settings/test-connection', {
+  return fetchJson<ConnectionTestResult>(API_PATHS.SETTINGS_TEST_CONNECTION, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -102,7 +103,7 @@ export async function testConnection(
 export async function saveSettings(
   data: SettingsSaveRequest,
 ): Promise<{ success: boolean; message: string }> {
-  return fetchJson<{ success: boolean; message: string }>('/api/settings', {
+  return fetchJson<{ success: boolean; message: string }>(API_PATHS.SETTINGS, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -110,18 +111,18 @@ export async function saveSettings(
 }
 
 export async function fetchAppConfigDefaults(): Promise<AppConfigDefault[]> {
-  return fetchJson<AppConfigDefault[]>('/api/app-config/defaults');
+  return fetchJson<AppConfigDefault[]>(API_PATHS.APP_CONFIG_DEFAULTS);
 }
 
 export async function fetchGuestConfig(id: string): Promise<AppConfigEntry> {
-  return fetchJson<AppConfigEntry>(`/api/guests/${encodeURIComponent(id)}/config`);
+  return fetchJson<AppConfigEntry>(API_PATHS.GUEST_CONFIG(id));
 }
 
 export async function saveGuestConfig(
   id: string,
   data: AppConfigEntry,
 ): Promise<{ status: string }> {
-  return fetchJson<{ status: string }>(`/api/guests/${encodeURIComponent(id)}/config`, {
+  return fetchJson<{ status: string }>(API_PATHS.GUEST_CONFIG(id), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -131,23 +132,23 @@ export async function saveGuestConfig(
 export async function deleteGuestConfig(
   id: string,
 ): Promise<{ status: string }> {
-  return fetchJson<{ status: string }>(`/api/guests/${encodeURIComponent(id)}/config`, {
+  return fetchJson<{ status: string }>(API_PATHS.GUEST_CONFIG(id), {
     method: 'DELETE',
   });
 }
 
 export async function sendTestNotification(): Promise<{ success: boolean; message: string }> {
-  return fetchJson<{ success: boolean; message: string }>('/api/notifications/test', {
+  return fetchJson<{ success: boolean; message: string }>(API_PATHS.NOTIFICATIONS_TEST, {
     method: 'POST',
   });
 }
 
 export async function fetchAuthStatus(): Promise<AuthStatus> {
-  return fetchJson<AuthStatus>('/api/auth/status');
+  return fetchJson<AuthStatus>(API_PATHS.AUTH_STATUS);
 }
 
 export async function login(username: string, password: string): Promise<{ success: boolean }> {
-  return fetchJson<{ success: boolean }>('/api/auth/login', {
+  return fetchJson<{ success: boolean }>(API_PATHS.AUTH_LOGIN, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
@@ -155,13 +156,13 @@ export async function login(username: string, password: string): Promise<{ succe
 }
 
 export async function logout(): Promise<void> {
-  await fetchJson<{ success: boolean }>('/api/auth/logout', {
+  await fetchJson<{ success: boolean }>(API_PATHS.AUTH_LOGOUT, {
     method: 'POST',
   });
 }
 
 export async function changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean }> {
-  return fetchJson<{ success: boolean }>('/api/auth/change-password', {
+  return fetchJson<{ success: boolean }>(API_PATHS.AUTH_CHANGE_PASSWORD, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
@@ -169,7 +170,7 @@ export async function changePassword(currentPassword: string, newPassword: strin
 }
 
 export async function testGithubRepo(repo: string): Promise<GitHubTestResult> {
-  return fetchJson<GitHubTestResult>('/api/github/test', {
+  return fetchJson<GitHubTestResult>(API_PATHS.GITHUB_TEST, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repo }),
@@ -177,11 +178,11 @@ export async function testGithubRepo(repo: string): Promise<GitHubTestResult> {
 }
 
 export async function fetchCustomApps(): Promise<CustomAppDef[]> {
-  return fetchJson<CustomAppDef[]>('/api/custom-apps');
+  return fetchJson<CustomAppDef[]>(API_PATHS.CUSTOM_APPS);
 }
 
 export async function createCustomApp(data: CustomAppDef): Promise<CustomAppDef> {
-  return fetchJson<CustomAppDef>('/api/custom-apps', {
+  return fetchJson<CustomAppDef>(API_PATHS.CUSTOM_APPS, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -189,7 +190,7 @@ export async function createCustomApp(data: CustomAppDef): Promise<CustomAppDef>
 }
 
 export async function updateCustomApp(name: string, data: CustomAppDef): Promise<CustomAppDef> {
-  return fetchJson<CustomAppDef>(`/api/custom-apps/${encodeURIComponent(name)}`, {
+  return fetchJson<CustomAppDef>(API_PATHS.CUSTOM_APP(name), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -197,7 +198,7 @@ export async function updateCustomApp(name: string, data: CustomAppDef): Promise
 }
 
 export async function deleteCustomApp(name: string): Promise<{ status: string }> {
-  return fetchJson<{ status: string }>(`/api/custom-apps/${encodeURIComponent(name)}`, {
+  return fetchJson<{ status: string }>(API_PATHS.CUSTOM_APP(name), {
     method: 'DELETE',
   });
 }

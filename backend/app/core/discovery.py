@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -14,6 +13,7 @@ from app.core.proxmox import ProxmoxClient
 from app.core.ssh import SSHClient
 from app.detectors.base import BaseDetector
 from app.detectors.registry import ALL_DETECTORS, DETECTOR_MAP, DOCKER_DETECTOR
+from app.detectors.utils import normalize_version
 from app.models.guest import GuestInfo, VersionCheck
 
 logger = logging.getLogger(__name__)
@@ -626,10 +626,7 @@ def _normalize_version_string(version: str) -> str:
     Preserves legitimate pre-release suffixes like '1.0.0-beta.1'.
     Only strips suffixes that look like build hashes (7+ hex chars after a hyphen).
     """
-    version = version.lstrip("v")
-    # Only strip suffixes that look like build hashes (7+ hex chars)
-    version = re.sub(r'-[0-9a-f]{7,}$', '', version)
-    return version
+    return normalize_version(version, strip_v=True)
 
 
 def _determine_update_status(

@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 import httpx
 
 from app.detectors.base import BaseDetector
+from app.detectors.utils import normalize_version
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,8 @@ class PlexDetector(BaseDetector):
                     in_plex = line.split(":", 1)[1].strip() == "plexmediaserver"
                 elif in_plex and line.startswith("Version:"):
                     raw = line.split(":", 1)[1].strip()
-                    # Strip build hash suffix: "1.40.0.7998-c29d4c0c8" → "1.40.0.7998"
-                    return raw.split("-")[0] if "-" in raw else raw
+                    # Strip build hash suffix: "1.40.0.7998-c29d4c0c8" -> "1.40.0.7998"
+                    return normalize_version(raw)
         except Exception:
             logger.warning("Failed to fetch latest Plex version from deb repo")
         return None
@@ -65,7 +66,7 @@ class PlexDetector(BaseDetector):
                 version = root.get("version")
                 if version:
                     # Plex versions look like "1.40.0.7998-c29d4c0c8"
-                    return version.split("-")[0] if "-" in version else version
+                    return normalize_version(version)
         except Exception:
             logger.debug("Failed to get Plex version from %s:%d", host, port)
         return None

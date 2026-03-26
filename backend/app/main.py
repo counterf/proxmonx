@@ -130,6 +130,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if settings.notifications_enabled and settings.ntfy_url:
         logger.info("Notifications enabled -> %s", settings.ntfy_url)
 
+    app.state.scheduler = scheduler
     app.dependency_overrides[_get_scheduler] = lambda: scheduler
     app.dependency_overrides[_get_settings] = lambda: settings
     app.dependency_overrides[_get_config_store] = lambda: config_store

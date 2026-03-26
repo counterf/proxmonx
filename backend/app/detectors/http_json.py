@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from app.detectors.base import BaseDetector
+from app.detectors.utils import normalize_version
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +164,7 @@ class HttpJsonDetector(BaseDetector):
                 data = resp.json()
                 version = self._extract_version(data)
                 if version and self._strip_v:
-                    version = version.lstrip("v")
+                    version = normalize_version(version, strip_v=True)
                 if version:
                     return version
                 raise ProbeError("Version key not found in response")
