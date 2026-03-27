@@ -3,7 +3,6 @@ import { Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-r
 import Dashboard from './components/Dashboard';
 import GuestDetail from './components/GuestDetail';
 import Settings from './components/Settings';
-import SetupWizard from './components/setup/SetupWizard';
 import LoginPage from './components/LoginPage';
 import LoadingSpinner from './components/LoadingSpinner';
 import ProxmonIcon from './components/icons/ProxmonIcon';
@@ -24,17 +23,10 @@ function App() {
       const status = await fetchSetupStatus();
       setConfigured(status.configured);
       setCheckError(false);
-      if (!status.configured && location.pathname !== '/setup') {
-        navigate('/setup', { replace: true });
-        return;
-      }
-      // Check auth status after setup passes
-      if (status.configured) {
-        const auth = await fetchAuthStatus();
-        setAuthStatus(auth);
-        if (auth.auth_mode === 'forms' && !auth.authenticated && location.pathname !== '/login') {
-          navigate('/login', { replace: true });
-        }
+      const auth = await fetchAuthStatus();
+      setAuthStatus(auth);
+      if (auth.auth_mode === 'forms' && !auth.authenticated && location.pathname !== '/login') {
+        navigate('/login', { replace: true });
       }
     } catch {
       setCheckError(true);
@@ -72,11 +64,6 @@ function App() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleWizardComplete = useCallback(() => {
-    setConfigured(true);
-    navigate('/', { replace: true });
-  }, [navigate]);
-
   const handleLoginSuccess = useCallback(async () => {
     const auth = await fetchAuthStatus();
     setAuthStatus(auth);
@@ -99,21 +86,6 @@ function App() {
     return (
       <div className="min-h-screen bg-background text-gray-100 flex items-center justify-center">
         <LoadingSpinner text="Connecting to proxmon..." />
-      </div>
-    );
-  }
-
-  // Unconfigured: show wizard
-  if (configured === false) {
-    return (
-      <div className="min-h-screen bg-background text-gray-100">
-        <nav className="sticky top-0 z-50 flex items-center h-12 px-4 bg-surface border-b border-gray-800">
-          <span className="flex items-center gap-2 text-white" aria-label="proxmon">
-            <ProxmonIcon className="w-5 h-5" />
-            <span className="text-lg font-bold tracking-tight">proxmon</span>
-          </span>
-        </nav>
-        <SetupWizard onComplete={handleWizardComplete} />
       </div>
     );
   }
@@ -188,7 +160,7 @@ function App() {
       {/* Content */}
       <main className="max-w-7xl mx-auto px-4 py-4">
         <Routes>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/" element={<Dashboard configured={configured === true} />} />
           <Route path="/guest/:id" element={<GuestDetail />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/login" element={<LoginPage onSuccess={handleLoginSuccess} />} />

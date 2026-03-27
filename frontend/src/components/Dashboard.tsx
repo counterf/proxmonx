@@ -93,7 +93,7 @@ function SortIcon({ active, direction }: { active: boolean; direction: SortDirec
   );
 }
 
-export default function Dashboard() {
+export default function Dashboard({ configured }: { configured: boolean }) {
   const { guests, loading, error, refreshing, lastRefreshed, refresh } = useGuests();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -228,6 +228,26 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-4">
+      {!configured && (
+        <div className="flex items-start gap-3 p-4 rounded bg-amber-900/30 border border-amber-800 text-amber-300">
+          <svg className="w-5 h-5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+          <div>
+            <p className="text-sm font-medium">No Proxmox hosts configured</p>
+            <p className="text-xs text-amber-400/80 mt-0.5">
+              Go to <strong>Settings → Connection</strong> and add at least one Proxmox host to start monitoring your guests.
+            </p>
+            <Link
+              to="/settings"
+              className="inline-block mt-2 px-3 py-1 text-xs rounded bg-amber-800/60 hover:bg-amber-800 text-amber-200 border border-amber-700"
+            >
+              Open Settings
+            </Link>
+          </div>
+        </div>
+      )}
+
       {error && <ErrorBanner message={error} onRetry={refresh} />}
 
       {/* Header row */}
