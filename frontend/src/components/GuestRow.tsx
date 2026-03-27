@@ -143,8 +143,15 @@ export function GuestTableRow({ guest, visibleColumns }: GuestRowProps) {
       }}
     >
       {vis.has('name') && (
-        <td className="px-3 py-2 text-sm text-gray-200 truncate max-w-[200px]" title={guest.name}>
-          {guest.name}
+        <td className="px-3 py-2 text-sm text-gray-200 max-w-[200px]" title={guest.name}>
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span
+              className={`w-2 h-2 rounded-full shrink-0 ${guest.status === 'running' ? 'bg-green-500' : 'bg-gray-600'}`}
+              title={guest.status}
+              aria-label={guest.status}
+            />
+            <span className="truncate">{guest.name}</span>
+          </span>
         </td>
       )}
       {vis.has('type') && (
@@ -248,7 +255,14 @@ export function GuestCard({ guest }: GuestRowProps) {
     >
       {/* Row 1: name + status */}
       <div className="flex items-center justify-between mb-1">
-        <span className="text-sm font-medium text-gray-200 truncate mr-2">{guest.name}</span>
+        <span className="flex items-center gap-1.5 min-w-0 mr-2">
+          <span
+            className={`w-2 h-2 rounded-full shrink-0 ${guest.status === 'running' ? 'bg-green-500' : 'bg-gray-600'}`}
+            title={guest.status}
+            aria-label={guest.status}
+          />
+          <span className="text-sm font-medium text-gray-200 truncate">{guest.name}</span>
+        </span>
         <StatusBadge status={guest.update_status} />
       </div>
       {/* Row 2: type + app */}
