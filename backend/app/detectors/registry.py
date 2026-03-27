@@ -14,6 +14,7 @@ from app.detectors.librespeed_rust import LibreSpeedRustDetector
 from app.detectors.plex import PlexDetector
 from app.detectors.qbittorrent import QBittorrentDetector
 from app.detectors.sabnzbd import SABnzbdDetector
+from app.detectors.truenas import TrueNASDetector
 
 if TYPE_CHECKING:
     from app.config import CustomAppDef
@@ -41,6 +42,7 @@ ALL_DETECTORS: list[BaseDetector] = [
     make_detector("traefik"),
     CaddyDetector(),
     make_detector("ntfy"),
+    TrueNASDetector(),
 ]
 
 # Docker generic detector is separate (fallback)
