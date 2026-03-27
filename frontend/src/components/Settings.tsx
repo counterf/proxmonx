@@ -15,6 +15,14 @@ import SecuritySection from './settings/SecuritySection';
 import SSHSection from './settings/SSHSection';
 
 type AuthMethod = 'key' | 'password';
+type SettingsTab = 'connection' | 'security' | 'notifications' | 'apps';
+
+const TABS: { id: SettingsTab; label: string }[] = [
+  { id: 'connection',    label: 'Connection' },
+  { id: 'security',     label: 'Security' },
+  { id: 'notifications', label: 'Notifications' },
+  { id: 'apps',         label: 'Apps' },
+];
 
 interface FormData {
   proxmox_host: string;
@@ -143,6 +151,11 @@ export default function Settings() {
   const [confirmPassword, setConfirmPassword] = useState('');
   // Detectors loaded from API
   const [detectors, setDetectors] = useState<AppConfigDefault[]>([]);
+  // Tab state — persisted in sessionStorage
+  const [activeTab, setActiveTab] = useState<SettingsTab>(
+    () => (sessionStorage.getItem('proxmon_settings_tab') as SettingsTab) ?? 'connection'
+  );
+  const [pendingTab, setPendingTab] = useState<SettingsTab | null>(null);
 
   useEffect(() => {
     Promise.all([fetchFullSettings(), fetchAppConfigDefaults()])
@@ -213,6 +226,30 @@ export default function Settings() {
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [isDirty]);
+
+  const switchTab = useCallback((tab: SettingsTab) => {
+    setActiveTab(tab);
+    sessionStorage.setItem('proxmon_settings_tab', tab);
+    setPendingTab(null);
+  }, []);
+
+  const handleTabClick = useCallback((tab: SettingsTab) => {
+    if (tab === activeTab) return;
+    if (isDirty) {
+      setPendingTab(tab);
+    } else {
+      switchTab(tab);
+    }
+  }, [activeTab, isDirty, switchTab]);
+
+  const handleTabKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const ids = TABS.map(t => t.id);
+    const current = ids.indexOf(activeTab);
+    if (e.key === 'ArrowRight') { e.preventDefault(); handleTabClick(ids[(current + 1) % ids.length]); }
+    if (e.key === 'ArrowLeft')  { e.preventDefault(); handleTabClick(ids[(current - 1 + ids.length) % ids.length]); }
+    if (e.key === 'Home')       { e.preventDefault(); handleTabClick(ids[0]); }
+    if (e.key === 'End')        { e.preventDefault(); handleTabClick(ids[ids.length - 1]); }
+  }, [activeTab, handleTabClick]);
 
   const validate = (): boolean => {
     if (!form) return false;
@@ -351,6 +388,7 @@ export default function Settings() {
       apiKeyChanged.current = false;
       githubTokenChanged.current = false;
       changedApiKeys.current = new Set();
+      setPendingTab(null);
       setToast('Settings saved. Discovery restarting...');
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save settings');
@@ -385,120 +423,174 @@ export default function Settings() {
 
       <h1 className="text-xl font-bold text-white">Settings</h1>
 
-      {/* Security */}
-      <SecuritySection
-        authMode={form.auth_mode}
-        savedAuthMode={savedForm?.auth_mode}
-        authUsername={form.auth_username}
-        authPasswordSet={authPasswordSet}
-        currentPassword={currentPassword}
-        newPassword={newPassword}
-        confirmPassword={confirmPassword}
-        proxmonApiKey={form.proxmon_api_key}
-        trustProxyHeaders={form.trust_proxy_headers}
-        onAuthModeChange={(v) => setField('auth_mode', v)}
-        onAuthUsernameChange={(v) => setField('auth_username', v)}
-        onCurrentPasswordChange={setCurrentPassword}
-        onNewPasswordChange={setNewPassword}
-        onConfirmPasswordChange={setConfirmPassword}
-        onApiKeyChange={(v) => setField('proxmon_api_key', v)}
-        onTrustProxyHeadersChange={(v) => setField('trust_proxy_headers', v)}
-        disabled={saving}
-      />
+      {/* Tab bar */}
+      <div
+        role="tablist"
+        aria-label="Settings sections"
+        className="flex overflow-x-auto border-b border-gray-800"
+      >
+        {TABS.map(({ id, label }) => (
+          <button
+            key={id}
+            role="tab"
+            id={`tab-${id}`}
+            aria-selected={activeTab === id}
+            aria-controls={`panel-${id}`}
+            onClick={() => handleTabClick(id)}
+            onKeyDown={handleTabKeyDown}
+            className={`px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+              activeTab === id
+                ? 'border-blue-500 text-white'
+                : 'border-transparent text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
-      {/* Proxmox Hosts */}
-      <ProxmoxHostsSection
-        hosts={proxmoxHosts}
-        onChange={setProxmoxHosts}
-        disabled={saving}
-      />
-
-      {/* Discovery */}
-      <DiscoverySection
-        pollInterval={form.poll_interval_seconds}
-        discoverVms={form.discover_vms}
-        verifySsl={form.verify_ssl}
-        versionDetectMethod={form.version_detect_method}
-        errors={errors}
-        onPollIntervalChange={(v) => setField('poll_interval_seconds', v)}
-        onDiscoverVmsChange={(v) => setField('discover_vms', v)}
-        onVerifySslChange={(v) => setField('verify_ssl', v)}
-        onVersionDetectMethodChange={(v) => setField('version_detect_method', v)}
-        disabled={saving}
-      />
-
-      {/* SSH */}
-      <SSHSection
-        sshEnabled={form.ssh_enabled}
-        sshUsername={form.ssh_username}
-        sshKeyPath={form.ssh_key_path}
-        sshPassword={form.ssh_password}
-        authMethod={authMethod}
-        onSshEnabledChange={(v) => setField('ssh_enabled', v)}
-        onSshUsernameChange={(v) => setField('ssh_username', v)}
-        onSshKeyPathChange={(v) => setField('ssh_key_path', v)}
-        onSshPasswordChange={(v) => setField('ssh_password', v)}
-        onAuthMethodChange={setAuthMethod}
-        disabled={saving}
-      />
-
-      {/* GitHub Token */}
-      <GitHubSection
-        githubToken={form.github_token}
-        onGithubTokenChange={(v) => setField('github_token', v)}
-        disabled={saving}
-      />
-
-      {/* Notifications */}
-      <NotificationsSection
-        enabled={form.notifications_enabled}
-        ntfyUrl={form.ntfy_url}
-        ntfyToken={form.ntfy_token}
-        ntfyPriority={form.ntfy_priority}
-        diskThreshold={form.notify_disk_threshold}
-        diskCooldown={form.notify_disk_cooldown_minutes}
-        notifyOnOutdated={form.notify_on_outdated}
-        onEnabledChange={(v) => setField('notifications_enabled', v)}
-        onNtfyUrlChange={(v) => setField('ntfy_url', v)}
-        onNtfyTokenChange={(v) => setField('ntfy_token', v)}
-        onNtfyPriorityChange={(v) => setField('ntfy_priority', v)}
-        onDiskThresholdChange={(v) => setField('notify_disk_threshold', v)}
-        onDiskCooldownChange={(v) => setField('notify_disk_cooldown_minutes', v)}
-        onNotifyOnOutdatedChange={(v) => setField('notify_on_outdated', v)}
-        disabled={saving}
-      />
-
-      {/* App Configuration */}
-      <AppConfigSection
-        appConfigs={appConfigs}
-        onChange={setAppConfigs}
-        changedKeys={changedApiKeys}
-        defaults={detectors}
-        disabled={saving}
-      />
-
-      {/* Custom Apps */}
-      <CustomAppsSection />
-
-      {/* Plugins */}
-      {detectors.length > 0 && (
-        <div className="p-4 rounded bg-surface border border-gray-800">
-          <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Plugins (Detectors)</h2>
-          <p className="text-xs text-gray-500 mb-3">
-            Built-in detectors that identify applications running inside guests by name, tag, or Docker image.
-          </p>
-          <div className="space-y-1">
-            {detectors.map((d) => (
-              <div key={d.name} className="flex items-center justify-between text-sm py-0.5">
-                <span className="text-gray-300">{d.display_name}</span>
-                <span className="px-1.5 py-0.5 text-[11px] font-semibold rounded bg-green-900 text-green-500">
-                  Enabled
-                </span>
-              </div>
-            ))}
+      {/* Unsaved changes banner — shown when switching tabs with dirty form */}
+      {pendingTab && (
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded bg-amber-900/30 border border-amber-800 text-amber-300 text-sm">
+          <span>You have unsaved changes.</span>
+          <div className="flex gap-3 shrink-0">
+            <button
+              onClick={() => switchTab(pendingTab)}
+              className="underline hover:text-amber-200"
+            >
+              Switch anyway
+            </button>
+            <button
+              onClick={() => setPendingTab(null)}
+              className="text-gray-400 hover:text-gray-200"
+            >
+              Stay
+            </button>
           </div>
         </div>
       )}
+
+      {/* Tab panels */}
+      <div
+        role="tabpanel"
+        id={`panel-${activeTab}`}
+        aria-labelledby={`tab-${activeTab}`}
+      >
+        {activeTab === 'connection' && (
+          <div className="space-y-4">
+            <ProxmoxHostsSection
+              hosts={proxmoxHosts}
+              onChange={setProxmoxHosts}
+              disabled={saving}
+            />
+            <DiscoverySection
+              pollInterval={form.poll_interval_seconds}
+              discoverVms={form.discover_vms}
+              verifySsl={form.verify_ssl}
+              versionDetectMethod={form.version_detect_method}
+              errors={errors}
+              onPollIntervalChange={(v) => setField('poll_interval_seconds', v)}
+              onDiscoverVmsChange={(v) => setField('discover_vms', v)}
+              onVerifySslChange={(v) => setField('verify_ssl', v)}
+              onVersionDetectMethodChange={(v) => setField('version_detect_method', v)}
+              disabled={saving}
+            />
+          </div>
+        )}
+
+        {activeTab === 'security' && (
+          <div className="space-y-4">
+            <SecuritySection
+              authMode={form.auth_mode}
+              savedAuthMode={savedForm?.auth_mode}
+              authUsername={form.auth_username}
+              authPasswordSet={authPasswordSet}
+              currentPassword={currentPassword}
+              newPassword={newPassword}
+              confirmPassword={confirmPassword}
+              proxmonApiKey={form.proxmon_api_key}
+              trustProxyHeaders={form.trust_proxy_headers}
+              onAuthModeChange={(v) => setField('auth_mode', v)}
+              onAuthUsernameChange={(v) => setField('auth_username', v)}
+              onCurrentPasswordChange={setCurrentPassword}
+              onNewPasswordChange={setNewPassword}
+              onConfirmPasswordChange={setConfirmPassword}
+              onApiKeyChange={(v) => setField('proxmon_api_key', v)}
+              onTrustProxyHeadersChange={(v) => setField('trust_proxy_headers', v)}
+              disabled={saving}
+            />
+            <SSHSection
+              sshEnabled={form.ssh_enabled}
+              sshUsername={form.ssh_username}
+              sshKeyPath={form.ssh_key_path}
+              sshPassword={form.ssh_password}
+              authMethod={authMethod}
+              onSshEnabledChange={(v) => setField('ssh_enabled', v)}
+              onSshUsernameChange={(v) => setField('ssh_username', v)}
+              onSshKeyPathChange={(v) => setField('ssh_key_path', v)}
+              onSshPasswordChange={(v) => setField('ssh_password', v)}
+              onAuthMethodChange={setAuthMethod}
+              disabled={saving}
+            />
+            <GitHubSection
+              githubToken={form.github_token}
+              onGithubTokenChange={(v) => setField('github_token', v)}
+              disabled={saving}
+            />
+          </div>
+        )}
+
+        {activeTab === 'notifications' && (
+          <NotificationsSection
+            enabled={form.notifications_enabled}
+            ntfyUrl={form.ntfy_url}
+            ntfyToken={form.ntfy_token}
+            ntfyPriority={form.ntfy_priority}
+            diskThreshold={form.notify_disk_threshold}
+            diskCooldown={form.notify_disk_cooldown_minutes}
+            notifyOnOutdated={form.notify_on_outdated}
+            onEnabledChange={(v) => setField('notifications_enabled', v)}
+            onNtfyUrlChange={(v) => setField('ntfy_url', v)}
+            onNtfyTokenChange={(v) => setField('ntfy_token', v)}
+            onNtfyPriorityChange={(v) => setField('ntfy_priority', v)}
+            onDiskThresholdChange={(v) => setField('notify_disk_threshold', v)}
+            onDiskCooldownChange={(v) => setField('notify_disk_cooldown_minutes', v)}
+            onNotifyOnOutdatedChange={(v) => setField('notify_on_outdated', v)}
+            disabled={saving}
+          />
+        )}
+
+        {activeTab === 'apps' && (
+          <div className="space-y-4">
+            <AppConfigSection
+              appConfigs={appConfigs}
+              onChange={setAppConfigs}
+              changedKeys={changedApiKeys}
+              defaults={detectors}
+              disabled={saving}
+            />
+            <CustomAppsSection />
+            {detectors.length > 0 && (
+              <div className="p-4 rounded bg-surface border border-gray-800">
+                <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Plugins (Detectors)</h2>
+                <p className="text-xs text-gray-500 mb-3">
+                  Built-in detectors that identify applications running inside guests by name, tag, or Docker image.
+                </p>
+                <div className="space-y-1">
+                  {detectors.map((d) => (
+                    <div key={d.name} className="flex items-center justify-between text-sm py-0.5">
+                      <span className="text-gray-300">{d.display_name}</span>
+                      <span className="px-1.5 py-0.5 text-[11px] font-semibold rounded bg-green-900 text-green-500">
+                        Enabled
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Sticky save bar */}
       <div className="fixed bottom-0 left-0 right-0 py-3 px-4 bg-background border-t border-gray-800 flex justify-center z-40">
