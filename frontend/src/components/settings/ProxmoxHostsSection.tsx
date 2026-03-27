@@ -29,7 +29,7 @@ function emptyHost(): ProxmoxHost {
 const inputClass = 'w-full px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500';
 
 export default function ProxmoxHostsSection({ hosts, onChange, disabled = false }: ProxmoxHostsSectionProps) {
-  const [expandedId, setExpandedId] = useState<string | null>(hosts.length > 0 ? hosts[0].id : null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showSecret, setShowSecret] = useState<Record<string, boolean>>({});
   const [showSshPass, setShowSshPass] = useState<Record<string, boolean>>({});
   const [testing, setTesting] = useState<Record<string, boolean>>({});
