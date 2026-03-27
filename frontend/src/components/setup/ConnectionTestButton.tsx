@@ -81,4 +81,3 @@ export default function ConnectionTestButton({ onTest, disabled }: ConnectionTes
   );
 }
 
-export type { TestStatus };

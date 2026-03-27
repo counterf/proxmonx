@@ -128,6 +128,7 @@ export default function Settings() {
   const tokenSecretChanged = useRef(false);
   const ntfyTokenChanged = useRef(false);
   const apiKeyChanged = useRef(false);
+  const githubTokenChanged = useRef(false);
   // Per-app configuration
   const [appConfigs, setAppConfigs] = useState<Record<string, AppConfigEntry>>({});
   const [savedAppConfigs, setSavedAppConfigs] = useState<Record<string, AppConfigEntry>>({});
@@ -180,6 +181,9 @@ export default function Settings() {
     if (key === 'proxmon_api_key') {
       apiKeyChanged.current = true;
     }
+    if (key === 'github_token') {
+      githubTokenChanged.current = true;
+    }
   }, []);
 
   // tokenSecretChanged must be ORed in: typing "***" back after changing it would
@@ -193,6 +197,7 @@ export default function Settings() {
     tokenSecretChanged.current ||
     ntfyTokenChanged.current ||
     apiKeyChanged.current ||
+    githubTokenChanged.current ||
     appConfigDirty ||
     hostsDirty ||
     passwordDirty ||
@@ -314,7 +319,7 @@ export default function Settings() {
         ssh_username: form.ssh_username,
         ssh_key_path: form.ssh_key_path || null,
         ssh_password: form.ssh_password || null,
-        github_token: form.github_token || null,
+        github_token: githubTokenChanged.current ? (form.github_token || null) : null,
         log_level: form.log_level,
         version_detect_method: form.version_detect_method,
         auth_mode: form.auth_mode,
@@ -344,6 +349,7 @@ export default function Settings() {
       tokenSecretChanged.current = false;
       ntfyTokenChanged.current = false;
       apiKeyChanged.current = false;
+      githubTokenChanged.current = false;
       changedApiKeys.current = new Set();
       setToast('Settings saved. Discovery restarting...');
     } catch (err) {
@@ -467,6 +473,7 @@ export default function Settings() {
         appConfigs={appConfigs}
         onChange={setAppConfigs}
         changedKeys={changedApiKeys}
+        defaults={detectors}
         disabled={saving}
       />
 

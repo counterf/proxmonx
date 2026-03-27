@@ -4,9 +4,10 @@ interface ToggleProps {
   checked: boolean;
   onChange: (v: boolean) => void;
   hint?: string;
+  disabled?: boolean;
 }
 
-export default function Toggle({ id, label, checked, onChange, hint }: ToggleProps) {
+export default function Toggle({ id, label, checked, onChange, hint, disabled }: ToggleProps) {
   const labelId = `${id}-label`;
   return (
     <div className="flex items-center justify-between">
@@ -25,8 +26,9 @@ export default function Toggle({ id, label, checked, onChange, hint }: TogglePro
         role="switch"
         aria-checked={checked}
         aria-labelledby={labelId}
-        onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none ${
+        onClick={() => !disabled && onChange(!checked)}
+        disabled={disabled}
+        className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
           checked ? 'bg-blue-600' : 'bg-gray-700'
         }`}
       >

@@ -40,6 +40,7 @@ export default function NotificationsSection({
   onDiskThresholdChange,
   onDiskCooldownChange,
   onNotifyOnOutdatedChange,
+  disabled,
 }: NotificationsSectionProps) {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
@@ -70,6 +71,7 @@ export default function NotificationsSection({
           checked={enabled}
           onChange={onEnabledChange}
           hint="Activate push notifications after each discovery cycle"
+          disabled={disabled}
         />
 
         {enabled && (
@@ -81,6 +83,7 @@ export default function NotificationsSection({
                 value={ntfyUrl}
                 onChange={(e) => onNtfyUrlChange(e.target.value)}
                 placeholder="https://ntfy.sh/my-proxmon-alerts"
+                disabled={disabled}
                 className={inputClass}
               />
             </FormField>
@@ -91,6 +94,7 @@ export default function NotificationsSection({
               value={ntfyToken}
               onChange={onNtfyTokenChange}
               hint="Required only if the ntfy topic uses access control"
+              disabled={disabled}
             />
 
             <FormField label="Priority" htmlFor="s_ntfy_priority" hint="Default priority for notifications (disk alerts always use High)">
@@ -98,6 +102,7 @@ export default function NotificationsSection({
                 id="s_ntfy_priority"
                 value={ntfyPriority}
                 onChange={(e) => onNtfyPriorityChange(parseInt(e.target.value))}
+                disabled={disabled}
                 className={inputClass}
               >
                 <option value={1}>1 - Min</option>
@@ -116,6 +121,7 @@ export default function NotificationsSection({
                 max={100}
                 value={diskThreshold}
                 onChange={(e) => onDiskThresholdChange(parseInt(e.target.value) || 95)}
+                disabled={disabled}
                 className={inputClass}
               />
             </FormField>
@@ -128,6 +134,7 @@ export default function NotificationsSection({
                 max={1440}
                 value={diskCooldown}
                 onChange={(e) => onDiskCooldownChange(parseInt(e.target.value) || 60)}
+                disabled={disabled}
                 className={inputClass}
               />
             </FormField>
@@ -138,13 +145,14 @@ export default function NotificationsSection({
               checked={notifyOnOutdated}
               onChange={onNotifyOnOutdatedChange}
               hint="Send a one-time alert when an app transitions from up-to-date to outdated"
+              disabled={disabled}
             />
 
             <div className="pt-2">
               <button
                 type="button"
                 onClick={handleTest}
-                disabled={testing || !ntfyUrl}
+                disabled={disabled || testing || !ntfyUrl}
                 className="px-4 py-1.5 text-sm font-medium rounded bg-gray-700 hover:bg-gray-600 text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {testing ? 'Sending...' : 'Send Test Notification'}

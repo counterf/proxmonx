@@ -62,11 +62,11 @@ class TestGetMissingFields:
 
 class TestSaveIdempotent:
     def test_second_save_overwrites_first(self, store: ConfigStore) -> None:
-        store.save({"a": 1})
-        store.save({"b": 2})
+        store.save({"proxmox_host": "https://host1:8006"})
+        store.save({"proxmox_node": "pve"})
         data = store.load()
-        assert "a" not in data
-        assert data["b"] == 2
+        assert "proxmox_host" not in data
+        assert data["proxmox_node"] == "pve"
 
 
 class TestMergeIntoSettings:
@@ -206,3 +206,17 @@ class TestGetMissingFieldsMultiHost:
             ],
         })
         assert store.get_missing_fields() == []
+
+
+class TestLoadAuth:
+    def test_load_auth_fast_path(self, store: ConfigStore) -> None:
+        store.save({
+            "auth_mode": "forms",
+            "auth_password_hash": "$bcrypt$somehash",
+        })
+        auth = store.load_auth()
+        assert auth == {
+            "auth_mode": "forms",
+            "auth_password_hash": "$bcrypt$somehash",
+        }
+        assert "proxmox_host" not in auth

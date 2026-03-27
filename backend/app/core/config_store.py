@@ -16,19 +16,90 @@ logger = logging.getLogger(__name__)
 
 _HOST_REQUIRED_KEYS = ("host", "token_id", "token_secret", "node")
 
+# ---------------------------------------------------------------------------
+# Field-type mappings
+# Every key that config_store.save() persists belongs to exactly one set.
+# ---------------------------------------------------------------------------
+
+_SCALAR_STR_FIELDS: frozenset[str] = frozenset({
+    "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node",
+    "ssh_username", "ssh_key_path", "ssh_password", "ssh_known_hosts_path",
+    "github_token", "log_level", "version_detect_method",
+    "auth_mode", "auth_username", "auth_password_hash",
+    "ntfy_url", "ntfy_token", "proxmon_api_key",
+})
+_SCALAR_INT_FIELDS: frozenset[str] = frozenset({
+    "poll_interval_seconds", "ntfy_priority",
+    "notify_disk_threshold", "notify_disk_cooldown_minutes",
+})
+_SCALAR_BOOL_FIELDS: frozenset[str] = frozenset({
+    "discover_vms", "verify_ssl", "ssh_enabled", "notifications_enabled",
+    "notify_on_outdated", "trust_proxy_headers",
+})
+_JSON_FIELDS: frozenset[str] = frozenset({
+    "proxmox_hosts", "app_config", "guest_config", "custom_app_defs",
+})
+
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS settings (
-    id         INTEGER PRIMARY KEY CHECK (id = 1),
-    data       TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    id                           INTEGER PRIMARY KEY CHECK (id = 1),
+    proxmox_host                 TEXT,
+    proxmox_token_id             TEXT,
+    proxmox_token_secret         TEXT,
+    proxmox_node                 TEXT,
+    poll_interval_seconds        INTEGER  DEFAULT 300,
+    discover_vms                 INTEGER  DEFAULT 0,
+    verify_ssl                   INTEGER  DEFAULT 0,
+    ssh_enabled                  INTEGER  DEFAULT 1,
+    ssh_username                 TEXT     DEFAULT 'root',
+    ssh_key_path                 TEXT,
+    ssh_password                 TEXT,
+    ssh_known_hosts_path         TEXT     DEFAULT '',
+    github_token                 TEXT,
+    log_level                    TEXT     DEFAULT 'info',
+    version_detect_method        TEXT     DEFAULT 'pct_first',
+    auth_mode                    TEXT     DEFAULT 'forms',
+    auth_username                TEXT     DEFAULT 'root',
+    auth_password_hash           TEXT,
+    notifications_enabled        INTEGER  DEFAULT 0,
+    ntfy_url                     TEXT     DEFAULT '',
+    ntfy_token                   TEXT     DEFAULT '',
+    ntfy_priority                INTEGER  DEFAULT 3,
+    notify_disk_threshold        INTEGER  DEFAULT 95,
+    notify_disk_cooldown_minutes INTEGER  DEFAULT 60,
+    notify_on_outdated           INTEGER  DEFAULT 1,
+    proxmon_api_key              TEXT,
+    trust_proxy_headers          INTEGER  DEFAULT 0,
+    proxmox_hosts                TEXT     DEFAULT '[]',
+    app_config                   TEXT     DEFAULT '{}',
+    guest_config                 TEXT     DEFAULT '{}',
+    custom_app_defs              TEXT     DEFAULT '[]',
+    updated_at                   TEXT     NOT NULL
+                                 DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 )
 """
 
-_UPSERT = """
-INSERT INTO settings (id, data, updated_at)
-VALUES (1, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at
-"""
+
+def _dict_to_params(data: dict) -> dict:
+    """Convert a settings dict to a column-name → SQLite-value mapping.
+
+    Keys not in the known field sets are silently ignored.
+    None values result in SQL NULL (omitting a key from the save dict clears it).
+    """
+    params: dict = {}
+    for key in _SCALAR_STR_FIELDS:
+        v = data.get(key)
+        params[key] = str(v) if v is not None else None
+    for key in _SCALAR_INT_FIELDS:
+        v = data.get(key)
+        params[key] = int(v) if v is not None else None
+    for key in _SCALAR_BOOL_FIELDS:
+        v = data.get(key)
+        params[key] = int(bool(v)) if v is not None else None
+    for key in _JSON_FIELDS:
+        v = data.get(key)
+        params[key] = json.dumps(v, default=str) if v is not None else None
+    return params
 
 
 class ConfigStore:
@@ -61,26 +132,71 @@ class ConfigStore:
             conn.execute(_CREATE_TABLE)
 
     def load(self) -> dict:
-        """Read settings from SQLite, return as dict."""
+        """Read settings from SQLite, return as dict.
+
+        None-valued columns are omitted from the result so callers using
+        ``.get()`` with defaults continue to work correctly.
+        """
         with self._connect() as conn:
-            row = conn.execute("SELECT data FROM settings WHERE id = 1").fetchone()
+            row = conn.execute("SELECT * FROM settings WHERE id = 1").fetchone()
             if row is None:
                 return {}
-            try:
-                data = json.loads(row["data"])
-                if not isinstance(data, dict):
-                    logger.error("Settings data is not a JSON object, ignoring")
-                    return {}
-                return data
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.error("Failed to parse settings data: %s", exc)
+            result: dict = {}
+            for key in _SCALAR_STR_FIELDS:
+                v = row[key]
+                if v is not None:
+                    result[key] = v
+            for key in _SCALAR_INT_FIELDS:
+                v = row[key]
+                if v is not None:
+                    result[key] = int(v)
+            for key in _SCALAR_BOOL_FIELDS:
+                v = row[key]
+                if v is not None:
+                    result[key] = bool(v)
+            for key in _JSON_FIELDS:
+                raw = row[key]
+                if raw is not None:
+                    try:
+                        result[key] = json.loads(raw)
+                    except (json.JSONDecodeError, TypeError) as exc:
+                        logger.error("Failed to parse JSON column '%s': %s", key, exc)
+            return result
+
+    def load_auth(self) -> dict:
+        """Fast-path read of auth fields only (used by auth middleware hot path).
+
+        Avoids loading and JSON-parsing the full settings row on every request.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT auth_mode, auth_password_hash FROM settings WHERE id = 1"
+            ).fetchone()
+            if row is None:
                 return {}
+            return {
+                "auth_mode": row["auth_mode"] or "forms",
+                "auth_password_hash": row["auth_password_hash"] or "",
+            }
 
     def save(self, data: dict) -> None:
-        """Write settings to SQLite (upsert single row)."""
-        payload = json.dumps(data, indent=2, default=str)
+        """Write settings to SQLite.
+
+        Every save fully replaces all columns — keys absent from *data* are
+        written as NULL, so a subsequent load() will not return them.
+        Unknown keys (not in any field-type set) are silently ignored.
+        Callers must supply the full settings dict, not a partial patch.
+        """
+        params = _dict_to_params(data)
+        cols = list(params.keys())
         with self._connect() as conn:
-            conn.execute(_UPSERT, (payload,))
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (id, updated_at) "
+                "VALUES (1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+            )
+            update_parts = ", ".join(f"{c} = :{c}" for c in cols)
+            update_parts += ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+            conn.execute(f"UPDATE settings SET {update_parts} WHERE id = 1", params)
         logger.info("Settings saved via UI")
 
     def is_configured(self) -> bool:

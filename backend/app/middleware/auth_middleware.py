@@ -91,7 +91,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 status_code=403,
             )
 
-        data = config_store.load()
+        data = config_store.load_auth()
         auth_mode = data.get("auth_mode", "forms")
 
         # 4. Auth disabled -> pass through

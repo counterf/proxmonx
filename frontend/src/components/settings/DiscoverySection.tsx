@@ -29,6 +29,7 @@ export default function DiscoverySection({
   onDiscoverVmsChange,
   onVerifySslChange,
   onVersionDetectMethodChange,
+  disabled,
 }: DiscoverySectionProps) {
   return (
     <div className="p-4 rounded bg-surface border border-gray-800">
@@ -42,6 +43,7 @@ export default function DiscoverySection({
             max={3600}
             value={pollInterval}
             onChange={(e) => onPollIntervalChange(parseInt(e.target.value) || 300)}
+            disabled={disabled}
             className={inputClass('poll_interval_seconds', errors)}
           />
         </FormField>
@@ -52,6 +54,7 @@ export default function DiscoverySection({
           checked={discoverVms}
           onChange={onDiscoverVmsChange}
           hint="Scan QEMU virtual machines in addition to LXC containers"
+          disabled={disabled}
         />
 
         <Toggle
@@ -60,6 +63,7 @@ export default function DiscoverySection({
           checked={verifySsl}
           onChange={onVerifySslChange}
           hint="Validate TLS certificates when connecting to Proxmox and application APIs"
+          disabled={disabled}
         />
 
         {!verifySsl && (
@@ -76,6 +80,7 @@ export default function DiscoverySection({
             id="s_version_detect_method"
             value={versionDetectMethod}
             onChange={(e) => onVersionDetectMethodChange(e.target.value)}
+            disabled={disabled}
             className={inputClass('version_detect_method', errors)}
           >
             <option value="pct_first">pct exec first, fallback to SSH</option>

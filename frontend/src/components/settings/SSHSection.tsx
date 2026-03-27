@@ -32,6 +32,7 @@ export default function SSHSection({
   onSshKeyPathChange,
   onSshPasswordChange,
   onAuthMethodChange,
+  disabled,
 }: SSHSectionProps) {
   return (
     <div className="p-4 rounded bg-surface border border-gray-800">
@@ -46,6 +47,7 @@ export default function SSHSection({
           checked={sshEnabled}
           onChange={onSshEnabledChange}
           hint="Allow SSH and pct exec for CLI-based version detection"
+          disabled={disabled}
         />
 
         {sshEnabled && (
@@ -56,6 +58,7 @@ export default function SSHSection({
                 type="text"
                 value={sshUsername}
                 onChange={(e) => onSshUsernameChange(e.target.value)}
+                disabled={disabled}
                 className={inputClass}
               />
             </FormField>
@@ -70,6 +73,7 @@ export default function SSHSection({
                     name="s_auth_method"
                     checked={authMethod === 'key'}
                     onChange={() => onAuthMethodChange('key')}
+                    disabled={disabled}
                     className="accent-blue-500"
                   />
                   Key file
@@ -80,6 +84,7 @@ export default function SSHSection({
                     name="s_auth_method"
                     checked={authMethod === 'password'}
                     onChange={() => onAuthMethodChange('password')}
+                    disabled={disabled}
                     className="accent-blue-500"
                   />
                   Password
@@ -95,6 +100,7 @@ export default function SSHSection({
                   value={sshKeyPath}
                   onChange={(e) => onSshKeyPathChange(e.target.value)}
                   placeholder="/root/.ssh/id_ed25519"
+                  disabled={disabled}
                   className={inputClass}
                 />
               </FormField>
@@ -107,6 +113,7 @@ export default function SSHSection({
                 value={sshPassword}
                 onChange={onSshPasswordChange}
                 hint="Fallback password when no key is configured"
+                disabled={disabled}
               />
             )}
           </>

@@ -203,7 +203,7 @@ class GitHubClient:
                 # Some repos only publish pre-releases or use tags; fall back
                 return await self._fetch_latest_from_list(repo, headers)
 
-            if response.status_code == 403:
+            if response.status_code in (403, 429):
                 remaining = response.headers.get("x-ratelimit-remaining", "?")
                 logger.warning(
                     "GitHub rate limit hit for %s (remaining: %s)", repo, remaining
@@ -224,6 +224,10 @@ class GitHubClient:
             resp = await c.get(
                 f"https://api.github.com/repos/{repo}/releases?per_page=1", headers=headers
             )
+            if resp.status_code in (403, 429):
+                remaining = resp.headers.get("x-ratelimit-remaining", "?")
+                logger.warning("GitHub rate limit hit for %s (remaining: %s)", repo, remaining)
+                return None
             if resp.status_code == 200:
                 releases: list[dict[str, str]] = resp.json()
                 if releases:
@@ -234,6 +238,10 @@ class GitHubClient:
             resp = await c.get(
                 f"https://api.github.com/repos/{repo}/tags?per_page=1", headers=headers
             )
+            if resp.status_code in (403, 429):
+                remaining = resp.headers.get("x-ratelimit-remaining", "?")
+                logger.warning("GitHub rate limit hit for %s (remaining: %s)", repo, remaining)
+                return None
             if resp.status_code == 200:
                 tags: list[dict[str, str]] = resp.json()
                 if tags:

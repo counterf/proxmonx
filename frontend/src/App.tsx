@@ -84,7 +84,11 @@ function App() {
   }, [navigate]);
 
   const handleLogout = useCallback(async () => {
-    await logout();
+    try {
+      await logout();
+    } catch {
+      // best-effort — clear local state regardless
+    }
     setAuthStatus({ auth_mode: 'forms', authenticated: false, username: null });
     setShowUserMenu(false);
     navigate('/login', { replace: true });

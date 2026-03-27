@@ -446,9 +446,7 @@ async def get_full_settings(
         _mask(h.model_dump(), _NESTED_SECRET_FIELDS)
         for h in settings.proxmox_hosts
     ]
-    result["auth_password_set"] = bool(
-        config_store.load().get("auth_password_hash", "")
-    )
+    result["auth_password_set"] = bool(config_store.load_auth().get("auth_password_hash"))
     return result
 
 

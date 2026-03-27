@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import type { AppConfigEntry, AppConfigDefault } from '../../types';
-import { fetchAppConfigDefaults } from '../../api/client';
 
 interface AppConfigSectionProps {
   appConfigs: Record<string, AppConfigEntry>;
   onChange: (configs: Record<string, AppConfigEntry>) => void;
   changedKeys: React.MutableRefObject<Set<string>>;
+  defaults: AppConfigDefault[];
   disabled?: boolean;
 }
 
@@ -15,20 +15,13 @@ export default function AppConfigSection({
   appConfigs,
   onChange,
   changedKeys,
+  defaults,
   disabled = false,
 }: AppConfigSectionProps) {
   const [expanded, setExpanded] = useState(false);
-  const [defaults, setDefaults] = useState<AppConfigDefault[]>([]);
   const [showApiKey, setShowApiKey] = useState<Record<string, boolean>>({});
   const [showSshPassword, setShowSshPassword] = useState<Record<string, boolean>>({});
   const [sshExpanded, setSshExpanded] = useState<Record<string, boolean>>({});
-  const [fetchError, setFetchError] = useState<boolean>(false);
-
-  useEffect(() => {
-    fetchAppConfigDefaults()
-      .then(setDefaults)
-      .catch(() => setFetchError(true));
-  }, []);
 
   const updateApp = (name: string, field: AppField, value: string) => {
     const current = appConfigs[name] || {};
@@ -70,13 +63,6 @@ export default function AppConfigSection({
     setSshExpanded((prev) => ({ ...prev, [name]: !prev[name] }));
   };
 
-  if (fetchError) {
-    return (
-      <p className="text-xs text-red-400 mt-1">
-        Failed to load app configuration options. Please refresh.
-      </p>
-    );
-  }
   if (defaults.length === 0) return null;
 
   const sshSection = (app: AppConfigDefault, prefix: string) => {

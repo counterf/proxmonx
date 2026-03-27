@@ -104,6 +104,7 @@ class DiscoveryEngine:
             verify=host_config.verify_ssl,
             follow_redirects=True,
         )
+        updated: dict[str, GuestInfo] = {}
         try:
             proxmox = ProxmoxClient(settings, http_client=host_client)
 
@@ -126,7 +127,6 @@ class DiscoveryEngine:
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            updated: dict[str, GuestInfo] = {}
             for result in results:
                 if isinstance(result, GuestInfo):
                     updated[result.id] = result

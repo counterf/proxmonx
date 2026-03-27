@@ -9,6 +9,7 @@ interface GitHubSectionProps {
 export default function GitHubSection({
   githubToken,
   onGithubTokenChange,
+  disabled,
 }: GitHubSectionProps) {
   return (
     <div className="p-4 rounded bg-surface border border-gray-800">
@@ -23,6 +24,7 @@ export default function GitHubSection({
         value={githubToken}
         onChange={onGithubTokenChange}
         hint="Optional"
+        disabled={disabled}
       />
     </div>
   );
