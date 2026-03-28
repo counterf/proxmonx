@@ -38,8 +38,8 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
     try {
       await guestAction(guest.id, action, snapName || undefined);
       const labels: Record<ActionKey, string> = {
-        start: 'Started', stop: 'Stopped', shutdown: 'Shutdown triggered',
-        restart: 'Restarting', snapshot: 'Snapshot created',
+        start: 'Task queued: start', stop: 'Task queued: stop', shutdown: 'Task queued: shutdown',
+        restart: 'Task queued: restart', snapshot: 'Task queued: snapshot',
       };
       setResult({ ok: true, msg: labels[action] });
       onActionComplete?.();
