@@ -7,6 +7,8 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
+from app.config import ProxmoxHostConfig, Settings
+from app.core.proxmox import ProxmoxClient
 from app.detectors.registry import DETECTOR_MAP
 from app.models.guest import GuestInfo
 
@@ -173,11 +175,14 @@ async def perform_guest_action(
         raise HTTPException(status_code=404, detail=f"Host config not found for host_id={guest.host_id!r}")
 
     # Build per-host client
-    from app.config import ProxmoxHostConfig
-    from app.core.proxmox import ProxmoxClient
-
     host_config = ProxmoxHostConfig(**host_dict)
-    host_settings = scheduler._build_host_settings(host_config)
+    host_settings = Settings(
+        proxmox_host=host_config.host,
+        proxmox_token_id=host_config.token_id,
+        proxmox_token_secret=host_config.token_secret,
+        proxmox_node=host_config.node,
+        verify_ssl=host_config.verify_ssl,
+    )
     client = ProxmoxClient(host_settings)
 
     # Map model guest_type ("vm") to Proxmox resource ("qemu")
