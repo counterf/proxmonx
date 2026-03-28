@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import type { GuestSummary } from '../types';
-import { guestAction } from '../api/client';
+import { guestAction, refreshGuest } from '../api/client';
 
-type ActionKey = 'start' | 'stop' | 'shutdown' | 'restart' | 'snapshot';
+type ActionKey = 'start' | 'stop' | 'shutdown' | 'restart' | 'snapshot' | 'refresh';
 
 interface Props {
   guest: GuestSummary;
@@ -36,10 +36,15 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
     setConfirm(null);
     setResult(null);
     try {
-      await guestAction(guest.id, action, snapName || undefined);
+      if (action === 'refresh') {
+        await refreshGuest(guest.id);
+      } else {
+        await guestAction(guest.id, action, snapName || undefined);
+      }
       const labels: Record<ActionKey, string> = {
         start: 'Task queued: start', stop: 'Task queued: stop', shutdown: 'Task queued: shutdown',
         restart: 'Task queued: restart', snapshot: 'Task queued: snapshot',
+        refresh: 'Refresh started',
       };
       setResult({ ok: true, msg: labels[action] });
       onActionComplete?.();
@@ -152,6 +157,7 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
               )}
               <div className="border-t border-gray-700 my-1" />
               <ActionItem label="Snapshot" icon="&#128247;" color="text-gray-300" onClick={() => handleAction('snapshot')} loading={pending === 'snapshot'} />
+              <ActionItem label="Refresh info" icon="&#8635;" color="text-gray-300" onClick={() => execute('refresh')} loading={pending === 'refresh'} />
             </>
           )}
         </div>

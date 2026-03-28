@@ -7,6 +7,8 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+import httpx
+
 from app.config import Settings
 from app.core.discovery import DiscoveryEngine
 from app.models.guest import GuestInfo
@@ -67,6 +69,45 @@ class Scheduler:
     def trigger_refresh(self) -> None:
         """Trigger an immediate refresh cycle."""
         self._refresh_event.set()
+
+    def trigger_guest_refresh(self, guest_id: str) -> bool:
+        """Schedule a single-guest re-detection out-of-band. Returns False if not found."""
+        if guest_id not in self._guests:
+            return False
+        asyncio.create_task(self._refresh_single_guest(guest_id))
+        return True
+
+    async def _refresh_single_guest(self, guest_id: str) -> None:
+        """Re-process one guest: re-detect app and re-check versions."""
+        existing = self._guests.get(guest_id)
+        if not existing:
+            return
+        hosts = self._engine._settings.get_hosts() if self._engine._settings else []
+        host_config = next((h for h in hosts if h.id == existing.host_id), None)
+        if not host_config:
+            logger.warning("No host config found for guest %s (host_id=%s)", guest_id, existing.host_id)
+            return
+        guest_copy = existing.model_copy()
+        host_client = httpx.AsyncClient(
+            timeout=10.0,
+            verify=host_config.verify_ssl,
+            follow_redirects=True,
+        )
+        try:
+            updated = await self._engine._process_guest(
+                guest_copy,
+                existing,
+                host_config=host_config,
+                host_http_client=host_client,
+            )
+        except Exception:
+            logger.exception("Single-guest refresh failed for %s", guest_id)
+            return
+        finally:
+            await host_client.aclose()
+        async with self._lock:
+            self._guests[guest_id] = updated
+        logger.info("Single-guest refresh complete for %s (%s)", existing.name, guest_id)
 
     async def _loop(self) -> None:
         """Main polling loop."""

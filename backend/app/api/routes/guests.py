@@ -204,6 +204,19 @@ async def perform_guest_action(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.post("/api/guests/{guest_id}/refresh", status_code=202, dependencies=[Depends(_require_api_key)])
+async def refresh_guest(
+    guest_id: str,
+    scheduler=Depends(_get_scheduler),
+) -> dict[str, str]:
+    """Trigger a re-detection cycle for a single guest (fire-and-forget)."""
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="proxmon is not configured")
+    if not scheduler.trigger_guest_refresh(guest_id):
+        raise HTTPException(status_code=404, detail=f"Guest {guest_id} not found")
+    return {"status": "started"}
+
+
 @router.post("/api/refresh", status_code=202, dependencies=[Depends(_require_api_key)])
 async def refresh(scheduler=Depends(_get_scheduler)) -> dict[str, str]:
     """Trigger an immediate re-discovery cycle."""
