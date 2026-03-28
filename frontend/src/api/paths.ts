@@ -2,6 +2,7 @@ export const API_PATHS = {
   GUESTS: '/api/guests',
   GUEST: (id: string) => `/api/guests/${encodeURIComponent(id)}`,
   GUEST_CONFIG: (id: string) => `/api/guests/${encodeURIComponent(id)}/config`,
+  GUEST_ACTION: (id: string) => `/api/guests/${encodeURIComponent(id)}/action`,
   REFRESH: '/api/refresh',
   SETTINGS_FULL: '/api/settings/full',
   SETTINGS: '/api/settings',

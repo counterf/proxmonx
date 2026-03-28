@@ -129,6 +129,18 @@ export async function saveGuestConfig(
   });
 }
 
+export async function guestAction(
+  guestId: string,
+  action: 'start' | 'stop' | 'shutdown' | 'restart' | 'snapshot',
+  snapshotName?: string,
+): Promise<{ status: string; task: string }> {
+  return fetchJson(API_PATHS.GUEST_ACTION(guestId), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, snapshot_name: snapshotName ?? null }),
+  });
+}
+
 export async function deleteGuestConfig(
   id: string,
 ): Promise<{ status: string }> {

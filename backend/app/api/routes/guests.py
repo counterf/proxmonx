@@ -1,10 +1,11 @@
 """Guest-related API endpoints."""
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import field_validator
+from pydantic import BaseModel, field_validator
 
 from app.detectors.registry import DETECTOR_MAP
 from app.models.guest import GuestInfo
@@ -25,6 +26,11 @@ router = APIRouter()
 
 
 # --- Request/Response models ---
+
+
+class GuestActionRequest(BaseModel):
+    action: Literal["start", "stop", "shutdown", "restart", "snapshot"]
+    snapshot_name: str | None = None
 
 
 class GuestConfigSaveRequest(_AppConfigBase):
@@ -143,6 +149,54 @@ async def delete_guest_config(
     _reload_settings_into_engine(request, config_store)
     logger.info("Guest config cleared for %s", guest_id)
     return {"status": "cleared"}
+
+
+@router.post("/api/guests/{guest_id}/action", dependencies=[Depends(_require_api_key)])
+async def perform_guest_action(
+    guest_id: str,
+    body: GuestActionRequest,
+    scheduler=Depends(_get_scheduler),
+    config_store=Depends(_get_config_store),
+) -> dict[str, str]:
+    """Trigger a lifecycle action (start/stop/shutdown/restart/snapshot) on a guest."""
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="proxmon is not configured")
+    guest = scheduler.guests.get(guest_id)
+    if not guest:
+        raise HTTPException(status_code=404, detail=f"Guest {guest_id} not found")
+
+    # Find matching host config
+    data = config_store.load()
+    hosts: list[dict] = data.get("proxmox_hosts", [])
+    host_dict = next((h for h in hosts if h.get("id") == guest.host_id), None)
+    if not host_dict:
+        raise HTTPException(status_code=404, detail=f"Host config not found for host_id={guest.host_id!r}")
+
+    # Build per-host client
+    from app.config import ProxmoxHostConfig
+    from app.core.proxmox import ProxmoxClient
+
+    host_config = ProxmoxHostConfig(**host_dict)
+    host_settings = scheduler._build_host_settings(host_config)
+    client = ProxmoxClient(host_settings)
+
+    # Map model guest_type ("vm") to Proxmox resource ("qemu")
+    proxmox_type = "lxc" if guest.type == "lxc" else "qemu"
+    vmid = guest.id.rsplit(":", 1)[-1]
+
+    try:
+        task = await client.guest_action(vmid, proxmox_type, body.action, body.snapshot_name)
+        logger.info("Action %s on guest %s -> task %s", body.action, guest_id, task)
+        return {"status": "ok", "task": task}
+    except httpx.HTTPStatusError as exc:
+        detail = f"Proxmox API error: {exc.response.status_code}"
+        try:
+            detail = exc.response.json().get("errors", detail)
+        except Exception:
+            pass
+        raise HTTPException(status_code=exc.response.status_code, detail=str(detail))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/api/refresh", status_code=202, dependencies=[Depends(_require_api_key)])

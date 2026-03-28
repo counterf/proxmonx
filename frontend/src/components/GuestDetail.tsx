@@ -6,6 +6,7 @@ import StatusBadge from './StatusBadge';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorBanner from './ErrorBanner';
 import AppIcon from './AppIcon';
+import GuestActions from './GuestActions';
 
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -367,7 +368,10 @@ export default function GuestDetail() {
           <AppIcon appName={guest.app_name} size={28} />
           <h1 className="text-xl font-bold text-white truncate">{guest.name}</h1>
         </div>
-        <StatusBadge status={guest.update_status} />
+        <div className="flex items-center gap-2">
+          <StatusBadge status={guest.update_status} />
+          <GuestActions guest={guest} onActionComplete={() => { if (id) loadGuest(id); }} />
+        </div>
       </div>
 
       {/* Metadata row */}

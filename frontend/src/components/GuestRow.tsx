@@ -3,6 +3,7 @@ import type { GuestSummary } from '../types';
 import type { ColumnKey } from '../hooks/useColumnVisibility';
 import StatusBadge from './StatusBadge';
 import AppIcon from './AppIcon';
+import GuestActions from './GuestActions';
 
 interface GuestRowProps {
   guest: GuestSummary;
@@ -210,16 +211,19 @@ export function GuestTableRow({ guest, visibleColumns }: GuestRowProps) {
         </td>
       )}
       <td className="px-3 py-2">
-        <button
-          className="text-xs text-blue-400 hover:text-blue-300"
-          aria-label={`View details for ${guest.name}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            navigate(`/guest/${guest.id}`);
-          }}
-        >
-          View
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="text-xs text-blue-400 hover:text-blue-300"
+            aria-label={`View details for ${guest.name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/guest/${guest.id}`);
+            }}
+          >
+            View
+          </button>
+          <GuestActions guest={guest} />
+        </div>
       </td>
     </tr>
   );
@@ -263,7 +267,10 @@ export function GuestCard({ guest }: GuestRowProps) {
           />
           <span className="text-sm font-medium text-gray-200 truncate">{guest.name}</span>
         </span>
-        <StatusBadge status={guest.update_status} />
+        <div className="flex items-center gap-2 shrink-0">
+          <StatusBadge status={guest.update_status} />
+          <GuestActions guest={guest} />
+        </div>
       </div>
       {/* Row 2: type + app */}
       <div className="flex items-center gap-2 text-sm text-gray-300 mb-1">

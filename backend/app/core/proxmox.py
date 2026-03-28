@@ -36,6 +36,39 @@ class ProxmoxClient:
             data: dict[str, list[dict[str, str | int | float | bool | None]] | dict[str, str | int | float | bool | None]] = response.json()
             return data
 
+    async def _post(self, path: str, data: dict | None = None) -> dict:
+        """Execute a POST request against the Proxmox API."""
+        url = f"{self._base_url}{path}"
+        async with httpx.AsyncClient(verify=self._verify_ssl, timeout=15.0) as client:
+            response = await client.post(url, headers=self._headers, json=data or {})
+            response.raise_for_status()
+            return response.json()
+
+    async def guest_action(
+        self,
+        vmid: str,
+        guest_type: str,   # "lxc" or "qemu"
+        action: str,       # "start"|"stop"|"shutdown"|"restart"|"snapshot"
+        snapshot_name: str | None = None,
+    ) -> str:
+        """Execute a lifecycle action on a guest. Returns the UPID task string."""
+        from datetime import datetime
+        resource = "lxc" if guest_type == "lxc" else "qemu"
+        base = f"/nodes/{self._node}/{resource}/{vmid}"
+
+        if action == "snapshot":
+            name = snapshot_name or f"proxmon-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            result = await self._post(f"{base}/snapshot", {
+                "snapname": name,
+                "description": "Created by proxmon",
+            })
+        else:
+            # QEMU uses "reboot" instead of "restart"
+            pve_action = "reboot" if (action == "restart" and resource == "qemu") else action
+            result = await self._post(f"{base}/status/{pve_action}")
+
+        return str(result.get("data", ""))
+
     async def list_guests(self) -> list[GuestInfo]:
         """Discover all LXC containers and optionally VMs."""
         guests: list[GuestInfo] = []
