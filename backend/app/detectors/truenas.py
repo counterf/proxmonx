@@ -54,7 +54,7 @@ class TrueNASDetector(BaseDetector):
         port = port or self.default_port
         # wss:// for https (default), ws:// for http
         ws_scheme = "wss" if scheme in ("https", "wss") else "ws"
-        uri = f"{ws_scheme}://{host}:{port}/api/v2.0/websocket"
+        uri = f"{ws_scheme}://{host}:{port}/api/current"
 
         try:
             import websockets
