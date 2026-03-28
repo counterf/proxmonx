@@ -1,7 +1,7 @@
 """TrueNAS SCALE detector — JSON-RPC 2.0 over WebSocket.
 
 Connection flow (per probe):
-  1. Open wss://{host}:{port}/api/v2.0/websocket  (ssl verify per config)
+  1. Open wss://{host}:{port}/api/current  (ssl verify per config)
   2. auth.login_with_api_key → True / False
   3. system.info              → .version  (installed)
   4. update.status            → .status.new_version.version  (latest, or None)
@@ -70,6 +70,7 @@ class TrueNASDetector(BaseDetector):
         else:
             ssl_ctx = False  # type: ignore[assignment]
 
+        logger.debug("TrueNAS WSS probe starting: %s", uri)
         try:
             async with websockets.connect(uri, ssl=ssl_ctx, open_timeout=10) as ws:
                 # 1. Authenticate
@@ -84,6 +85,7 @@ class TrueNASDetector(BaseDetector):
                     auth_resp = json.loads(await ws.recv())
                     if auth_resp.get("id") != auth_id or not auth_resp.get("result"):
                         raise ProbeError("Authentication failed — check API key")
+                    logger.debug("TrueNAS WSS auth OK: %s", host)
 
                 # 2. system.info → installed version
                 info_id = _next_id()
@@ -113,11 +115,18 @@ class TrueNASDetector(BaseDetector):
                     if "error" not in upd_resp:
                         result = upd_resp.get("result", {})
                         new_ver = (result.get("status") or {}).get("new_version") or {}
-                        self._cached_latest = new_ver.get("version") or str(installed)
+                        latest = new_ver.get("version")
+                        self._cached_latest = latest or str(installed)
+                        if latest and latest != str(installed):
+                            logger.info("TrueNAS update available on %s: %s → %s", host, installed, latest)
+                        else:
+                            logger.info("TrueNAS probe OK: %s installed=%s up-to-date", host, installed)
                     else:
                         self._cached_latest = str(installed)
-                except Exception:
+                        logger.warning("TrueNAS update.status error on %s: %s", host, upd_resp.get("error"))
+                except Exception as exc:
                     self._cached_latest = str(installed)
+                    logger.warning("TrueNAS update.status failed on %s: %s", host, exc)
 
                 return str(installed)
 

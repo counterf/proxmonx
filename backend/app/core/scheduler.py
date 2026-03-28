@@ -87,13 +87,26 @@ class Scheduler:
         if not host_config:
             logger.warning("No host config found for guest %s (host_id=%s)", guest_id, existing.host_id)
             return
-        guest_copy = existing.model_copy()
         host_client = httpx.AsyncClient(
             timeout=10.0,
             verify=host_config.verify_ssl,
             follow_redirects=True,
         )
         try:
+            # Re-fetch live status from Proxmox so a guest that was stopped
+            # during the last full cycle but is now running gets processed correctly.
+            from app.core.proxmox import ProxmoxClient
+            settings = self._engine._build_host_settings(host_config)
+            proxmox = ProxmoxClient(settings, http_client=host_client)
+            fresh_guests = await proxmox.list_guests()
+            raw_vmid = guest_id.rsplit(":", 1)[-1]
+            fresh = next((g for g in fresh_guests if str(g.id) == raw_vmid), None)
+            guest_copy = existing.model_copy()
+            if fresh:
+                guest_copy.status = fresh.status
+                guest_copy.disk_used = fresh.disk_used
+                guest_copy.disk_total = fresh.disk_total
+
             updated = await self._engine._process_guest(
                 guest_copy,
                 existing,
