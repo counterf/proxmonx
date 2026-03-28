@@ -194,12 +194,20 @@ async def perform_guest_action(
         logger.info("Action %s on guest %s -> task %s", body.action, guest_id, task)
         return {"status": "ok", "task": task}
     except httpx.HTTPStatusError as exc:
-        detail = f"Proxmox API error: {exc.response.status_code}"
+        # Extract the Proxmox error message
+        detail: str = exc.response.reason_phrase or f"Proxmox API error: {exc.response.status_code}"
         try:
-            detail = exc.response.json().get("errors", detail)
+            body = exc.response.json()
+            errors = body.get("errors") or body.get("message") or body.get("data")
+            if errors:
+                detail = str(errors)
         except Exception:
-            pass
-        raise HTTPException(status_code=exc.response.status_code, detail=str(detail))
+            if exc.response.text:
+                detail = exc.response.text.strip()
+        # Proxmox uses 500 for logical conflicts (e.g. "already running", "already stopped").
+        # Map those to 409 so the frontend shows the message rather than a generic error.
+        status_code = 409 if exc.response.status_code == 500 else exc.response.status_code
+        raise HTTPException(status_code=status_code, detail=detail)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
