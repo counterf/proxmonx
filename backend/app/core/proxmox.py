@@ -63,8 +63,8 @@ class ProxmoxClient:
                 "description": "Created by proxmon",
             })
         else:
-            # QEMU uses "reboot" instead of "restart"
-            pve_action = "reboot" if (action == "restart" and resource == "qemu") else action
+            # Both LXC and QEMU use "reboot" instead of "restart"
+            pve_action = "reboot" if action == "restart" else action
             result = await self._post(f"{base}/status/{pve_action}")
 
         return str(result.get("data", ""))
