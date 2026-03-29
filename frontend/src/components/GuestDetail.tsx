@@ -474,6 +474,59 @@ export default function GuestDetail() {
         </div>
       </div>
 
+      {/* OS Updates panel — only shown when data is available (LXC + SSH enabled) */}
+      {(guest.pending_updates != null || guest.reboot_required != null) && (
+        <div className="p-4 rounded bg-surface border border-gray-800">
+          <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">OS Updates</h2>
+          <div className="space-y-4 text-sm">
+
+            {guest.pending_updates != null && (
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-gray-500">Package updates:</span>
+                  {guest.pending_updates === 0 ? (
+                    <span className="text-green-400">{'\u2713'} Up to date</span>
+                  ) : (
+                    <span className="text-amber-400 font-medium">{guest.pending_updates} pending</span>
+                  )}
+                </div>
+                {guest.pending_updates > 0 && guest.pending_update_packages && guest.pending_update_packages.length > 0 && (
+                  <ul className="mt-1 ml-2 pl-2 border-l border-gray-700 space-y-0.5">
+                    {guest.pending_update_packages.map((pkg) => (
+                      <li key={pkg} className="text-xs font-mono text-gray-300">{pkg}</li>
+                    ))}
+                  </ul>
+                )}
+                {guest.last_checked && (
+                  <p className="text-xs text-gray-600 mt-1">
+                    Last checked: {new Date(guest.last_checked).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {guest.reboot_required != null && (
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500">Reboot required:</span>
+                  {guest.reboot_required ? (
+                    <span className="text-orange-400 font-medium">{'\u26a0'} Yes — reboot required</span>
+                  ) : (
+                    <span className="text-green-400">{'\u2713'} No reboot needed</span>
+                  )}
+                </div>
+                {guest.last_checked && (
+                  <p className="text-xs text-gray-600 mt-1">
+                    Last checked: {new Date(guest.last_checked).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            )}
+
+          </div>
+        </div>
+      )}
+
       {/* Version Detection panel */}
       {guest.app_name && (() => {
         const method = guest.version_detection_method;
