@@ -4,10 +4,35 @@ import asyncio
 import logging
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 import paramiko
 
 from app.config import Settings
+
+# Hardcoded OS update commands by Proxmox ostype value.
+# Keys match the ostype field from `pct config` / Proxmox API.
+OS_UPDATE_COMMANDS: dict[str, str] = {
+    "alpine":    "apk -U upgrade",
+    "debian":    "apt-get -qq update && apt-get -yq dist-upgrade",
+    "ubuntu":    "apt-get -qq update && apt-get -yq dist-upgrade",
+    "devuan":    "apt-get -qq update && apt-get -yq dist-upgrade",
+    "fedora":    "dnf -y update",
+    "centos":    "dnf -y update",
+    "archlinux": "pacman -Syyu --noconfirm",
+    "opensuse":  "zypper ref && zypper --non-interactive dup",
+}
+
+
+def _extract_ssh_host(host: str) -> str:
+    """Strip scheme and port from a host string for use as an SSH target.
+
+    Handles bare IPs ('192.168.1.10'), hostnames with port ('host:8006'),
+    and full URLs ('https://192.168.1.10:8006').
+    """
+    if "://" in host:
+        return urlparse(host).hostname or host
+    return host.split(":")[0]
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +240,112 @@ class SSHClient:
         except Exception as exc:
             logger.warning("pct exec failed on %s vmid %s: %s", proxmox_host, vmid, exc)
             return None
+
+    async def run_os_update(
+        self,
+        proxmox_host: str,
+        vmid: str,
+        os_type: str,
+        ssh_username: str | None = None,
+        ssh_key_path: str | None = None,
+        ssh_password: str | None = None,
+        timeout: int = 300,
+    ) -> tuple[bool, str]:
+        """Run OS package update in an LXC container via pct exec.
+
+        Returns (success, output):
+        - success: exit_code == 0 (package manager ran without error)
+        - output: combined stdout/stderr for display (last 10 lines logged)
+        """
+        if not self._enabled:
+            return False, "SSH not enabled"
+        if not vmid.isdigit():
+            return False, f"Invalid vmid: {vmid!r}"
+        inner_cmd = OS_UPDATE_COMMANDS.get(os_type)
+        if not inner_cmd:
+            return False, f"Unsupported OS type: {os_type!r}"
+
+        ssh_host = _extract_ssh_host(proxmox_host)
+        # Wrap in sh -c so && is interpreted inside the container, not by the Proxmox host shell
+        pct_command = f'pct exec {vmid} -- sh -c "{inner_cmd}"'
+        logger.info("OS update on %s vmid %s (ostype=%s)", ssh_host, vmid, os_type)
+        try:
+            stdout, stderr, exit_code = await asyncio.to_thread(
+                self._execute_sync_with_exit_code,
+                ssh_host,
+                pct_command,
+                timeout,
+                username=ssh_username,
+                key_path=ssh_key_path,
+                password=ssh_password,
+            )
+            success = (exit_code == 0)
+            output = (stdout or "") + ("\n" + stderr if stderr else "")
+            output = output.strip()
+
+            tail = "\n".join(output.splitlines()[-10:]) if output else "(no output)"
+            if success:
+                logger.info(
+                    "OS update on %s vmid %s (ostype=%s): exit_code=%s\n%s",
+                    ssh_host, vmid, os_type, exit_code, tail,
+                )
+            else:
+                logger.warning(
+                    "OS update FAILED on %s vmid %s (ostype=%s): exit_code=%s\n%s",
+                    ssh_host, vmid, os_type, exit_code, tail,
+                )
+            return success, output
+        except Exception as exc:
+            logger.warning("OS update exception on %s vmid %s: %s", ssh_host, vmid, exc)
+            return False, str(exc)
+
+    def _execute_sync_with_exit_code(
+        self,
+        host: str,
+        command: str,
+        timeout: int,
+        username: str | None = None,
+        key_path: str | None = None,
+        password: str | None = None,
+    ) -> tuple[str, str, int]:
+        """Blocking SSH execution. Returns (stdout, stderr, exit_code).
+
+        exit_code is -1 if the connection could not be established.
+        Must call recv_exit_status() after reading stdout/stderr (paramiko requirement).
+        """
+        effective_username = username or self._username
+        effective_key_path = key_path or self._key_path
+        effective_password = password or self._password
+
+        client = paramiko.SSHClient()
+        if self._known_hosts_path and Path(self._known_hosts_path).is_file():
+            client.load_host_keys(self._known_hosts_path)
+            client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        else:
+            client.set_missing_host_key_policy(paramiko.WarningPolicy())
+        try:
+            connect_kwargs: dict[str, str | int | Path | None] = {
+                "hostname": host,
+                "username": effective_username,
+                "timeout": timeout,
+            }
+            if effective_key_path:
+                connect_kwargs["key_filename"] = effective_key_path
+            elif effective_password:
+                connect_kwargs["password"] = effective_password
+            else:
+                return "", "no credentials configured", -1
+
+            client.connect(**connect_kwargs)  # type: ignore[arg-type]
+            _, stdout_ch, stderr_ch = client.exec_command(command, timeout=timeout)
+            out = stdout_ch.read().decode("utf-8", errors="replace").strip()
+            err = stderr_ch.read().decode("utf-8", errors="replace").strip()
+            exit_code = stdout_ch.channel.recv_exit_status()
+            return out, err, exit_code
+        except Exception as exc:
+            return "", str(exc), -1
+        finally:
+            client.close()
 
     def _execute_sync(
         self,

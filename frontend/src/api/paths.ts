@@ -4,6 +4,7 @@ export const API_PATHS = {
   GUEST_CONFIG: (id: string) => `/api/guests/${encodeURIComponent(id)}/config`,
   GUEST_ACTION: (id: string) => `/api/guests/${encodeURIComponent(id)}/action`,
   GUEST_REFRESH: (id: string) => `/api/guests/${encodeURIComponent(id)}/refresh`,
+  GUEST_OS_UPDATE: (id: string) => `/api/guests/${encodeURIComponent(id)}/os-update`,
   REFRESH: '/api/refresh',
   SETTINGS_FULL: '/api/settings/full',
   SETTINGS: '/api/settings',

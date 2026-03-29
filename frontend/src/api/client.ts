@@ -133,6 +133,12 @@ export async function refreshGuest(guestId: string): Promise<{ status: string }>
   return fetchJson<{ status: string }>(API_PATHS.GUEST_REFRESH(guestId), { method: 'POST' });
 }
 
+export async function osUpdateGuest(
+  guestId: string,
+): Promise<{ success: boolean; output: string; os_type: string }> {
+  return fetchJson(API_PATHS.GUEST_OS_UPDATE(guestId), { method: 'POST' });
+}
+
 export async function guestAction(
   guestId: string,
   action: 'start' | 'stop' | 'shutdown' | 'restart' | 'snapshot',

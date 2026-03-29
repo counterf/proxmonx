@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import type { GuestSummary } from '../types';
-import { guestAction, refreshGuest } from '../api/client';
+import { guestAction, refreshGuest, osUpdateGuest } from '../api/client';
 
-type ActionKey = 'start' | 'stop' | 'shutdown' | 'restart' | 'snapshot' | 'refresh';
+type ActionKey = 'start' | 'stop' | 'shutdown' | 'restart' | 'snapshot' | 'refresh' | 'os_update';
 
 interface Props {
   guest: GuestSummary;
@@ -38,13 +38,15 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
     try {
       if (action === 'refresh') {
         await refreshGuest(guest.id);
+      } else if (action === 'os_update') {
+        await osUpdateGuest(guest.id);
       } else {
         await guestAction(guest.id, action, snapName || undefined);
       }
       const labels: Record<ActionKey, string> = {
         start: 'Task queued: start', stop: 'Task queued: stop', shutdown: 'Task queued: shutdown',
         restart: 'Task queued: restart', snapshot: 'Task queued: snapshot',
-        refresh: 'Refresh started',
+        refresh: 'Refresh started', os_update: 'Update complete',
       };
       setResult({ ok: true, msg: labels[action] });
       onActionComplete?.();
@@ -52,12 +54,15 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
       setResult({ ok: false, msg: err instanceof Error ? err.message : 'Action failed' });
     } finally {
       setPending(null);
-      setTimeout(() => { setOpen(false); setResult(null); setSnapshotName(''); }, 2500);
+      // os_update takes minutes — keep result visible until user dismisses manually
+      if (action !== 'os_update') {
+        setTimeout(() => { setOpen(false); setResult(null); setSnapshotName(''); }, 2500);
+      }
     }
   };
 
   const handleAction = (action: ActionKey) => {
-    if (action === 'stop' || action === 'shutdown') {
+    if (action === 'stop' || action === 'shutdown' || action === 'os_update') {
       setConfirm(action);
     } else if (action === 'snapshot') {
       setConfirm('snapshot');
@@ -97,6 +102,10 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
             <div className={`px-3 py-2 text-xs ${result.ok ? 'text-green-400' : 'text-red-400'}`}>
               {result.msg}
             </div>
+          ) : pending === 'os_update' ? (
+            <div className="px-3 py-2 text-xs text-cyan-400">
+              Updating OS... (this may take several minutes)
+            </div>
           ) : confirm === 'stop' || confirm === 'shutdown' ? (
             <div className="px-3 py-2">
               <p className="text-xs text-gray-300 mb-2">
@@ -108,6 +117,26 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
                   className="px-2 py-1 text-xs rounded bg-red-700 hover:bg-red-600 text-white"
                 >
                   Confirm
+                </button>
+                <button
+                  onClick={() => setConfirm(null)}
+                  className="px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : confirm === 'os_update' ? (
+            <div className="px-3 py-2">
+              <p className="text-xs text-gray-300 mb-2">
+                Update all system packages in <span className="text-white">{guest.name}</span>? Running services may restart.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => execute('os_update')}
+                  className="px-2 py-1 text-xs rounded bg-cyan-700 hover:bg-cyan-600 text-white"
+                >
+                  Update
                 </button>
                 <button
                   onClick={() => setConfirm(null)}
@@ -158,6 +187,12 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
               <div className="border-t border-gray-700 my-1" />
               <ActionItem label="Snapshot" icon="&#128247;" color="text-gray-300" onClick={() => handleAction('snapshot')} loading={pending === 'snapshot'} />
               <ActionItem label="Refresh info" icon="&#8635;" color="text-gray-300" onClick={() => execute('refresh')} loading={pending === 'refresh'} />
+              {guest.type === 'lxc' && guest.status === 'running' && (
+                <>
+                  <div className="border-t border-gray-700 my-1" />
+                  <ActionItem label="Update OS" icon="&#8593;" color="text-cyan-400" onClick={() => handleAction('os_update')} loading={false} />
+                </>
+              )}
             </>
           )}
         </div>
@@ -166,14 +201,14 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
   );
 }
 
-function ActionItem({ label, icon, color, onClick, loading }: {
-  label: string; icon: string; color: string; onClick: () => void; loading: boolean;
+function ActionItem({ label, icon, color, onClick, loading, disabled }: {
+  label: string; icon: string; color: string; onClick: () => void; loading: boolean; disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={loading}
+      disabled={loading || !!disabled}
       className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-gray-800 disabled:opacity-50 ${color}`}
     >
       <span className="w-3 text-center" dangerouslySetInnerHTML={{ __html: icon }} />

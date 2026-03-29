@@ -10,6 +10,7 @@ from pydantic import BaseModel, field_validator
 from app.config import ProxmoxHostConfig, Settings
 from app.core.proxmox import ProxmoxClient
 from app.detectors.registry import DETECTOR_MAP
+from app.core.ssh import OS_UPDATE_COMMANDS, SSHClient
 from app.models.guest import GuestInfo
 
 from app.api.helpers import (
@@ -25,6 +26,9 @@ from app.api.helpers import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Tracks guest IDs with an OS update currently in progress to prevent concurrent runs.
+_os_update_in_progress: set[str] = set()
 
 
 # --- Request/Response models ---
@@ -223,6 +227,67 @@ async def refresh_guest(
     if not scheduler.trigger_guest_refresh(guest_id):
         raise HTTPException(status_code=404, detail=f"Guest {guest_id} not found")
     return {"status": "started"}
+
+
+@router.post("/api/guests/{guest_id}/os-update", dependencies=[Depends(_require_api_key)])
+async def os_update_guest(
+    guest_id: str,
+    scheduler=Depends(_get_scheduler),
+    config_store=Depends(_get_config_store),
+) -> dict[str, Any]:
+    """Run OS package update inside an LXC container via pct exec."""
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="proxmon is not configured")
+    guest = scheduler.guests.get(guest_id)
+    if not guest:
+        raise HTTPException(status_code=404, detail=f"Guest {guest_id} not found")
+    if guest.type != "lxc":
+        raise HTTPException(status_code=400, detail="OS update is only supported for LXC containers")
+    if guest.status != "running":
+        raise HTTPException(status_code=400, detail="Guest must be running to update OS")
+    if not guest.os_type or guest.os_type not in OS_UPDATE_COMMANDS:
+        raise HTTPException(status_code=400, detail=f"Unsupported OS type: {guest.os_type!r}")
+
+    data = config_store.load()
+    hosts: list[dict] = data.get("proxmox_hosts", [])
+    host_dict = next((h for h in hosts if h.get("id") == guest.host_id), None)
+    if not host_dict:
+        raise HTTPException(status_code=404, detail=f"Host config not found for {guest.host_id!r}")
+
+    host_config = ProxmoxHostConfig(**host_dict)
+    if not host_config.pct_exec_enabled:
+        raise HTTPException(status_code=400, detail="pct exec is not enabled for this host — enable it in Settings")
+
+    if guest_id in _os_update_in_progress:
+        raise HTTPException(status_code=409, detail="An OS update is already in progress for this guest")
+    _os_update_in_progress.add(guest_id)
+
+    ssh_settings = Settings(
+        ssh_enabled=True,
+        ssh_username=host_config.ssh_username,
+        ssh_key_path=host_config.ssh_key_path,
+        ssh_password=host_config.ssh_password,
+    )
+    ssh = SSHClient(ssh_settings)
+    vmid = guest_id.rsplit(":", 1)[-1]
+
+    try:
+        success, output = await ssh.run_os_update(
+            host_config.host, vmid, guest.os_type,
+            ssh_username=host_config.ssh_username,
+            ssh_key_path=host_config.ssh_key_path,
+            ssh_password=host_config.ssh_password,
+        )
+    finally:
+        _os_update_in_progress.discard(guest_id)
+
+    if not success:
+        raise HTTPException(status_code=502, detail=output or "OS update command failed")
+
+    # Trigger re-detection so the dashboard reflects any version changes
+    scheduler.trigger_guest_refresh(guest_id)
+
+    return {"success": True, "output": output, "os_type": guest.os_type}
 
 
 @router.post("/api/refresh", status_code=202, dependencies=[Depends(_require_api_key)])
