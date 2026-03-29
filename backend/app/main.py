@@ -152,6 +152,23 @@ app = FastAPI(
 )
 
 app.add_middleware(AuthMiddleware)
+
+_SECURITY_HEADERS = {
+    "X-Frame-Options": "SAMEORIGIN",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "X-XSS-Protection": "1; mode=block",
+}
+
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    for header, value in _SECURITY_HEADERS.items():
+        response.headers[header] = value
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
     # Dev only: production is same-origin; these are for local Vite/React dev servers.
@@ -175,11 +192,15 @@ if _static_dir.is_dir():
 
         async def get_response(self, path: str, scope: Scope):
             try:
-                return await super().get_response(path, scope)
+                response = await super().get_response(path, scope)
             except StarletteHTTPException as exc:
                 if exc.status_code == 404:
-                    return await super().get_response("index.html", scope)
-                raise
+                    response = await super().get_response("index.html", scope)
+                else:
+                    raise
+            for header, value in _SECURITY_HEADERS.items():
+                response.headers[header] = value
+            return response
 
     # Mounted last so /api and /health routes are matched first by the router.
     app.mount("/", _SPAStaticFiles(directory=str(_static_dir), html=True), name="static")

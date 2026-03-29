@@ -21,15 +21,6 @@ from app.detectors.http_json import ProbeError
 
 logger = logging.getLogger(__name__)
 
-_MSG_ID = 0
-
-
-def _next_id() -> int:
-    global _MSG_ID
-    _MSG_ID += 1
-    return _MSG_ID
-
-
 class TrueNASDetector(BaseDetector):
     name = "truenas"
     display_name = "TrueNAS"
@@ -63,19 +54,28 @@ class TrueNASDetector(BaseDetector):
 
         ssl_ctx: ssl.SSLContext | bool
         if ws_scheme == "wss":
+            # TrueNAS commonly uses self-signed certificates; skip verification.
             ssl_ctx = ssl.create_default_context()
-            # honour the global verify_ssl setting via the detector's base class
             ssl_ctx.check_hostname = False
             ssl_ctx.verify_mode = ssl.CERT_NONE
         else:
             ssl_ctx = False  # type: ignore[assignment]
+
+        # Local message ID counter — avoids shared state across concurrent probes
+        # (e.g. two TrueNAS hosts probed simultaneously via asyncio.gather).
+        _msg_id = 0
+
+        def next_id() -> int:
+            nonlocal _msg_id
+            _msg_id += 1
+            return _msg_id
 
         logger.debug("TrueNAS WSS probe starting: %s", uri)
         try:
             async with websockets.connect(uri, ssl=ssl_ctx, open_timeout=10) as ws:
                 # 1. Authenticate
                 if api_key:
-                    auth_id = _next_id()
+                    auth_id = next_id()
                     await ws.send(json.dumps({
                         "jsonrpc": "2.0",
                         "id": auth_id,
@@ -88,7 +88,7 @@ class TrueNASDetector(BaseDetector):
                     logger.debug("TrueNAS WSS auth OK: %s", host)
 
                 # 2. system.info → installed version
-                info_id = _next_id()
+                info_id = next_id()
                 await ws.send(json.dumps({
                     "jsonrpc": "2.0",
                     "id": info_id,
@@ -104,7 +104,7 @@ class TrueNASDetector(BaseDetector):
 
                 # 3. update.status → latest available version (best-effort)
                 try:
-                    upd_id = _next_id()
+                    upd_id = next_id()
                     await ws.send(json.dumps({
                         "jsonrpc": "2.0",
                         "id": upd_id,

@@ -37,6 +37,7 @@ export interface Guest {
   os_type: string | null;
   probe_url: string | null;
   probe_error: string | null;
+  pending_updates?: number | null;
 }
 
 /** @deprecated Use Guest instead */

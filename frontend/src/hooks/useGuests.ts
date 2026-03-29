@@ -22,6 +22,13 @@ export function useGuests(): UseGuestsResult {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
 
+  const stopPolling = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const data = await fetchGuests();
@@ -31,6 +38,13 @@ export function useGuests(): UseGuestsResult {
       setError(null);
     } catch (err) {
       if (!mountedRef.current) return;
+      if (err instanceof HttpError && err.status === 401) {
+        // Session expired — stop polling to avoid log spam.
+        // AUTH_UNAUTHORIZED_EVENT dispatched by fetchJson is consumed by App.tsx
+        // which handles navigation via React Router.
+        stopPolling();
+        return;
+      }
       if (err instanceof HttpError && err.status === 503) {
         setError('not_configured');
       } else {
@@ -42,7 +56,7 @@ export function useGuests(): UseGuestsResult {
         setLoading(false);
       }
     }
-  }, []);
+  }, [stopPolling]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -67,11 +81,9 @@ export function useGuests(): UseGuestsResult {
     intervalRef.current = setInterval(load, POLL_INTERVAL);
     return () => {
       mountedRef.current = false;
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
+      stopPolling();
     };
-  }, [load]);
+  }, [load, stopPolling]);
 
   return { guests, loading, error, refreshing, lastRefreshed, refresh };
 }

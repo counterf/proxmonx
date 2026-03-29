@@ -175,22 +175,28 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
           ) : (
             <>
               {!running && (
-                <ActionItem label="Start" icon="&#9654;" color="text-green-400" onClick={() => handleAction('start')} loading={pending === 'start'} />
+                <ActionItem label="Start" icon="▶" color="text-green-400" onClick={() => handleAction('start')} loading={pending === 'start'} />
               )}
               {running && (
                 <>
-                  <ActionItem label="Restart" icon="&#8634;" color="text-blue-400" onClick={() => handleAction('restart')} loading={pending === 'restart'} />
-                  <ActionItem label="Shutdown" icon="&#9211;" color="text-amber-400" onClick={() => handleAction('shutdown')} loading={pending === 'shutdown'} />
-                  <ActionItem label="Stop" icon="&#9632;" color="text-red-400" onClick={() => handleAction('stop')} loading={pending === 'stop'} />
+                  <ActionItem label="Restart" icon="↺" color="text-blue-400" onClick={() => handleAction('restart')} loading={pending === 'restart'} />
+                  <ActionItem label="Shutdown" icon="⏻" color="text-amber-400" onClick={() => handleAction('shutdown')} loading={pending === 'shutdown'} />
+                  <ActionItem label="Stop" icon="■" color="text-red-400" onClick={() => handleAction('stop')} loading={pending === 'stop'} />
                 </>
               )}
               <div className="border-t border-gray-700 my-1" />
-              <ActionItem label="Snapshot" icon="&#128247;" color="text-gray-300" onClick={() => handleAction('snapshot')} loading={pending === 'snapshot'} />
-              <ActionItem label="Refresh info" icon="&#8635;" color="text-gray-300" onClick={() => execute('refresh')} loading={pending === 'refresh'} />
+              <ActionItem label="Snapshot" icon="📷" color="text-gray-300" onClick={() => handleAction('snapshot')} loading={pending === 'snapshot'} />
+              <ActionItem label="Refresh info" icon="↻" color="text-gray-300" onClick={() => execute('refresh')} loading={pending === 'refresh'} />
               {guest.type === 'lxc' && guest.status === 'running' && (
                 <>
                   <div className="border-t border-gray-700 my-1" />
-                  <ActionItem label="Update OS" icon="&#8593;" color="text-cyan-400" onClick={() => handleAction('os_update')} loading={false} />
+                  <ActionItem
+                    label={guest.pending_updates != null && guest.pending_updates > 0 ? `Update OS (${guest.pending_updates})` : 'Update OS'}
+                    icon="↑"
+                    color="text-cyan-400"
+                    onClick={() => handleAction('os_update')}
+                    loading={false}
+                  />
                 </>
               )}
             </>
@@ -211,7 +217,7 @@ function ActionItem({ label, icon, color, onClick, loading, disabled }: {
       disabled={loading || !!disabled}
       className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-gray-800 disabled:opacity-50 ${color}`}
     >
-      <span className="w-3 text-center" dangerouslySetInnerHTML={{ __html: icon }} />
+      <span className="w-3 text-center">{icon}</span>
       {label}
     </button>
   );

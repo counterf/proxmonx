@@ -85,14 +85,12 @@ def _mask(data: dict, secret_fields: frozenset[str]) -> dict:
 # Both "***" and None mean: keep the existing stored value unchanged.
 # To update a field, the frontend sends the new plaintext value.
 # To clear a field intentionally, the frontend sends an empty string "".
-# Note: empty string "" is also treated as "keep existing" by this function
-# because `not incoming` is True for "".  There is currently no UI path to
-# explicitly clear a secret field.
-# This function implements that contract.
 def _keep_or_replace(incoming: str | None, existing: str | None) -> str | None:
-    """Return existing value when incoming is None, empty, or the masked sentinel '***'."""
-    if not incoming or incoming == "***":
+    """Keep existing when incoming is None or '***'. Clear when incoming is ''. Replace otherwise."""
+    if incoming is None or incoming == "***":
         return existing or None
+    if incoming == "":
+        return None  # explicit clear
     return incoming
 
 

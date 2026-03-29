@@ -15,8 +15,9 @@ class TestKeepOrReplace:
     def test_none_incoming_keeps_existing(self) -> None:
         assert _keep_or_replace(None, "existing-secret") == "existing-secret"
 
-    def test_empty_incoming_keeps_existing(self) -> None:
-        assert _keep_or_replace("", "existing-secret") == "existing-secret"
+    def test_empty_incoming_clears_existing(self) -> None:
+        # Empty string is an explicit "clear" — removes a previously set secret
+        assert _keep_or_replace("", "existing-secret") is None
 
     def test_masked_sentinel_keeps_existing(self) -> None:
         assert _keep_or_replace("***", "existing-secret") == "existing-secret"

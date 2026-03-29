@@ -79,6 +79,12 @@ function VersionSourceCell({ guest }: { guest: GuestSummary }) {
   );
 }
 
+function PendingUpdatesCell({ count }: { count: number | null | undefined }) {
+  if (count == null) return <span className="text-gray-600">{'\u2014'}</span>;
+  if (count === 0) return <span className="text-green-400 text-xs">{'\u2713'} up to date</span>;
+  return <span className="text-amber-400 text-xs font-medium">{count} pending</span>;
+}
+
 function OsTypeCell({ guest }: { guest: GuestSummary }) {
   const os = guest.os_type;
   if (!os) return <span className="text-gray-500">{'\u2014'}</span>;
@@ -205,6 +211,11 @@ export function GuestTableRow({ guest, visibleColumns }: GuestRowProps) {
           <OsTypeCell guest={guest} />
         </td>
       )}
+      {vis.has('pending_updates') && (
+        <td className="px-3 py-2 text-center">
+          <PendingUpdatesCell count={guest.pending_updates} />
+        </td>
+      )}
       {vis.has('last_checked') && (
         <td className="px-3 py-2 text-xs text-gray-500" title={guest.last_checked || ''}>
           {formatRelativeTime(guest.last_checked)}
@@ -284,6 +295,9 @@ export function GuestCard({ guest }: GuestRowProps) {
       <div className="flex items-center justify-between text-xs text-gray-500">
         <span className="font-mono truncate max-w-[140px]">{versionStr || '\u2014'}</span>
         <div className="flex items-center gap-3">
+          {guest.pending_updates != null && (
+            <PendingUpdatesCell count={guest.pending_updates} />
+          )}
           <DiskUsageCell guest={guest} />
           <span>{formatRelativeTime(guest.last_checked)}</span>
         </div>

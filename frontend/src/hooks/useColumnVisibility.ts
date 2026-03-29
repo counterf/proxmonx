@@ -11,6 +11,7 @@ export type ColumnKey =
   | 'disk'
   | 'version_detection_method'
   | 'os_type'
+  | 'pending_updates'
   | 'last_checked';
 
 export interface ColumnDef {
@@ -32,6 +33,7 @@ export const COLUMN_DEFS: ColumnDef[] = [
   { key: 'disk', label: 'Disk', defaultVisible: true, weight: 1.8 },
   { key: 'version_detection_method', label: 'Version Source', defaultVisible: false, weight: 1.5 },
   { key: 'os_type', label: 'OS', defaultVisible: false, weight: 1.2 },
+  { key: 'pending_updates', label: 'Pkg Updates', defaultVisible: false, weight: 2 },
   { key: 'last_checked', label: 'Last Checked', defaultVisible: true, weight: 2 },
 ];
 

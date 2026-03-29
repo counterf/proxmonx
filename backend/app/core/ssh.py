@@ -23,6 +23,20 @@ OS_UPDATE_COMMANDS: dict[str, str] = {
     "opensuse":  "zypper ref && zypper --non-interactive dup",
 }
 
+# Commands that COUNT pending updates by reading the local package cache only.
+# No network I/O inside the container — reads the cached index.
+# grep -c exits 0 (N matches) or 1 (0 matches, but still outputs "0"); both are valid.
+OS_PENDING_UPDATES_COMMANDS: dict[str, str] = {
+    "alpine":    "apk list --upgradable 2>/dev/null | grep -c .",
+    "debian":    "apt list --upgradable 2>/dev/null | grep -c upgradable",
+    "ubuntu":    "apt list --upgradable 2>/dev/null | grep -c upgradable",
+    "devuan":    "apt list --upgradable 2>/dev/null | grep -c upgradable",
+    "fedora":    "dnf list updates -q 2>/dev/null | grep -c .",
+    "centos":    "dnf list updates -q 2>/dev/null | grep -c .",
+    "archlinux": "pacman -Qu 2>/dev/null | grep -c .",
+    "opensuse":  "zypper list-updates 2>/dev/null | grep -c ^v",
+}
+
 
 def _extract_ssh_host(host: str) -> str:
     """Strip scheme and port from a host string for use as an SSH target.
@@ -298,6 +312,61 @@ class SSHClient:
         except Exception as exc:
             logger.warning("OS update exception on %s vmid %s: %s", ssh_host, vmid, exc)
             return False, str(exc)
+
+    async def run_pending_updates_check(
+        self,
+        proxmox_host: str,
+        vmid: str,
+        os_type: str,
+        ssh_username: str | None = None,
+        ssh_key_path: str | None = None,
+        ssh_password: str | None = None,
+        timeout: int = 30,
+    ) -> int | None:
+        """Count pending OS package updates in an LXC container via pct exec.
+
+        Reads the local package cache only — does not run apt update / dnf update.
+        Returns the count of pending updates, or None if the check could not run.
+        """
+        if not self._enabled:
+            return None
+        if not vmid.isdigit():
+            return None
+        check_cmd = OS_PENDING_UPDATES_COMMANDS.get(os_type)
+        if not check_cmd:
+            return None
+
+        ssh_host = _extract_ssh_host(proxmox_host)
+        pct_command = f'pct exec {vmid} -- sh -c "{check_cmd}"'
+        logger.debug("pending updates check on %s vmid %s (ostype=%s)", ssh_host, vmid, os_type)
+        try:
+            stdout, _stderr, exit_code = await asyncio.to_thread(
+                self._execute_sync_with_exit_code,
+                ssh_host,
+                pct_command,
+                timeout,
+                username=ssh_username,
+                key_path=ssh_key_path,
+                password=ssh_password,
+            )
+            # grep exits 0 when matches found, 1 when no matches (but still outputs "0")
+            if exit_code not in (0, 1):
+                logger.debug(
+                    "pending updates check failed on %s vmid %s: exit_code=%s",
+                    ssh_host, vmid, exit_code,
+                )
+                return None
+            try:
+                return int(stdout.strip())
+            except (ValueError, AttributeError):
+                logger.debug(
+                    "pending updates check unparseable output on %s vmid %s: %r",
+                    ssh_host, vmid, stdout,
+                )
+                return None
+        except Exception as exc:
+            logger.debug("pending updates check exception on %s vmid %s: %s", ssh_host, vmid, exc)
+            return None
 
     def _execute_sync_with_exit_code(
         self,

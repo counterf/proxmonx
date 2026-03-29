@@ -32,6 +32,13 @@ export function diskPercent(g: GuestSummary): number | null {
 }
 
 export function compareGuests(a: GuestSummary, b: GuestSummary, col: SortColumn, dir: SortDirection): number {
+  if (col === 'pending_updates') {
+    const pa = a.pending_updates ?? -1;
+    const pb = b.pending_updates ?? -1;
+    const cmp = pa - pb;
+    return dir === 'desc' ? -cmp : cmp;
+  }
+
   if (col === 'disk') {
     const da = diskPercent(a);
     const db = diskPercent(b);

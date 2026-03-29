@@ -10,7 +10,7 @@ import httpx
 from app.config import ProxmoxHostConfig, Settings
 from app.core.github import GitHubClient
 from app.core.proxmox import ProxmoxClient
-from app.core.ssh import SSHClient
+from app.core.ssh import SSHClient, _extract_ssh_host
 from app.detectors.base import BaseDetector
 from app.detectors.registry import ALL_DETECTORS, DETECTOR_MAP, DOCKER_DETECTOR
 from app.detectors.utils import normalize_version
@@ -211,6 +211,12 @@ class DiscoveryEngine:
                 if guest.detector_used and guest.ip:
                     await self._check_version(guest, host_config=host_config)
 
+                # Check pending OS package updates (LXC only, reads local cache)
+                if previous:
+                    guest.pending_updates = previous.pending_updates
+                if host_config:
+                    await self._check_pending_updates(guest, host_config)
+
                 # Preserve version history from previous checks
                 if previous:
                     guest.version_history = list(previous.version_history)
@@ -291,6 +297,10 @@ class DiscoveryEngine:
             return
 
         images = [line.strip() for line in output.splitlines() if line.strip()]
+
+        # Pass 1: scan all images for a known named detector match first.
+        # This prevents a generic-parseable image (e.g. "python:3.12") that
+        # appears before a known app image (e.g. "sonarr:4.0") from shadowing it.
         for image in images:
             for detector in ALL_DETECTORS:
                 if detector.match_docker_image(image):
@@ -310,7 +320,8 @@ class DiscoveryEngine:
                     )
                     return
 
-            # Generic Docker fallback: record the image but no version check
+        # Pass 2: no named detector matched — fall back to generic image tag parsing.
+        for image in images:
             version = DOCKER_DETECTOR.parse_image_version(image)
             if version:
                 guest.app_name = image.split(":")[0].split("/")[-1]
@@ -389,6 +400,34 @@ class DiscoveryEngine:
             port or "default", "set" if api_key else "none", scheme, version_host or "none",
         )
         return port, api_key, scheme, github_repo, ssh_cmd, ssh_user, ssh_key, ssh_pass, version_host
+
+    async def _check_pending_updates(
+        self,
+        guest: GuestInfo,
+        host_config: ProxmoxHostConfig,
+    ) -> None:
+        """Count pending OS package updates in an LXC container via pct exec.
+
+        Only runs for running LXC containers with pct_exec_enabled and a known os_type.
+        Updates guest.pending_updates in place; leaves it unchanged on failure.
+        """
+        if guest.type != "lxc" or guest.status != "running":
+            return
+        if not guest.os_type or not host_config.pct_exec_enabled:
+            return
+
+        vmid = guest.id.rsplit(":", 1)[-1]
+        ssh_host = _extract_ssh_host(host_config.host)
+        result = await self._ssh.run_pending_updates_check(
+            proxmox_host=ssh_host,
+            vmid=vmid,
+            os_type=guest.os_type,
+            ssh_username=host_config.ssh_username,
+            ssh_key_path=host_config.ssh_key_path,
+            ssh_password=host_config.ssh_password,
+        )
+        if result is not None:
+            guest.pending_updates = result
 
     async def _check_version(
         self,
