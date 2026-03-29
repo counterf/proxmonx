@@ -1396,8 +1396,6 @@ proxmon/
 │   │       ├── ErrorBanner.tsx       Dismissible error with retry
 │   │       └── LoadingSpinner.tsx    Centered spinner with optional text
 │   │
-│   ├── Dockerfile                    Standalone frontend build (dev use only)
-│   ├── nginx.conf                    Dev nginx config (not used in production)
 │   ├── package.json
 │   ├── tsconfig.json
 │   ├── vite.config.ts
