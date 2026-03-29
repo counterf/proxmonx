@@ -211,9 +211,11 @@ class DiscoveryEngine:
                 if guest.detector_used and guest.ip:
                     await self._check_version(guest, host_config=host_config)
 
-                # Check pending OS package updates (LXC only, reads local cache)
+                # Check pending OS package updates and reboot status (LXC only)
                 if previous:
                     guest.pending_updates = previous.pending_updates
+                    guest.pending_update_packages = previous.pending_update_packages
+                    guest.reboot_required = previous.reboot_required
                 if host_config:
                     await self._check_pending_updates(guest, host_config)
 
@@ -265,22 +267,38 @@ class DiscoveryEngine:
                 )
                 return
 
-        # Strategy 1 & 2: Name and tag matching
+        # Pass 1: tag-only sweep — an explicit container tag always beats a name heuristic.
+        # Iterates all detectors before name matching so a late-ordered detector
+        # with a matching tag wins over an early-ordered detector with a name match.
         for detector in ALL_DETECTORS:
-            method = detector.detect(guest)
-            if method:
+            for tag in guest.tags:
+                key = tag.lower().removeprefix("app:")
+                if key == detector.name or key in detector.aliases:
+                    guest.app_name = detector.display_name
+                    guest.detector_used = detector.name
+                    guest.detection_method = "tag_match"
+                    guest.raw_detection_output = {
+                        "detector": detector.name,
+                        "method": "tag_match",
+                        "matched_tag": tag,
+                        "matched_tags": ", ".join(guest.tags),
+                    }
+                    logger.debug("Tag match: %s on %s via tag %r", detector.name, guest.name, tag)
+                    return
+
+        # Pass 2: name matching
+        for detector in ALL_DETECTORS:
+            if detector._name_matches(guest.name):
                 guest.app_name = detector.display_name
                 guest.detector_used = detector.name
-                guest.detection_method = method
+                guest.detection_method = "name_match"
                 guest.raw_detection_output = {
                     "detector": detector.name,
-                    "method": method,
+                    "method": "name_match",
                     "matched_name": guest.name,
                     "matched_tags": ", ".join(guest.tags),
                 }
-                logger.debug(
-                    "Detected %s on %s via %s", detector.name, guest.name, method
-                )
+                logger.debug("Name match: %s on %s", detector.name, guest.name)
                 return
 
         # Strategy 3: Docker container inspection via SSH
@@ -406,10 +424,11 @@ class DiscoveryEngine:
         guest: GuestInfo,
         host_config: ProxmoxHostConfig,
     ) -> None:
-        """Count pending OS package updates in an LXC container via pct exec.
+        """Check pending OS package updates and reboot status for an LXC container.
 
         Only runs for running LXC containers with pct_exec_enabled and a known os_type.
-        Updates guest.pending_updates in place; leaves it unchanged on failure.
+        Updates guest.pending_updates, guest.pending_update_packages, guest.reboot_required in place.
+        Both checks run in parallel to reduce SSH round-trips.
         """
         if guest.type != "lxc" or guest.status != "running":
             return
@@ -418,16 +437,24 @@ class DiscoveryEngine:
 
         vmid = guest.id.rsplit(":", 1)[-1]
         ssh_host = _extract_ssh_host(host_config.host)
-        result = await self._ssh.run_pending_updates_check(
+        ssh_kwargs = dict(
             proxmox_host=ssh_host,
             vmid=vmid,
-            os_type=guest.os_type,
             ssh_username=host_config.ssh_username,
             ssh_key_path=host_config.ssh_key_path,
             ssh_password=host_config.ssh_password,
         )
-        if result is not None:
-            guest.pending_updates = result
+
+        packages, reboot = await asyncio.gather(
+            self._ssh.run_pending_updates_list(os_type=guest.os_type, **ssh_kwargs),
+            self._ssh.run_reboot_required_check(**ssh_kwargs),
+        )
+
+        if packages is not None:
+            guest.pending_update_packages = packages
+            guest.pending_updates = len(packages)
+        if reboot is not None:
+            guest.reboot_required = reboot
 
     async def _check_version(
         self,

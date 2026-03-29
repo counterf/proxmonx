@@ -23,18 +23,18 @@ OS_UPDATE_COMMANDS: dict[str, str] = {
     "opensuse":  "zypper ref && zypper --non-interactive dup",
 }
 
-# Commands that COUNT pending updates by reading the local package cache only.
-# No network I/O inside the container — reads the cached index.
-# grep -c exits 0 (N matches) or 1 (0 matches, but still outputs "0"); both are valid.
-OS_PENDING_UPDATES_COMMANDS: dict[str, str] = {
-    "alpine":    "apk list --upgradable 2>/dev/null | grep -c .",
-    "debian":    "apt list --upgradable 2>/dev/null | grep -c upgradable",
-    "ubuntu":    "apt list --upgradable 2>/dev/null | grep -c upgradable",
-    "devuan":    "apt list --upgradable 2>/dev/null | grep -c upgradable",
-    "fedora":    "dnf list updates -q 2>/dev/null | grep -c .",
-    "centos":    "dnf list updates -q 2>/dev/null | grep -c .",
-    "archlinux": "pacman -Qu 2>/dev/null | grep -c .",
-    "opensuse":  "zypper list-updates 2>/dev/null | grep -c ^v",
+# Commands that LIST pending updates (one package name/line) from local package cache only.
+# No network I/O inside the container.
+# Use cut instead of awk to avoid $-expansion in double-quoted sh -c contexts.
+OS_PENDING_UPDATES_LIST_COMMANDS: dict[str, str] = {
+    "alpine":    "apk list --upgradable 2>/dev/null | grep upgradable | cut -d' ' -f1",
+    "debian":    "apt list --upgradable 2>/dev/null | grep upgradable | cut -d/ -f1",
+    "ubuntu":    "apt list --upgradable 2>/dev/null | grep upgradable | cut -d/ -f1",
+    "devuan":    "apt list --upgradable 2>/dev/null | grep upgradable | cut -d/ -f1",
+    "fedora":    "dnf list updates -q 2>/dev/null | grep -v ^Updated | grep -v ^$ | cut -d. -f1",
+    "centos":    "dnf list updates -q 2>/dev/null | grep -v ^Updated | grep -v ^$ | cut -d. -f1",
+    "archlinux": "pacman -Qu 2>/dev/null | cut -d' ' -f1",
+    "opensuse":  "zypper list-updates 2>/dev/null | grep ^v | cut -d'|' -f3 | tr -d ' '",
 }
 
 
@@ -313,7 +313,7 @@ class SSHClient:
             logger.warning("OS update exception on %s vmid %s: %s", ssh_host, vmid, exc)
             return False, str(exc)
 
-    async def run_pending_updates_check(
+    async def run_pending_updates_list(
         self,
         proxmox_host: str,
         vmid: str,
@@ -322,23 +322,23 @@ class SSHClient:
         ssh_key_path: str | None = None,
         ssh_password: str | None = None,
         timeout: int = 30,
-    ) -> int | None:
-        """Count pending OS package updates in an LXC container via pct exec.
+    ) -> list[str] | None:
+        """List pending OS package updates in an LXC container via pct exec.
 
         Reads the local package cache only — does not run apt update / dnf update.
-        Returns the count of pending updates, or None if the check could not run.
+        Returns a list of package names, empty list if up-to-date, or None on failure.
         """
         if not self._enabled:
             return None
         if not vmid.isdigit():
             return None
-        check_cmd = OS_PENDING_UPDATES_COMMANDS.get(os_type)
+        check_cmd = OS_PENDING_UPDATES_LIST_COMMANDS.get(os_type)
         if not check_cmd:
             return None
 
         ssh_host = _extract_ssh_host(proxmox_host)
         pct_command = f'pct exec {vmid} -- sh -c "{check_cmd}"'
-        logger.debug("pending updates check on %s vmid %s (ostype=%s)", ssh_host, vmid, os_type)
+        logger.debug("pending updates list on %s vmid %s (ostype=%s)", ssh_host, vmid, os_type)
         try:
             stdout, _stderr, exit_code = await asyncio.to_thread(
                 self._execute_sync_with_exit_code,
@@ -349,23 +349,61 @@ class SSHClient:
                 key_path=ssh_key_path,
                 password=ssh_password,
             )
-            # grep exits 0 when matches found, 1 when no matches (but still outputs "0")
+            # grep exits 1 when no matches (0 packages) — still valid
             if exit_code not in (0, 1):
                 logger.debug(
-                    "pending updates check failed on %s vmid %s: exit_code=%s",
+                    "pending updates list failed on %s vmid %s: exit_code=%s",
                     ssh_host, vmid, exit_code,
                 )
                 return None
-            try:
-                return int(stdout.strip())
-            except (ValueError, AttributeError):
-                logger.debug(
-                    "pending updates check unparseable output on %s vmid %s: %r",
-                    ssh_host, vmid, stdout,
-                )
-                return None
+            return [p.strip() for p in (stdout or "").splitlines() if p.strip()]
         except Exception as exc:
-            logger.debug("pending updates check exception on %s vmid %s: %s", ssh_host, vmid, exc)
+            logger.debug("pending updates list exception on %s vmid %s: %s", ssh_host, vmid, exc)
+            return None
+
+    async def run_reboot_required_check(
+        self,
+        proxmox_host: str,
+        vmid: str,
+        ssh_username: str | None = None,
+        ssh_key_path: str | None = None,
+        ssh_password: str | None = None,
+        timeout: int = 10,
+    ) -> bool | None:
+        """Check if /var/run/reboot-required exists in an LXC container.
+
+        Returns True (reboot needed), False (not needed), or None (check failed).
+        Non-Debian distros cleanly return False since the file won't exist.
+        """
+        if not self._enabled:
+            return None
+        if not vmid.isdigit():
+            return None
+
+        ssh_host = _extract_ssh_host(proxmox_host)
+        pct_command = f"pct exec {vmid} -- test -f /var/run/reboot-required"
+        logger.debug("reboot-required check on %s vmid %s", ssh_host, vmid)
+        try:
+            _stdout, _stderr, exit_code = await asyncio.to_thread(
+                self._execute_sync_with_exit_code,
+                ssh_host,
+                pct_command,
+                timeout,
+                username=ssh_username,
+                key_path=ssh_key_path,
+                password=ssh_password,
+            )
+            if exit_code == 0:
+                return True
+            if exit_code == 1:
+                return False
+            logger.debug(
+                "reboot-required check unexpected exit_code=%s on %s vmid %s",
+                exit_code, ssh_host, vmid,
+            )
+            return None
+        except Exception as exc:
+            logger.debug("reboot-required check exception on %s vmid %s: %s", ssh_host, vmid, exc)
             return None
 
     def _execute_sync_with_exit_code(

@@ -38,6 +38,8 @@ export interface Guest {
   probe_url: string | null;
   probe_error: string | null;
   pending_updates?: number | null;
+  pending_update_packages?: string[] | null;
+  reboot_required?: boolean | null;
 }
 
 /** @deprecated Use Guest instead */

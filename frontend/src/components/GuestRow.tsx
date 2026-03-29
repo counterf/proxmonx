@@ -79,10 +79,41 @@ function VersionSourceCell({ guest }: { guest: GuestSummary }) {
   );
 }
 
-function PendingUpdatesCell({ count }: { count: number | null | undefined }) {
-  if (count == null) return <span className="text-gray-600">{'\u2014'}</span>;
-  if (count === 0) return <span className="text-green-400 text-xs">{'\u2713'} up to date</span>;
-  return <span className="text-amber-400 text-xs font-medium">{count} pending</span>;
+function PendingUpdatesCell({
+  count,
+  packages,
+  rebootRequired,
+}: {
+  count: number | null | undefined;
+  packages?: string[] | null;
+  rebootRequired?: boolean | null;
+}) {
+  const tooltip =
+    packages && packages.length > 0
+      ? packages.slice(0, 30).join('\n') + (packages.length > 30 ? `\n…and ${packages.length - 30} more` : '')
+      : undefined;
+
+  return (
+    <div className="flex flex-col items-center gap-0.5">
+      {count == null ? (
+        <span className="text-gray-600">{'\u2014'}</span>
+      ) : count === 0 ? (
+        <span className="text-green-400 text-xs">{'\u2713'} up to date</span>
+      ) : (
+        <span className="text-amber-400 text-xs font-medium cursor-help" title={tooltip}>
+          {count} pending
+        </span>
+      )}
+      {rebootRequired && (
+        <span
+          className="inline-block px-1.5 py-0.5 text-[10px] font-semibold rounded bg-orange-900/50 text-orange-400 border border-orange-800/50"
+          title="Reboot required (/var/run/reboot-required)"
+        >
+          reboot
+        </span>
+      )}
+    </div>
+  );
 }
 
 function OsTypeCell({ guest }: { guest: GuestSummary }) {
@@ -213,7 +244,7 @@ export function GuestTableRow({ guest, visibleColumns }: GuestRowProps) {
       )}
       {vis.has('pending_updates') && (
         <td className="px-3 py-2 text-center">
-          <PendingUpdatesCell count={guest.pending_updates} />
+          <PendingUpdatesCell count={guest.pending_updates} packages={guest.pending_update_packages} rebootRequired={guest.reboot_required} />
         </td>
       )}
       {vis.has('last_checked') && (
@@ -295,8 +326,8 @@ export function GuestCard({ guest }: GuestRowProps) {
       <div className="flex items-center justify-between text-xs text-gray-500">
         <span className="font-mono truncate max-w-[140px]">{versionStr || '\u2014'}</span>
         <div className="flex items-center gap-3">
-          {guest.pending_updates != null && (
-            <PendingUpdatesCell count={guest.pending_updates} />
+          {(guest.pending_updates != null || guest.reboot_required) && (
+            <PendingUpdatesCell count={guest.pending_updates} packages={guest.pending_update_packages} rebootRequired={guest.reboot_required} />
           )}
           <DiskUsageCell guest={guest} />
           <span>{formatRelativeTime(guest.last_checked)}</span>
