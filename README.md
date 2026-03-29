@@ -130,7 +130,7 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 
 ## 3. Features
 
-### Phase 1 — Current (read-only)
+### Phase 1 — Current
 
 - **Proxmox API integration** — connects via token-based auth; no password stored
 - **Continuous discovery** — configurable polling interval (default: 5 min)
@@ -167,12 +167,14 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 - **SQLite-backed config store** — settings persisted in SQLite (`/app/data/proxmon.db`)
 - **GitHub Actions CI** — auto-builds and pushes a single Docker image to `ghcr.io` on every push to main
 - **SQLite-only config** — all settings stored in SQLite; no `.env` file needed
+- **Guest actions** — start, stop, shutdown, restart, snapshot, and per-guest refresh from the dashboard dropdown; Proxmox returns a task ID (UPID) for async operations
+- **OS update action** — "Update OS" in the guest actions dropdown runs the appropriate package manager (`apt-get`, `apk`, `dnf`, `pacman`, `zypper`) inside running LXC containers via `pct exec`; requires `pct_exec_enabled` on the host; concurrency-guarded; triggers a guest refresh after completion
+- **TrueNAS detector** — version probe via JSON-RPC 2.0 over WebSocket (`wss://{host}/api/current`); auth via API key; fetches installed version from `system.info` and latest from `update.status`
 
 ### Phase 2 — Planned
 
-- Update button per app (triggers update on the guest)
 - Pre-update Proxmox snapshot hook (safety net before every update)
-- App-specific update handlers (plugin per app)
+- App-specific update handlers (plugin per app, e.g. `apt upgrade sonarr`, Docker pull + restart)
 - Audit log (who triggered what, when, outcome)
 - Health checks per app (is the app actually responding?)
 - Additional notification channels (Gotify, Discord, webhooks)
@@ -1547,6 +1549,9 @@ docker compose logs --tail=100
 - [x] **App icons** — icons from selfhst/icons CDN next to app names
 - [x] **Version detection cascade** — API > PCT > SSH fallback strategy
 - [x] **Settings field descriptions** — hints and descriptions for all configuration options
+- [x] **Guest actions** — start, stop, shutdown, restart, snapshot, per-guest refresh
+- [x] **OS update action** — run `apt-get`/`apk`/`dnf`/`pacman`/`zypper` inside LXC containers from the dashboard
+- [x] **TrueNAS detector** — JSON-RPC 2.0 over WebSocket; no REST API dependency
 
 ---
 

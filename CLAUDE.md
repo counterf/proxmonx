@@ -13,13 +13,18 @@ Proxmox monitoring dashboard. Discovers LXC/VM guests, detects running apps, com
 - `backend/app/core/discovery.py` -- main orchestration: guest discovery -> app detection -> version check; handles `forced_detector` guest override
 - `backend/app/detectors/http_json.py` -- config-driven detector for JSON version endpoints; add `DetectorConfig` entries here for new simple apps
 - `backend/app/detectors/registry.py` -- ALL_DETECTORS list, DETECTOR_MAP; `load_custom_detectors()` for runtime injection of user-defined apps; specialized detectors live in separate files
+- `backend/app/detectors/truenas.py` -- TrueNAS detector; JSON-RPC 2.0 over WebSocket (`wss://{host}/api/current`); auth via `auth.login_with_api_key`; installed from `system.info`, latest from `update.status`
 - `backend/app/core/github.py` -- GitHub releases API client with 1h TTL cache; `parse_github_repo()` normalizes URLs; `test_repo()` for UI validation
-- `backend/app/api/routes.py` -- all API endpoints; `_keep_or_replace()` guards masked secrets; CRUD for custom app defs at `/api/custom-apps`
+- `backend/app/api/routes/guests.py` -- guest endpoints; `_os_update_in_progress` set guards concurrent OS updates; `POST /api/guests/{id}/os-update` runs pct exec package manager
+- `backend/app/api/routes/settings.py` -- settings endpoints
 - `backend/app/api/auth_routes.py` -- login/logout/session endpoints
 - `backend/app/middleware/auth_middleware.py` -- session cookie auth middleware
 - `backend/app/core/session_store.py` -- in-memory session management
 - `backend/app/core/auth.py` -- password hashing and verification
+- `backend/app/core/ssh.py` -- SSH executor; `OS_UPDATE_COMMANDS` dict maps Proxmox ostype → package manager command; `run_os_update()` uses `_execute_sync_with_exit_code()` to capture exit code; `_extract_ssh_host()` strips scheme/port from host URL
+- `backend/app/core/scheduler.py` -- background polling; `trigger_guest_refresh(guest_id)` re-fetches live Proxmox status before re-running detection (fixes stale-status bug)
 - `backend/app/config.py` -- Settings (pydantic-settings); AppConfig (per-app/guest overrides); CustomAppDef (user-defined detector model)
+- `frontend/src/components/GuestActions.tsx` -- guest action dropdown; handles start/stop/shutdown/restart/snapshot/refresh/os_update; os_update has confirm dialog, no auto-close, and in-progress message
 - `frontend/src/components/Settings.tsx` -- settings form (delegates to section components)
 - `frontend/src/components/settings/AppConfigSection.tsx` -- per-app config (port, api_key, scheme, github_repo)
 - `frontend/src/components/settings/CustomAppsSection.tsx` -- CRUD UI for user-defined custom app definitions
@@ -61,3 +66,8 @@ CI auto-builds to `ghcr.io/counterf/proxmon:latest` on push to main.
 - `forced_detector` and `version_host` live on `AppConfig` (shared model) but are semantically guest-only; only the guest config save path uses them
 - `version_host` overrides both the version probe IP and the clickable web URL link for a guest
 - VM disk usage is fetched via `agent/get-fsinfo` (QEMU guest agent); LXC disk comes from the Proxmox list endpoint directly. VMs without the guest agent show blank disk.
+- Guest actions (start/stop/restart/snapshot) return a Proxmox UPID (async task ID), not a completion confirmation — feedback labels say "Task queued", not "Done"
+- `run_os_update()` uses `_execute_sync_with_exit_code()` (not `_execute_sync`) to capture exit code; success = `exit_code == 0`; `run_pct_exec()` still uses `_is_version_cmd_safe()` and blocks `&&`
+- `_extract_ssh_host()` is required before SSH calls — `ProxmoxHostConfig.host` may contain a full URL (`https://192.168.1.10:8006`), not a bare hostname
+- TrueNAS `get_latest_version()` has no host/api_key params — latest version is cached in `self._cached_latest` during `get_installed_version()` and returned from there
+- Proxmox ostype values `rocky` and `alma` do not exist — containers using those distros are configured as `centos` in Proxmox
