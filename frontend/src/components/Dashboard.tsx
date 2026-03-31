@@ -370,12 +370,14 @@ export default function Dashboard({ configured }: { configured: boolean }) {
           </span>
           <div className="flex gap-2">
             <button
+              type="button"
               onClick={() => { setPendingBulkAction(showBulkConfirm); setShowBulkConfirm(null); }}
               className="px-3 py-1 text-xs rounded bg-cyan-700 hover:bg-cyan-600 text-white"
             >
               Confirm
             </button>
             <button
+              type="button"
               onClick={() => setShowBulkConfirm(null)}
               className="px-3 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300"
             >
