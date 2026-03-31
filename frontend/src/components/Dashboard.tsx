@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useGuests } from '../hooks/useGuests';
 import type { UpdateStatus, GuestType, GuestSummary } from '../types';
@@ -7,6 +7,8 @@ import { GuestTableRow, GuestCard } from './GuestRow';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorBanner from './ErrorBanner';
 import ColumnToggle from './ColumnToggle';
+import BulkActionBar from './BulkActionBar';
+import BulkProgressModal from './BulkProgressModal';
 import { useColumnVisibility, COLUMN_DEFS, type ColumnKey } from '../hooks/useColumnVisibility';
 
 type SortColumn = ColumnKey;
@@ -119,6 +121,31 @@ export default function Dashboard({ configured }: { configured: boolean }) {
   const initDir = searchParams.get('dir') as SortDirection | null;
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(initSort);
   const [sortDirection, setSortDirection] = useState<SortDirection>(initDir || 'asc');
+
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [pendingBulkAction, setPendingBulkAction] = useState<'os_update' | 'app_update' | null>(null);
+  const [showBulkConfirm, setShowBulkConfirm] = useState<'os_update' | 'app_update' | null>(null);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && bulkMode && !pendingBulkAction) {
+        setBulkMode(false);
+        setSelectedIds(new Set());
+        setShowBulkConfirm(null);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [bulkMode, pendingBulkAction]);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
 
   // Sync filters to URL
   const updateFilter = useCallback((key: string, value: string) => {
@@ -282,6 +309,13 @@ export default function Dashboard({ configured }: { configured: boolean }) {
 
           <ColumnToggle visibleColumns={visibleColumns} onToggle={toggleColumn} onReset={resetToDefaults} />
 
+          <button
+            onClick={() => { setBulkMode(p => !p); setSelectedIds(new Set()); setShowBulkConfirm(null); }}
+            className="px-3 py-1.5 text-sm rounded bg-gray-800 border border-gray-700 text-gray-400 hover:text-gray-200"
+          >
+            {bulkMode ? 'Done' : 'Select'}
+          </button>
+
           {/* Health badges */}
           {outdatedCount > 0 && (
             <span className="px-2 py-0.5 text-xs font-semibold rounded bg-red-900 text-red-400">
@@ -315,6 +349,40 @@ export default function Dashboard({ configured }: { configured: boolean }) {
         hostFilter={hostFilter}
         onHostChange={handleHostChange}
       />
+
+      {bulkMode && selectedIds.size > 0 && (() => {
+        const visibleSelected = sorted.filter(g => selectedIds.has(g.id)).length;
+        const hiddenSelected = selectedIds.size - visibleSelected;
+        return hiddenSelected > 0 ? (
+          <p className="text-xs text-gray-500">
+            {selectedIds.size} selected ({hiddenSelected} not visible in current filter)
+          </p>
+        ) : null;
+      })()}
+
+      {showBulkConfirm && (
+        <div className="p-3 rounded bg-gray-800 border border-gray-700 flex items-center gap-3 flex-wrap">
+          <span className="text-sm text-gray-300">
+            {showBulkConfirm === 'os_update'
+              ? `Update OS on ${selectedIds.size} guests? Running services may restart.`
+              : `Run app updater on ${selectedIds.size} guests?`}
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setPendingBulkAction(showBulkConfirm); setShowBulkConfirm(null); }}
+              className="px-3 py-1 text-xs rounded bg-cyan-700 hover:bg-cyan-600 text-white"
+            >
+              Confirm
+            </button>
+            <button
+              onClick={() => setShowBulkConfirm(null)}
+              className="px-3 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Guest list */}
       {guests.length === 0 ? (
@@ -357,6 +425,28 @@ export default function Dashboard({ configured }: { configured: boolean }) {
               <caption className="sr-only">Proxmox guests</caption>
               <thead className="bg-surface border-b border-gray-800">
                 <tr>
+                  {bulkMode && (
+                    <th scope="col" style={{ width: '36px' }} className="px-2 py-2">
+                      <input
+                        type="checkbox"
+                        aria-label="Select all visible guests"
+                        checked={sorted.length > 0 && sorted.every(g => selectedIds.has(g.id))}
+                        ref={(el) => {
+                          if (el) el.indeterminate =
+                            sorted.some(g => selectedIds.has(g.id)) &&
+                            !sorted.every(g => selectedIds.has(g.id));
+                        }}
+                        onChange={() => {
+                          if (sorted.every(g => selectedIds.has(g.id))) {
+                            setSelectedIds(new Set());
+                          } else {
+                            setSelectedIds(new Set(sorted.map(g => g.id)));
+                          }
+                        }}
+                        className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-blue-500 cursor-pointer"
+                      />
+                    </th>
+                  )}
                   {activeColumns.cols.map((col) => (
                     <th
                       key={col.key}
@@ -375,7 +465,14 @@ export default function Dashboard({ configured }: { configured: boolean }) {
               </thead>
               <tbody>
                 {sorted.map((guest) => (
-                  <GuestTableRow key={guest.id} guest={guest} visibleColumns={visibleColumns} />
+                  <GuestTableRow
+                    key={guest.id}
+                    guest={guest}
+                    visibleColumns={visibleColumns}
+                    bulkMode={bulkMode}
+                    selected={selectedIds.has(guest.id)}
+                    onToggleSelect={toggleSelect}
+                  />
                 ))}
               </tbody>
             </table>
@@ -384,10 +481,37 @@ export default function Dashboard({ configured }: { configured: boolean }) {
           {/* Mobile card list (< md) */}
           <div className="md:hidden" data-testid="guest-card-list">
             {sorted.map((guest) => (
-              <GuestCard key={guest.id} guest={guest} />
+              <GuestCard
+                key={guest.id}
+                guest={guest}
+                bulkMode={bulkMode}
+                selected={selectedIds.has(guest.id)}
+                onToggleSelect={toggleSelect}
+              />
             ))}
           </div>
         </>
+      )}
+      {bulkMode && selectedIds.size > 0 && !pendingBulkAction && (
+        <BulkActionBar
+          selectionSize={selectedIds.size}
+          selectedGuests={guests.filter(g => selectedIds.has(g.id))}
+          onOsUpdate={() => setShowBulkConfirm('os_update')}
+          onAppUpdate={() => setShowBulkConfirm('app_update')}
+          onClear={() => setSelectedIds(new Set())}
+        />
+      )}
+      {pendingBulkAction && (
+        <BulkProgressModal
+          action={pendingBulkAction}
+          guests={guests.filter(g => selectedIds.has(g.id))}
+          onClose={() => {
+            setPendingBulkAction(null);
+            setBulkMode(false);
+            setSelectedIds(new Set());
+            setTimeout(() => refresh(), 4000);
+          }}
+        />
       )}
     </div>
   );

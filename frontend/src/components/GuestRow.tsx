@@ -8,6 +8,9 @@ import GuestActions from './GuestActions';
 interface GuestRowProps {
   guest: GuestSummary;
   visibleColumns?: Set<ColumnKey>;
+  bulkMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: string) => void;
 }
 
 function formatRelativeTime(dateStr: string | null): string {
@@ -160,7 +163,7 @@ function AppNameCell({ guest }: { guest: GuestSummary }) {
 }
 
 /** Table row for desktop (>= md) */
-export function GuestTableRow({ guest, visibleColumns }: GuestRowProps) {
+export function GuestTableRow({ guest, visibleColumns, bulkMode, selected, onToggleSelect }: GuestRowProps) {
   const navigate = useNavigate();
   const vis = visibleColumns ?? new Set<ColumnKey>();
 
@@ -171,15 +174,27 @@ export function GuestTableRow({ guest, visibleColumns }: GuestRowProps) {
   return (
     <tr
       tabIndex={0}
-      className="border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer transition-colors"
-      onClick={() => navigate(`/guest/${guest.id}`)}
+      className={`border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer transition-colors${selected ? ' bg-blue-950/40 border-l-2 border-l-blue-600' : ''}`}
+      onClick={() => bulkMode ? onToggleSelect?.(guest.id) : navigate(`/guest/${guest.id}`)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          navigate(`/guest/${guest.id}`);
+          if (bulkMode) onToggleSelect?.(guest.id);
+          else navigate(`/guest/${guest.id}`);
         }
       }}
     >
+      {bulkMode && (
+        <td style={{ width: '36px' }} className="px-2 py-2" onClick={e => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelect?.(guest.id)}
+            aria-label={`Select ${guest.name}`}
+            className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-blue-500 cursor-pointer"
+          />
+        </td>
+      )}
       {vis.has('name') && (
         <td className="px-3 py-2 text-sm text-gray-200 max-w-[200px]" title={guest.name}>
           <span className="flex items-center gap-1.5 min-w-0">
@@ -253,26 +268,28 @@ export function GuestTableRow({ guest, visibleColumns }: GuestRowProps) {
         </td>
       )}
       <td className="px-3 py-2">
-        <div className="flex items-center gap-2">
-          <button
-            className="text-xs text-blue-400 hover:text-blue-300"
-            aria-label={`View details for ${guest.name}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate(`/guest/${guest.id}`);
-            }}
-          >
-            View
-          </button>
-          <GuestActions guest={guest} />
-        </div>
+        {!bulkMode ? (
+          <div className="flex items-center gap-2">
+            <button
+              className="text-xs text-blue-400 hover:text-blue-300"
+              aria-label={`View details for ${guest.name}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/guest/${guest.id}`);
+              }}
+            >
+              View
+            </button>
+            <GuestActions guest={guest} />
+          </div>
+        ) : null}
       </td>
     </tr>
   );
 }
 
 /** Card layout for mobile (< md) */
-export function GuestCard({ guest }: GuestRowProps) {
+export function GuestCard({ guest, bulkMode, selected, onToggleSelect }: GuestRowProps) {
   const navigate = useNavigate();
 
   const typeBadgeClass = guest.type === 'lxc'
@@ -289,12 +306,13 @@ export function GuestCard({ guest }: GuestRowProps) {
     <div
       tabIndex={0}
       role="button"
-      className="border border-gray-800 rounded px-4 py-3 mb-2 hover:bg-gray-800/50 cursor-pointer transition-colors"
-      onClick={() => navigate(`/guest/${guest.id}`)}
+      className={`border rounded px-4 py-3 mb-2 hover:bg-gray-800/50 cursor-pointer transition-colors${selected ? ' bg-blue-950/40 border-blue-600' : ' border-gray-800'}`}
+      onClick={() => bulkMode ? onToggleSelect?.(guest.id) : navigate(`/guest/${guest.id}`)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          navigate(`/guest/${guest.id}`);
+          if (bulkMode) onToggleSelect?.(guest.id);
+          else navigate(`/guest/${guest.id}`);
         }
       }}
       data-testid="guest-card"
@@ -311,7 +329,18 @@ export function GuestCard({ guest }: GuestRowProps) {
         </span>
         <div className="flex items-center gap-2 shrink-0">
           <StatusBadge status={guest.update_status} />
-          <GuestActions guest={guest} />
+          {bulkMode ? (
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => onToggleSelect?.(guest.id)}
+              aria-label={`Select ${guest.name}`}
+              className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-blue-500 cursor-pointer"
+              onClick={e => e.stopPropagation()}
+            />
+          ) : (
+            <GuestActions guest={guest} />
+          )}
         </div>
       </div>
       {/* Row 2: type + app */}
