@@ -11,6 +11,7 @@ import type {
   AuthStatus,
   CustomAppDef,
   GitHubTestResult,
+  TaskRecord,
 } from '../types';
 import { API_PATHS } from './paths';
 
@@ -43,7 +44,14 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
       ) {
         window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT));
       }
-      throw new HttpError(response.status, `HTTP ${response.status}: ${response.statusText}`);
+      let detail = `HTTP ${response.status}: ${response.statusText}`;
+      try {
+        const body = await response.json() as Record<string, unknown>;
+        if (typeof body.detail === 'string') detail = body.detail;
+      } catch {
+        // non-JSON body — keep status text
+      }
+      throw new HttpError(response.status, detail);
     }
     try {
       return await response.json() as T;
@@ -135,8 +143,18 @@ export async function refreshGuest(guestId: string): Promise<{ status: string }>
 
 export async function osUpdateGuest(
   guestId: string,
+  batchId?: string,
 ): Promise<{ success: boolean; output: string; os_type: string }> {
-  return fetchJson(API_PATHS.GUEST_OS_UPDATE(guestId), { method: 'POST' });
+  const qs = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : '';
+  return fetchJson(API_PATHS.GUEST_OS_UPDATE(guestId) + qs, { method: 'POST' });
+}
+
+export async function appUpdateGuest(
+  guestId: string,
+  batchId?: string,
+): Promise<{ success: boolean; output: string }> {
+  const qs = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : '';
+  return fetchJson(API_PATHS.GUEST_APP_UPDATE(guestId) + qs, { method: 'POST' });
 }
 
 export async function guestAction(
@@ -223,4 +241,26 @@ export async function deleteCustomApp(name: string): Promise<{ status: string }>
   return fetchJson<{ status: string }>(API_PATHS.CUSTOM_APP(name), {
     method: 'DELETE',
   });
+}
+
+export interface BackupStorage {
+  storage: string;
+  type: string;
+  avail?: number | null;
+}
+
+export async function fetchBackupStorages(hostId: string): Promise<BackupStorage[] | { error: string }> {
+  return fetchJson(API_PATHS.HOST_BACKUP_STORAGES(hostId));
+}
+
+export async function backupGuest(guestId: string): Promise<{ status: string; task: string }> {
+  return fetchJson(API_PATHS.GUEST_BACKUP(guestId), { method: 'POST' });
+}
+
+export async function fetchTasks(): Promise<TaskRecord[]> {
+  return fetchJson<TaskRecord[]>(API_PATHS.TASKS);
+}
+
+export async function clearTasks(): Promise<{ status: string }> {
+  return fetchJson<{ status: string }>(API_PATHS.TASKS, { method: 'DELETE' });
 }

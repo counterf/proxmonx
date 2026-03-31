@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import type { TaskRecord } from '../types';
 import { fetchTasks, clearTasks } from '../api/client';
@@ -195,7 +195,7 @@ function BatchGroupCard({ group }: { group: TaskGroupBatch }) {
     <div className="border border-gray-800 rounded px-4 py-3 cursor-pointer" onClick={() => setExpanded(p => !p)}>
       <div className="flex items-center justify-between mb-1">
         <span className="text-sm font-medium text-gray-300">{actionLabel} — {group.tasks.length} guests</span>
-        <span className="text-xs text-gray-500">{expanded ? '\u25B2' : '\u25BC'}</span>
+        <span className="text-xs text-gray-500">{expanded ? '\u25BC' : '\u25B6'}</span>
       </div>
       <div className="flex items-center gap-2 text-xs text-gray-500">
         <span>{formatRelativeTime(group.tasks[0]?.started_at)}</span>
@@ -219,6 +219,12 @@ function BatchGroupCard({ group }: { group: TaskGroupBatch }) {
   );
 }
 
+// --- Types ---
+
+type TaskGroup =
+  | { type: 'single'; task: TaskRecord }
+  | { type: 'batch'; batchId: string; tasks: TaskRecord[] };
+
 // --- Main component ---
 
 export default function Tasks() {
@@ -228,7 +234,6 @@ export default function Tasks() {
   const [clearing, setClearing] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = async () => {
     try {
@@ -242,24 +247,17 @@ export default function Tasks() {
     }
   };
 
-  // Auto-refresh every 5s when any task is active
+  // Mount: initial load only
   useEffect(() => {
     load();
-    pollRef.current = setInterval(() => {
-      const hasActive = tasks.some(t => t.status === 'pending' || t.status === 'running');
-      if (hasActive) load();
-    }, 5000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Re-check active tasks whenever tasks list changes
+  // Reactive polling: re-runs whenever tasks changes; polls only while active tasks exist
   useEffect(() => {
-    if (pollRef.current) clearInterval(pollRef.current);
     const hasActive = tasks.some(t => t.status === 'pending' || t.status === 'running');
-    if (hasActive) {
-      pollRef.current = setInterval(load, 5000);
-    }
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    if (!hasActive) return;
+    const id = setInterval(load, 5000);
+    return () => clearInterval(id);
   }, [tasks]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRefresh = async () => {
@@ -281,10 +279,6 @@ export default function Tasks() {
       setClearing(false);
     }
   };
-
-  type TaskGroup =
-    | { type: 'single'; task: TaskRecord }
-    | { type: 'batch'; batchId: string; tasks: TaskRecord[] };
 
   const groups = useMemo((): TaskGroup[] => {
     const result: TaskGroup[] = [];

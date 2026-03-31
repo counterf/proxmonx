@@ -310,6 +310,7 @@ export default function Dashboard({ configured }: { configured: boolean }) {
           <ColumnToggle visibleColumns={visibleColumns} onToggle={toggleColumn} onReset={resetToDefaults} />
 
           <button
+            type="button"
             onClick={() => { setBulkMode(p => !p); setSelectedIds(new Set()); setShowBulkConfirm(null); }}
             className="px-3 py-1.5 text-sm rounded bg-gray-800 border border-gray-700 text-gray-400 hover:text-gray-200"
           >
@@ -438,9 +439,15 @@ export default function Dashboard({ configured }: { configured: boolean }) {
                         }}
                         onChange={() => {
                           if (sorted.every(g => selectedIds.has(g.id))) {
-                            setSelectedIds(new Set());
+                            // Deselect only currently visible guests; preserve selections outside current filter
+                            setSelectedIds(prev => {
+                              const next = new Set(prev);
+                              sorted.forEach(g => next.delete(g.id));
+                              return next;
+                            });
                           } else {
-                            setSelectedIds(new Set(sorted.map(g => g.id)));
+                            // Add all visible guests to existing selection
+                            setSelectedIds(prev => new Set([...prev, ...sorted.map(g => g.id)]));
                           }
                         }}
                         className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-blue-500 cursor-pointer"
