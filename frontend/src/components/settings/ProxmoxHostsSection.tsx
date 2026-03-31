@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { ProxmoxHost, ConnectionTestResult } from '../../types';
-import { testConnection } from '../../api/client';
+import { testConnection, fetchBackupStorages } from '../../api/client';
+import type { BackupStorage } from '../../api/client';
 
 interface ProxmoxHostsSectionProps {
   hosts: ProxmoxHost[];
@@ -23,6 +24,7 @@ function emptyHost(): ProxmoxHost {
     ssh_password: null,
     ssh_key_path: null,
     pct_exec_enabled: false,
+    backup_storage: null,
   };
 }
 
@@ -34,6 +36,31 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
   const [showSshPass, setShowSshPass] = useState<Record<string, boolean>>({});
   const [testing, setTesting] = useState<Record<string, boolean>>({});
   const [testResult, setTestResult] = useState<Record<string, ConnectionTestResult>>({});
+  const [storages, setStorages] = useState<Record<string, BackupStorage[] | null>>({});
+  const [storagesLoading, setStoragesLoading] = useState<Record<string, boolean>>({});
+  const [storagesError, setStoragesError] = useState<Record<string, string | null>>({});
+
+  useEffect(() => {
+    if (!expandedId) return;
+    if (storages[expandedId] !== undefined) return; // already loaded
+    const host = hosts.find((h) => h.id === expandedId);
+    if (!host || !host.host || !host.token_id || !host.node) return;
+    setStoragesLoading((p) => ({ ...p, [expandedId]: true }));
+    setStoragesError((p) => ({ ...p, [expandedId]: null }));
+    fetchBackupStorages(expandedId).then((result) => {
+      if ('error' in result) {
+        setStoragesError((p) => ({ ...p, [expandedId]: result.error }));
+        setStorages((p) => ({ ...p, [expandedId]: null }));
+      } else {
+        setStorages((p) => ({ ...p, [expandedId]: result }));
+      }
+    }).catch((err) => {
+      setStoragesError((p) => ({ ...p, [expandedId]: err instanceof Error ? err.message : 'Failed to load storages' }));
+      setStorages((p) => ({ ...p, [expandedId]: null }));
+    }).finally(() => {
+      setStoragesLoading((p) => ({ ...p, [expandedId]: false }));
+    });
+  }, [expandedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateHost = (id: string, patch: Partial<ProxmoxHost>) => {
     onChange(hosts.map((h) => (h.id === id ? { ...h, ...patch } : h)));
@@ -320,6 +347,46 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
                         <p className="text-xs text-gray-600">Run version commands inside LXC containers via the Proxmox host over SSH</p>
                       </div>
                     </div>
+                  </div>
+
+                  <div>
+                    <label htmlFor={`host-backup-storage-${host.id}`} className="block text-xs text-gray-400 mb-1">Backup Storage</label>
+                    {storagesLoading[host.id] ? (
+                      <select disabled className={`${inputClass} opacity-60`}>
+                        <option>Loading storages…</option>
+                      </select>
+                    ) : storages[host.id] ? (
+                      <select
+                        id={`host-backup-storage-${host.id}`}
+                        value={host.backup_storage || ''}
+                        onChange={(e) => updateHost(host.id, { backup_storage: e.target.value || null })}
+                        disabled={disabled}
+                        className={inputClass}
+                      >
+                        <option value="">None — disable backup</option>
+                        {storages[host.id]!.map((s) => (
+                          <option key={s.storage} value={s.storage}>
+                            {s.storage} ({s.type}{s.avail != null ? `, ${(s.avail / 1024 / 1024 / 1024).toFixed(1)} GB free` : ''})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <>
+                        <input
+                          id={`host-backup-storage-${host.id}`}
+                          type="text"
+                          value={host.backup_storage || ''}
+                          onChange={(e) => updateHost(host.id, { backup_storage: e.target.value || null })}
+                          placeholder="e.g. local"
+                          disabled={disabled}
+                          className={inputClass}
+                        />
+                        {storagesError[host.id] && (
+                          <p className="text-xs text-amber-500 mt-0.5">Could not load storages — enter manually. ({storagesError[host.id]})</p>
+                        )}
+                      </>
+                    )}
+                    <p className="text-xs text-gray-600 mt-0.5">Proxmox storage for vzdump backups (only backup-capable storages listed)</p>
                   </div>
 
                   {/* Actions */}

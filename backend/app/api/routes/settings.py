@@ -51,6 +51,7 @@ class ProxmoxHostSaveEntry(BaseModel):
     ssh_password: str | None = None
     ssh_key_path: str | None = None
     pct_exec_enabled: bool = False
+    backup_storage: str | None = None
 
     @field_validator("id")
     @classmethod
@@ -228,6 +229,7 @@ def _merge_proxmox_hosts(
             "ssh_password": _keep_or_replace(entry.ssh_password, prev.get("ssh_password")),
             "ssh_key_path": entry.ssh_key_path or prev.get("ssh_key_path") or "",
             "pct_exec_enabled": entry.pct_exec_enabled,
+            "backup_storage": entry.backup_storage or None,
         })
     return saved_hosts
 
@@ -448,6 +450,38 @@ async def get_full_settings(
     ]
     result["auth_password_set"] = bool(config_store.load_auth().get("auth_password_hash"))
     return result
+
+
+@router.get("/api/settings/hosts/{host_id}/backup-storages", dependencies=[Depends(_require_api_key)])
+async def list_host_backup_storages(
+    host_id: str,
+    config_store=Depends(_get_config_store),
+) -> list[dict] | dict:
+    """Return Proxmox storages that support backup content for the given host."""
+    from app.config import ProxmoxHostConfig
+    from app.core.proxmox import ProxmoxClient
+
+    data = config_store.load()
+    hosts: list[dict] = data.get("proxmox_hosts", [])
+    host_dict = next((h for h in hosts if h.get("id") == host_id), None)
+    if not host_dict:
+        return {"error": f"Host {host_id!r} not found"}
+
+    try:
+        host_config = ProxmoxHostConfig(**host_dict)
+        host_settings = Settings(
+            proxmox_host=host_config.host,
+            proxmox_token_id=host_config.token_id,
+            proxmox_token_secret=host_config.token_secret,
+            proxmox_node=host_config.node,
+            verify_ssl=host_config.verify_ssl,
+        )
+        client = ProxmoxClient(host_settings)
+        storages = await client.list_backup_storages()
+        return storages
+    except Exception as exc:
+        logger.warning("Failed to list backup storages for host %s: %s", host_id, exc)
+        return {"error": str(exc)}
 
 
 @router.post("/api/settings/test-connection", dependencies=[Depends(_require_api_key)])

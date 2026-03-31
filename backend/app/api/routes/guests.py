@@ -1,7 +1,10 @@
 """Guest-related API endpoints."""
 
+import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any, Literal
+from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -9,6 +12,7 @@ from pydantic import BaseModel, field_validator
 
 from app.config import ProxmoxHostConfig, Settings
 from app.core.proxmox import ProxmoxClient
+from app.core.task_store import TaskRecord, TaskStore
 from app.detectors.registry import DETECTOR_MAP
 from app.core.ssh import OS_UPDATE_COMMANDS, SSHClient
 from app.models.guest import GuestInfo
@@ -18,6 +22,7 @@ from app.api.helpers import (
     _get_config_store,
     _get_scheduler,
     _get_settings,
+    _get_task_store,
     _keep_or_replace,
     _reload_settings_into_engine,
     _require_api_key,
@@ -29,6 +34,47 @@ router = APIRouter()
 
 # Tracks guest IDs with an OS update currently in progress to prevent concurrent runs.
 _os_update_in_progress: set[str] = set()
+# Tracks guest IDs with an app update currently in progress to prevent concurrent runs.
+_app_update_in_progress: set[str] = set()
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+async def _poll_upid(
+    task_store: TaskStore,
+    host_config: ProxmoxHostConfig,
+    task_id: str,
+    upid: str,
+    success_detail: str | None = None,
+) -> None:
+    """Background task: poll Proxmox for UPID completion and update the task record."""
+    client = ProxmoxClient(Settings(
+        proxmox_host=host_config.host,
+        proxmox_token_id=host_config.token_id,
+        proxmox_token_secret=host_config.token_secret,
+        proxmox_node=host_config.node,
+        verify_ssl=host_config.verify_ssl,
+    ))
+    for _ in range(60):  # poll every 10s up to 10 min
+        await asyncio.sleep(10)
+        try:
+            data = await client.get_task_status(upid)
+        except Exception:
+            continue
+        if data.get("status") == "stopped":
+            exitstatus = str(data.get("exitstatus", ""))
+            succeeded = exitstatus == "OK"
+            task_store.update(
+                task_id,
+                status="success" if succeeded else "failed",
+                detail=success_detail if succeeded else (exitstatus or upid),
+                finished_at=_now_iso(),
+            )
+            return
+    # Timed out without completion — leave status as "running" with a note
+    task_store.update(task_id, detail=f"{upid} (poll timed out after 10 min)")
 
 
 # --- Request/Response models ---
@@ -163,6 +209,7 @@ async def perform_guest_action(
     body: GuestActionRequest,
     scheduler=Depends(_get_scheduler),
     config_store=Depends(_get_config_store),
+    task_store=Depends(_get_task_store),
 ) -> dict[str, str]:
     """Trigger a lifecycle action (start/stop/shutdown/restart/snapshot) on a guest."""
     if scheduler is None:
@@ -193,26 +240,38 @@ async def perform_guest_action(
     proxmox_type = "lxc" if guest.type == "lxc" else "qemu"
     vmid = guest.id.rsplit(":", 1)[-1]
 
+    task_id = str(uuid4())
+    task_store.create(TaskRecord(
+        id=task_id, guest_id=guest_id, guest_name=guest.name,
+        host_id=guest.host_id, action=body.action,
+        status="pending", started_at=_now_iso(),
+    ))
+
     try:
-        task = await client.guest_action(vmid, proxmox_type, body.action, body.snapshot_name)
-        logger.info("Action %s on guest %s -> task %s", body.action, guest_id, task)
-        return {"status": "ok", "task": task}
+        upid = await client.guest_action(vmid, proxmox_type, body.action, body.snapshot_name)
+        logger.info("Action %s on guest %s -> task %s", body.action, guest_id, upid)
+        task_store.update(task_id, status="running", detail=upid)
+        success_detail = f"Snapshot '{body.snapshot_name}' created" if body.action == "snapshot" and body.snapshot_name else None
+        asyncio.create_task(_poll_upid(task_store, host_config, task_id, upid, success_detail))
+        return {"status": "ok", "task": upid}
     except httpx.HTTPStatusError as exc:
         # Extract the Proxmox error message
         detail: str = exc.response.reason_phrase or f"Proxmox API error: {exc.response.status_code}"
         try:
-            body = exc.response.json()
-            errors = body.get("errors") or body.get("message") or body.get("data")
+            resp_body = exc.response.json()
+            errors = resp_body.get("errors") or resp_body.get("message") or resp_body.get("data")
             if errors:
                 detail = str(errors)
         except Exception:
             if exc.response.text:
                 detail = exc.response.text.strip()
+        task_store.update(task_id, status="failed", detail=detail, finished_at=_now_iso())
         # Proxmox uses 500 for logical conflicts (e.g. "already running", "already stopped").
         # Map those to 409 so the frontend shows the message rather than a generic error.
         status_code = 409 if exc.response.status_code == 500 else exc.response.status_code
         raise HTTPException(status_code=status_code, detail=detail)
     except Exception as exc:
+        task_store.update(task_id, status="failed", detail=str(exc), finished_at=_now_iso())
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -232,8 +291,10 @@ async def refresh_guest(
 @router.post("/api/guests/{guest_id}/os-update", dependencies=[Depends(_require_api_key)])
 async def os_update_guest(
     guest_id: str,
+    batch_id: str | None = None,
     scheduler=Depends(_get_scheduler),
     config_store=Depends(_get_config_store),
+    task_store=Depends(_get_task_store),
 ) -> dict[str, Any]:
     """Run OS package update inside an LXC container via pct exec."""
     if scheduler is None:
@@ -271,12 +332,26 @@ async def os_update_guest(
     ssh = SSHClient(ssh_settings)
     vmid = guest_id.rsplit(":", 1)[-1]
 
+    task_id = str(uuid4())
+    task_store.create(TaskRecord(
+        id=task_id, guest_id=guest_id, guest_name=guest.name,
+        host_id=guest.host_id, action="os_update",
+        status="running", started_at=_now_iso(),
+        batch_id=batch_id,
+    ))
+
     try:
         success, output = await ssh.run_os_update(
             host_config.host, vmid, guest.os_type,
             ssh_username=host_config.ssh_username,
             ssh_key_path=host_config.ssh_key_path,
             ssh_password=host_config.ssh_password,
+        )
+        task_store.update(
+            task_id,
+            status="success" if success else "failed",
+            output=output,
+            finished_at=_now_iso(),
         )
     finally:
         _os_update_in_progress.discard(guest_id)
@@ -288,6 +363,146 @@ async def os_update_guest(
     scheduler.trigger_guest_refresh(guest_id)
 
     return {"success": True, "output": output, "os_type": guest.os_type}
+
+
+@router.post("/api/guests/{guest_id}/app-update", dependencies=[Depends(_require_api_key)])
+async def app_update_guest(
+    guest_id: str,
+    batch_id: str | None = None,
+    scheduler=Depends(_get_scheduler),
+    config_store=Depends(_get_config_store),
+    task_store=Depends(_get_task_store),
+) -> dict[str, Any]:
+    """Run the community-script updater inside an LXC container via pct exec."""
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="proxmon is not configured")
+    guest = scheduler.guests.get(guest_id)
+    if not guest:
+        raise HTTPException(status_code=404, detail=f"Guest {guest_id} not found")
+    if guest.type != "lxc":
+        raise HTTPException(status_code=400, detail="App update is only supported for LXC containers")
+    if guest.status != "running":
+        raise HTTPException(status_code=400, detail="Guest must be running to update app")
+    if not guest.has_community_script:
+        raise HTTPException(status_code=400, detail="/usr/bin/update not found on this container")
+
+    data = config_store.load()
+    hosts: list[dict] = data.get("proxmox_hosts", [])
+    host_dict = next((h for h in hosts if h.get("id") == guest.host_id), None)
+    if not host_dict:
+        raise HTTPException(status_code=404, detail=f"Host config not found for {guest.host_id!r}")
+
+    host_config = ProxmoxHostConfig(**host_dict)
+    if not host_config.pct_exec_enabled:
+        raise HTTPException(status_code=400, detail="pct exec is not enabled for this host — enable it in Settings")
+
+    if guest_id in _app_update_in_progress:
+        raise HTTPException(status_code=409, detail="An app update is already in progress for this guest")
+    _app_update_in_progress.add(guest_id)
+
+    ssh_settings = Settings(
+        ssh_enabled=True,
+        ssh_username=host_config.ssh_username,
+        ssh_key_path=host_config.ssh_key_path,
+        ssh_password=host_config.ssh_password,
+    )
+    ssh = SSHClient(ssh_settings)
+    vmid = guest_id.rsplit(":", 1)[-1]
+
+    task_id = str(uuid4())
+    task_store.create(TaskRecord(
+        id=task_id, guest_id=guest_id, guest_name=guest.name,
+        host_id=guest.host_id, action="app_update",
+        status="running", started_at=_now_iso(),
+        batch_id=batch_id,
+    ))
+
+    try:
+        success, output = await ssh.run_app_update(
+            host_config.host, vmid,
+            ssh_username=host_config.ssh_username,
+            ssh_key_path=host_config.ssh_key_path,
+            ssh_password=host_config.ssh_password,
+        )
+        task_store.update(
+            task_id,
+            status="success" if success else "failed",
+            output=output,
+            finished_at=_now_iso(),
+        )
+    finally:
+        _app_update_in_progress.discard(guest_id)
+
+    if not success:
+        raise HTTPException(status_code=502, detail=output or "App update command failed")
+
+    scheduler.trigger_guest_refresh(guest_id)
+    return {"success": True, "output": output}
+
+
+@router.post("/api/guests/{guest_id}/backup", dependencies=[Depends(_require_api_key)])
+async def backup_guest(
+    guest_id: str,
+    scheduler=Depends(_get_scheduler),
+    config_store=Depends(_get_config_store),
+    task_store=Depends(_get_task_store),
+) -> dict[str, str]:
+    """Trigger a vzdump backup via the Proxmox API. Returns UPID immediately."""
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="proxmon is not configured")
+    guest = scheduler.guests.get(guest_id)
+    if not guest:
+        raise HTTPException(status_code=404, detail=f"Guest {guest_id} not found")
+
+    data = config_store.load()
+    hosts: list[dict] = data.get("proxmox_hosts", [])
+    host_dict = next((h for h in hosts if h.get("id") == guest.host_id), None)
+    if not host_dict:
+        raise HTTPException(status_code=404, detail=f"Host config not found for {guest.host_id!r}")
+
+    host_config = ProxmoxHostConfig(**host_dict)
+    if not host_config.backup_storage:
+        raise HTTPException(status_code=400, detail="No backup storage configured for this host — set it in Settings")
+
+    host_settings = Settings(
+        proxmox_host=host_config.host,
+        proxmox_token_id=host_config.token_id,
+        proxmox_token_secret=host_config.token_secret,
+        proxmox_node=host_config.node,
+        verify_ssl=host_config.verify_ssl,
+    )
+    client = ProxmoxClient(host_settings)
+    vmid = guest_id.rsplit(":", 1)[-1]
+
+    task_id = str(uuid4())
+    task_store.create(TaskRecord(
+        id=task_id, guest_id=guest_id, guest_name=guest.name,
+        host_id=guest.host_id, action="backup",
+        status="pending", started_at=_now_iso(),
+    ))
+
+    try:
+        upid = await client.create_backup(vmid, host_config.backup_storage)
+        logger.info("Backup queued for guest %s -> %s", guest_id, upid)
+        task_store.update(task_id, status="running", detail=upid)
+        asyncio.create_task(_poll_upid(task_store, host_config, task_id, upid, f"Backed up to {host_config.backup_storage}"))
+        return {"status": "ok", "task": upid}
+    except httpx.HTTPStatusError as exc:
+        detail: str = exc.response.reason_phrase or f"Proxmox API error: {exc.response.status_code}"
+        try:
+            body_data = exc.response.json()
+            errors = body_data.get("errors") or body_data.get("message") or body_data.get("data")
+            if errors:
+                detail = str(errors)
+        except Exception:
+            if exc.response.text:
+                detail = exc.response.text.strip()
+        task_store.update(task_id, status="failed", detail=detail, finished_at=_now_iso())
+        status_code = 409 if exc.response.status_code == 500 else exc.response.status_code
+        raise HTTPException(status_code=status_code, detail=detail)
+    except Exception as exc:
+        task_store.update(task_id, status="failed", detail=str(exc), finished_at=_now_iso())
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/api/refresh", status_code=202, dependencies=[Depends(_require_api_key)])

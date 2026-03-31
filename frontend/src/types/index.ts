@@ -40,12 +40,27 @@ export interface Guest {
   pending_updates?: number | null;
   pending_update_packages?: string[] | null;
   reboot_required?: boolean | null;
+  has_community_script?: boolean | null;
 }
 
 /** @deprecated Use Guest instead */
 export type GuestSummary = Guest;
 /** @deprecated Use Guest instead */
 export type GuestDetail = Guest;
+
+export interface TaskRecord {
+  id: string;
+  guest_id: string;
+  guest_name: string;
+  host_id: string;
+  action: string;
+  status: 'pending' | 'running' | 'success' | 'failed';
+  started_at: string;
+  finished_at: string | null;
+  output: string | null;
+  detail: string | null;
+  batch_id?: string | null;
+}
 
 export interface HealthStatus {
   status: string;
@@ -94,6 +109,7 @@ export interface ProxmoxHost {
   ssh_password: string | null;
   ssh_key_path: string | null;
   pct_exec_enabled: boolean;
+  backup_storage: string | null;
 }
 
 export interface FullSettings {

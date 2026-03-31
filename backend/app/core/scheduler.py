@@ -102,6 +102,12 @@ class Scheduler:
             raw_vmid = guest_id.rsplit(":", 1)[-1]
             fresh = next((g for g in fresh_guests if str(g.id) == raw_vmid), None)
             guest_copy = existing.model_copy()
+            # Clear version fields so _check_version() re-runs detection from scratch.
+            # model_copy() preserves stale installed_version, which causes the CLI fallback
+            # (pct exec / SSH) to be skipped because its guard is `if not guest.installed_version`.
+            guest_copy.installed_version = None
+            guest_copy.version_detection_method = None
+            guest_copy.probe_error = None
             if fresh:
                 guest_copy.status = fresh.status
                 guest_copy.disk_used = fresh.disk_used

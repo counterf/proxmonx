@@ -33,6 +33,11 @@ def _get_config_store():
     raise RuntimeError("ConfigStore not initialized")
 
 
+def _get_task_store():
+    """Dependency placeholder -- overridden in main.py."""
+    raise RuntimeError("TaskStore not initialized")
+
+
 _api_key_header = APIKeyHeader(name="X-Api-Key", auto_error=False)
 
 

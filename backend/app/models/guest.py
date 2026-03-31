@@ -105,6 +105,7 @@ class GuestInfo(BaseModel):
     pending_updates: int | None = None
     pending_update_packages: list[str] | None = None
     reboot_required: bool | None = None
+    has_community_script: bool | None = None
     version_host: str | None = None  # override hostname/IP used for version probe and web URL
 
     @computed_field  # type: ignore[prop-decorator]

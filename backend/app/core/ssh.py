@@ -14,9 +14,9 @@ from app.config import Settings
 # Keys match the ostype field from `pct config` / Proxmox API.
 OS_UPDATE_COMMANDS: dict[str, str] = {
     "alpine":    "apk -U upgrade",
-    "debian":    "apt-get -qq update && apt-get -yq dist-upgrade",
-    "ubuntu":    "apt-get -qq update && apt-get -yq dist-upgrade",
-    "devuan":    "apt-get -qq update && apt-get -yq dist-upgrade",
+    "debian":    "DEBIAN_FRONTEND=noninteractive apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get -yq -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold dist-upgrade",
+    "ubuntu":    "DEBIAN_FRONTEND=noninteractive apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get -yq -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold dist-upgrade",
+    "devuan":    "DEBIAN_FRONTEND=noninteractive apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get -yq -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold dist-upgrade",
     "fedora":    "dnf -y update",
     "centos":    "dnf -y update",
     "archlinux": "pacman -Syyu --noconfirm",
@@ -313,6 +313,56 @@ class SSHClient:
             logger.warning("OS update exception on %s vmid %s: %s", ssh_host, vmid, exc)
             return False, str(exc)
 
+    async def run_app_update(
+        self,
+        proxmox_host: str,
+        vmid: str,
+        ssh_username: str | None = None,
+        ssh_key_path: str | None = None,
+        ssh_password: str | None = None,
+        timeout: int = 300,
+    ) -> tuple[bool, str]:
+        """Run the community-script updater inside an LXC container via pct exec.
+
+        Executes PHS_SILENT=1 /usr/bin/update. Returns (success, output).
+        """
+        if not self._enabled:
+            return False, "SSH not enabled"
+        if not vmid.isdigit():
+            return False, f"Invalid vmid: {vmid!r}"
+
+        ssh_host = _extract_ssh_host(proxmox_host)
+        pct_command = f'pct exec {vmid} -- sh -c "PHS_SILENT=1 /usr/bin/update"'
+        logger.info("App update on %s vmid %s", ssh_host, vmid)
+        try:
+            stdout, stderr, exit_code = await asyncio.to_thread(
+                self._execute_sync_with_exit_code,
+                ssh_host,
+                pct_command,
+                timeout,
+                username=ssh_username,
+                key_path=ssh_key_path,
+                password=ssh_password,
+            )
+            success = (exit_code == 0)
+            output = (stdout or "") + ("\n" + stderr if stderr else "")
+            output = output.strip()
+            tail = "\n".join(output.splitlines()[-10:]) if output else "(no output)"
+            if success:
+                logger.info(
+                    "App update on %s vmid %s: exit_code=%s\n%s",
+                    ssh_host, vmid, exit_code, tail,
+                )
+            else:
+                logger.warning(
+                    "App update FAILED on %s vmid %s: exit_code=%s\n%s",
+                    ssh_host, vmid, exit_code, tail,
+                )
+            return success, output
+        except Exception as exc:
+            logger.warning("App update exception on %s vmid %s: %s", ssh_host, vmid, exc)
+            return False, str(exc)
+
     async def run_pending_updates_list(
         self,
         proxmox_host: str,
@@ -404,6 +454,50 @@ class SSHClient:
             return None
         except Exception as exc:
             logger.debug("reboot-required check exception on %s vmid %s: %s", ssh_host, vmid, exc)
+            return None
+
+    async def run_community_script_check(
+        self,
+        proxmox_host: str,
+        vmid: str,
+        ssh_username: str | None = None,
+        ssh_key_path: str | None = None,
+        ssh_password: str | None = None,
+        timeout: int = 10,
+    ) -> bool | None:
+        """Check if /usr/bin/update exists inside an LXC container via pct exec.
+
+        Returns True (present), False (absent), None (check failed / SSH disabled).
+        """
+        if not self._enabled:
+            return None
+        if not vmid.isdigit():
+            return None
+
+        ssh_host = _extract_ssh_host(proxmox_host)
+        pct_command = f"pct exec {vmid} -- test -f /usr/bin/update"
+        logger.debug("community-script check on %s vmid %s", ssh_host, vmid)
+        try:
+            _stdout, _stderr, exit_code = await asyncio.to_thread(
+                self._execute_sync_with_exit_code,
+                ssh_host,
+                pct_command,
+                timeout,
+                username=ssh_username,
+                key_path=ssh_key_path,
+                password=ssh_password,
+            )
+            if exit_code == 0:
+                return True
+            if exit_code == 1:
+                return False
+            logger.debug(
+                "community-script check unexpected exit_code=%s on %s vmid %s",
+                exit_code, ssh_host, vmid,
+            )
+            return None
+        except Exception as exc:
+            logger.debug("community-script check exception on %s vmid %s: %s", ssh_host, vmid, exc)
             return None
 
     def _execute_sync_with_exit_code(

@@ -5,6 +5,9 @@ export const API_PATHS = {
   GUEST_ACTION: (id: string) => `/api/guests/${encodeURIComponent(id)}/action`,
   GUEST_REFRESH: (id: string) => `/api/guests/${encodeURIComponent(id)}/refresh`,
   GUEST_OS_UPDATE: (id: string) => `/api/guests/${encodeURIComponent(id)}/os-update`,
+  GUEST_APP_UPDATE: (id: string) => `/api/guests/${encodeURIComponent(id)}/app-update`,
+  GUEST_BACKUP: (id: string) => `/api/guests/${encodeURIComponent(id)}/backup`,
+  HOST_BACKUP_STORAGES: (hostId: string) => `/api/settings/hosts/${encodeURIComponent(hostId)}/backup-storages`,
   REFRESH: '/api/refresh',
   SETTINGS_FULL: '/api/settings/full',
   SETTINGS: '/api/settings',
@@ -20,4 +23,5 @@ export const API_PATHS = {
   AUTH_CHANGE_PASSWORD: '/api/auth/change-password',
   SETUP_STATUS: '/api/setup/status',
   HEALTH: '/health',
+  TASKS: '/api/tasks',
 } as const;

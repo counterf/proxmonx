@@ -219,6 +219,12 @@ class DiscoveryEngine:
                 if host_config:
                     await self._check_pending_updates(guest, host_config)
 
+                # Check community-script presence (once per session; preserved if already known)
+                if previous and previous.has_community_script is not None:
+                    guest.has_community_script = previous.has_community_script
+                elif host_config:
+                    await self._check_community_script(guest, host_config)
+
                 # Preserve version history from previous checks
                 if previous:
                     guest.version_history = list(previous.version_history)
@@ -455,6 +461,31 @@ class DiscoveryEngine:
             guest.pending_updates = len(packages)
         if reboot is not None:
             guest.reboot_required = reboot
+
+    async def _check_community_script(
+        self,
+        guest: GuestInfo,
+        host_config: ProxmoxHostConfig,
+    ) -> None:
+        """Check whether /usr/bin/update exists inside an LXC container.
+
+        Only runs for running LXCs with pct_exec_enabled. Sets guest.has_community_script.
+        """
+        if guest.type != "lxc" or guest.status != "running":
+            return
+        if not host_config.pct_exec_enabled:
+            return
+
+        vmid = guest.id.rsplit(":", 1)[-1]
+        result = await self._ssh.run_community_script_check(
+            proxmox_host=host_config.host,
+            vmid=vmid,
+            ssh_username=host_config.ssh_username,
+            ssh_key_path=host_config.ssh_key_path,
+            ssh_password=host_config.ssh_password,
+        )
+        if result is not None:
+            guest.has_community_script = result
 
     async def _check_version(
         self,

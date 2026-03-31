@@ -104,6 +104,7 @@ function initHostsFromSettings(s: FullSettings): ProxmoxHost[] {
       ssh_password: s.ssh_password,
       ssh_key_path: s.ssh_key_path,
       pct_exec_enabled: false,
+      backup_storage: null,
     }];
   }
   return [{
@@ -118,6 +119,7 @@ function initHostsFromSettings(s: FullSettings): ProxmoxHost[] {
     ssh_password: null,
     ssh_key_path: null,
     pct_exec_enabled: false,
+    backup_storage: null,
   }];
 }
 

@@ -141,6 +141,36 @@ class ProxmoxClient:
             logger.exception("Failed to parse guest: %s", raw)
             return None
 
+    async def create_backup(
+        self,
+        vmid: str,
+        storage: str,
+        compress: str = "zstd",
+        mode: str = "snapshot",
+    ) -> str:
+        """Trigger a vzdump backup via Proxmox API. Returns UPID."""
+        result = await self._post(f"/nodes/{self._node}/vzdump", {
+            "vmid": vmid,
+            "storage": storage,
+            "compress": compress,
+            "mode": mode,
+        })
+        return str(result.get("data", ""))
+
+    async def get_task_status(self, upid: str) -> dict:
+        """Poll a Proxmox task by UPID. Returns data dict with 'status' and 'exitstatus'."""
+        result = await self._get(f"/nodes/{self._node}/tasks/{upid}/status")
+        data = result.get("data", {})
+        return data if isinstance(data, dict) else {}
+
+    async def list_backup_storages(self) -> list[dict]:
+        """Return storages on this node that support backup content."""
+        result = await self._get(f"/nodes/{self._node}/storage?content=backup")
+        raw = result.get("data", [])
+        if not isinstance(raw, list):
+            return []
+        return [{"storage": s.get("storage"), "type": s.get("type"), "avail": s.get("avail")} for s in raw if s.get("storage")]
+
     async def get_guest_network(self, vmid: str, guest_type: str) -> tuple[str | None, str | None]:
         """Resolve a guest's IP address and OS type from the Proxmox API.
 

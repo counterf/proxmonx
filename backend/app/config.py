@@ -76,6 +76,7 @@ class ProxmoxHostConfig(BaseModel):
     ssh_password: str | None = None
     ssh_key_path: str | None = None
     pct_exec_enabled: bool = False
+    backup_storage: str | None = None  # Proxmox storage ID for vzdump backups
 
 
 class Settings(BaseSettings):

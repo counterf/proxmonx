@@ -13,6 +13,7 @@ from app.api.routes.guests import GuestConfigSaveRequest  # noqa: F401
 from app.api.helpers import _AppConfigBase  # noqa: F401
 from app.api.routes.settings import router as settings_router  # noqa: F401
 from app.api.routes.custom_apps import router as custom_apps_router  # noqa: F401
+from app.api.routes.tasks import router as tasks_router  # noqa: F401
 
 # Re-export _keep_or_replace for tests
 from app.api.helpers import _keep_or_replace  # noqa: F401
@@ -24,3 +25,4 @@ router = APIRouter()
 router.include_router(guests_router)
 router.include_router(settings_router)
 router.include_router(custom_apps_router)
+router.include_router(tasks_router)
