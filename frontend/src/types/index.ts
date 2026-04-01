@@ -62,6 +62,27 @@ export interface TaskRecord {
   batch_id?: string | null;
 }
 
+export interface BulkJobResult {
+  status: 'pending' | 'running' | 'success' | 'failed' | 'skipped';
+  task_id: string | null;
+  error: string | null;
+}
+
+export interface BulkJob {
+  id: string;
+  action: 'os_update' | 'app_update';
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  guest_ids: string[];
+  results: Record<string, BulkJobResult>;
+  total: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
 export interface HealthStatus {
   status: string;
   configured?: boolean;

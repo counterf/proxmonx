@@ -527,11 +527,18 @@ class DiscoveryEngine:
         probe_path = getattr(detector, '_path', '')
         guest.probe_url = f"{scheme}://{probe_host}:{effective_port}{probe_path}"
         guest.probe_error = None
+        # Track TrueNAS latest version from the same probe (avoids race on singleton)
+        _truenas_latest: str | None = None
         try:
-            guest.installed_version = await detector.get_installed_version(
+            result = await detector.get_installed_version(
                 probe_host, port=port_override, api_key=api_key, scheme=scheme,
                 http_client=self._http_client,
             )
+            # TrueNAS returns (installed, latest) tuple; others return str|None
+            if isinstance(result, tuple):
+                guest.installed_version, _truenas_latest = result
+            else:
+                guest.installed_version = result
             if guest.installed_version:
                 guest.version_detection_method = "http"
         except ProbeError as exc:
@@ -567,8 +574,8 @@ class DiscoveryEngine:
                     ssh_username, ssh_key_path, ssh_password,
                 )
 
-        # Get latest version: try detector's custom source first, then GitHub
-        custom_latest = await detector.get_latest_version(http_client=self._http_client)
+        # Get latest version: use TrueNAS probe result if available, then custom, then GitHub
+        custom_latest = _truenas_latest or await detector.get_latest_version(http_client=self._http_client)
         if custom_latest:
             guest.latest_version = custom_latest
             guest.latest_version_source = "custom"

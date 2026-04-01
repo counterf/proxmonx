@@ -12,6 +12,7 @@ import type {
   CustomAppDef,
   GitHubTestResult,
   TaskRecord,
+  BulkJob,
 } from '../types';
 import { API_PATHS } from './paths';
 
@@ -267,4 +268,19 @@ export async function fetchTasks(): Promise<TaskRecord[]> {
 
 export async function clearTasks(): Promise<{ status: string }> {
   return fetchJson<{ status: string }>(API_PATHS.TASKS, { method: 'DELETE' });
+}
+
+export async function startBulkJob(
+  action: 'os_update' | 'app_update',
+  guestIds: string[],
+): Promise<{ job_id: string; status: string }> {
+  return fetchJson(API_PATHS.BULK_JOBS, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, guest_ids: guestIds }),
+  });
+}
+
+export async function fetchBulkJob(jobId: string): Promise<BulkJob> {
+  return fetchJson<BulkJob>(API_PATHS.BULK_JOB(jobId));
 }

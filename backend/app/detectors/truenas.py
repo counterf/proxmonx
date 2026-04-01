@@ -30,10 +30,6 @@ class TrueNASDetector(BaseDetector):
     docker_images: list[str] = []
     accepts_api_key = True
 
-    def __init__(self) -> None:
-        super().__init__()
-        self._cached_latest: str | None = None
-
     async def get_installed_version(
         self,
         host: str,
@@ -41,7 +37,7 @@ class TrueNASDetector(BaseDetector):
         api_key: str | None = None,
         scheme: str = "https",
         http_client=None,
-    ) -> str | None:
+    ) -> tuple[str, str | None]:
         port = port or self.default_port
         # wss:// for https (default), ws:// for http
         ws_scheme = "wss" if scheme in ("https", "wss") else "ws"
@@ -116,19 +112,19 @@ class TrueNASDetector(BaseDetector):
                         result = upd_resp.get("result", {})
                         new_ver = (result.get("status") or {}).get("new_version") or {}
                         latest = new_ver.get("version")
-                        self._cached_latest = latest or str(installed)
+                        cached_latest = latest or str(installed)
                         if latest and latest != str(installed):
                             logger.info("TrueNAS update available on %s: %s → %s", host, installed, latest)
                         else:
                             logger.info("TrueNAS probe OK: %s installed=%s up-to-date", host, installed)
                     else:
-                        self._cached_latest = str(installed)
+                        cached_latest = str(installed)
                         logger.warning("TrueNAS update.status error on %s: %s", host, upd_resp.get("error"))
                 except Exception as exc:
-                    self._cached_latest = str(installed)
+                    cached_latest = str(installed)
                     logger.warning("TrueNAS update.status failed on %s: %s", host, exc)
 
-                return str(installed)
+                return str(installed), cached_latest
 
         except ProbeError:
             raise
@@ -136,5 +132,7 @@ class TrueNASDetector(BaseDetector):
             raise ProbeError(f"WebSocket connection failed: {exc}") from exc
 
     async def get_latest_version(self, http_client=None) -> str | None:
-        """Return the version cached by get_installed_version (from update.status)."""
-        return self._cached_latest
+        """TrueNAS latest version is returned as the second element of the tuple
+        from get_installed_version(). This method should not be called directly
+        for TrueNAS guests; discovery.py handles the tuple unpacking."""
+        return None

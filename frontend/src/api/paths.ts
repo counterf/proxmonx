@@ -25,4 +25,6 @@ export const API_PATHS = {
   HEALTH: '/health',
   TASKS: '/api/tasks',
   TASK: (id: string) => `/api/tasks/${encodeURIComponent(id)}`,
+  BULK_JOBS: '/api/bulk-jobs',
+  BULK_JOB: (id: string) => `/api/bulk-jobs/${encodeURIComponent(id)}`,
 } as const;

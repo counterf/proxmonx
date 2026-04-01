@@ -1,4 +1,5 @@
 import type { GuestSummary } from '../types';
+import { isEligible } from './BulkProgressModal';
 
 interface Props {
   selectionSize: number;
@@ -9,8 +10,8 @@ interface Props {
 }
 
 export default function BulkActionBar({ selectionSize, selectedGuests, onOsUpdate, onAppUpdate, onClear }: Props) {
-  const osEligible = selectedGuests.filter(g => g.type === 'lxc' && g.status === 'running').length;
-  const appEligible = selectedGuests.filter(g => g.type === 'lxc' && g.status === 'running' && g.has_community_script === true).length;
+  const osEligible = selectedGuests.filter(g => isEligible(g, 'os_update')).length;
+  const appEligible = selectedGuests.filter(g => isEligible(g, 'app_update')).length;
   const osSkipped = selectionSize - osEligible;
   const appSkipped = selectionSize - appEligible;
 

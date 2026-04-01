@@ -281,17 +281,17 @@ export default function Tasks() {
   };
 
   const groups = useMemo((): TaskGroup[] => {
+    const batchMap = new Map<string, TaskGroup>();
     const result: TaskGroup[] = [];
     for (const task of tasks) {
       if (!task.batch_id) {
         result.push({ type: 'single', task });
+      } else if (batchMap.has(task.batch_id)) {
+        batchMap.get(task.batch_id)!.tasks.push(task);
       } else {
-        const last = result[result.length - 1];
-        if (last && last.type === 'batch' && last.batchId === task.batch_id) {
-          last.tasks.push(task);
-        } else {
-          result.push({ type: 'batch', batchId: task.batch_id, tasks: [task] });
-        }
+        const group: TaskGroup = { type: 'batch', batchId: task.batch_id, tasks: [task] };
+        batchMap.set(task.batch_id, group);
+        result.push(group);
       }
     }
     return result;
