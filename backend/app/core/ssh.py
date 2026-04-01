@@ -23,18 +23,18 @@ OS_UPDATE_COMMANDS: dict[str, str] = {
     "opensuse":  "zypper ref && zypper --non-interactive dup",
 }
 
-# Commands that LIST pending updates (one package name/line) from local package cache only.
-# No network I/O inside the container.
-# Use cut instead of awk to avoid $-expansion in double-quoted sh -c contexts.
+# Commands that refresh the package index then list pending upgrades (one package name per line).
+# apt/apk/zypper entries perform a quiet network refresh first; dnf and pacman read local cache only.
+# If the refresh fails the list command is skipped (&&), so callers receive None rather than stale data.
 OS_PENDING_UPDATES_LIST_COMMANDS: dict[str, str] = {
-    "alpine":    "apk list --upgradable 2>/dev/null | grep upgradable | cut -d' ' -f1",
-    "debian":    "apt list --upgradable 2>/dev/null | grep upgradable | cut -d/ -f1",
-    "ubuntu":    "apt list --upgradable 2>/dev/null | grep upgradable | cut -d/ -f1",
-    "devuan":    "apt list --upgradable 2>/dev/null | grep upgradable | cut -d/ -f1",
+    "alpine":    "apk update -q 2>/dev/null && apk list --upgradable 2>/dev/null | grep upgradable | cut -d' ' -f1",
+    "debian":    "apt-get update -qq 2>/dev/null && apt list --upgradable 2>/dev/null | grep upgradable | cut -d/ -f1",
+    "ubuntu":    "apt-get update -qq 2>/dev/null && apt list --upgradable 2>/dev/null | grep upgradable | cut -d/ -f1",
+    "devuan":    "apt-get update -qq 2>/dev/null && apt list --upgradable 2>/dev/null | grep upgradable | cut -d/ -f1",
     "fedora":    "dnf list updates -q 2>/dev/null | grep -v ^Updated | grep -v ^$ | cut -d. -f1",
     "centos":    "dnf list updates -q 2>/dev/null | grep -v ^Updated | grep -v ^$ | cut -d. -f1",
     "archlinux": "pacman -Qu 2>/dev/null | cut -d' ' -f1",
-    "opensuse":  "zypper list-updates 2>/dev/null | grep ^v | cut -d'|' -f3 | tr -d ' '",
+    "opensuse":  "zypper refresh -q 2>/dev/null && zypper list-updates 2>/dev/null | grep ^v | cut -d'|' -f3 | tr -d ' '",
 }
 
 
@@ -293,6 +293,7 @@ class SSHClient:
                 username=ssh_username,
                 key_path=ssh_key_path,
                 password=ssh_password,
+                capture_exit_code=True,
             )
             success = (exit_code == 0)
             output = (stdout or "") + ("\n" + stderr if stderr else "")
@@ -345,6 +346,7 @@ class SSHClient:
                 username=ssh_username,
                 key_path=ssh_key_path,
                 password=ssh_password,
+                capture_exit_code=True,
             )
             success = (exit_code == 0)
             output = (stdout or "") + ("\n" + stderr if stderr else "")
@@ -373,12 +375,14 @@ class SSHClient:
         ssh_username: str | None = None,
         ssh_key_path: str | None = None,
         ssh_password: str | None = None,
-        timeout: int = 30,
+        timeout: int = 90,
     ) -> list[str] | None:
         """List pending OS package updates in an LXC container via pct exec.
 
-        Reads the local package cache only — does not run apt update / dnf update.
-        Returns a list of package names, empty list if up-to-date, or None on failure.
+        Refreshes the package index (apt-get update / apk update / zypper refresh)
+        before listing, so results reflect current repo state. Performs network I/O
+        inside the container. Returns a list of package names, empty list if
+        up-to-date, or None on failure (including refresh failure).
         """
         if not self._enabled:
             return None
@@ -401,6 +405,7 @@ class SSHClient:
                 username=ssh_username,
                 key_path=ssh_key_path,
                 password=ssh_password,
+                capture_exit_code=True,
             )
             # grep exits 1 when no matches (0 packages) — still valid
             if exit_code not in (0, 1):
@@ -445,6 +450,7 @@ class SSHClient:
                 username=ssh_username,
                 key_path=ssh_key_path,
                 password=ssh_password,
+                capture_exit_code=True,
             )
             if exit_code == 0:
                 return True
@@ -489,6 +495,7 @@ class SSHClient:
                 username=ssh_username,
                 key_path=ssh_key_path,
                 password=ssh_password,
+                capture_exit_code=True,
             )
             if exit_code == 0:
                 return True

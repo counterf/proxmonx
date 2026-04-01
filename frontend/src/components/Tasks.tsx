@@ -223,7 +223,7 @@ function BatchGroupCard({ group }: { group: TaskGroupBatch }) {
 
 type TaskGroup =
   | { type: 'single'; task: TaskRecord }
-  | { type: 'batch'; batchId: string; tasks: TaskRecord[] };
+  | TaskGroupBatch;
 
 // --- Main component ---
 
@@ -281,7 +281,7 @@ export default function Tasks() {
   };
 
   const groups = useMemo((): TaskGroup[] => {
-    const batchMap = new Map<string, TaskGroup>();
+    const batchMap = new Map<string, TaskGroupBatch>();
     const result: TaskGroup[] = [];
     for (const task of tasks) {
       if (!task.batch_id) {
@@ -289,7 +289,7 @@ export default function Tasks() {
       } else if (batchMap.has(task.batch_id)) {
         batchMap.get(task.batch_id)!.tasks.push(task);
       } else {
-        const group: TaskGroup = { type: 'batch', batchId: task.batch_id, tasks: [task] };
+        const group: TaskGroupBatch = { type: 'batch', batchId: task.batch_id, tasks: [task] };
         batchMap.set(task.batch_id, group);
         result.push(group);
       }
