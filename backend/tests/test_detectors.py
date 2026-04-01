@@ -276,7 +276,7 @@ class TestInstalledVersion:
         d = DETECTOR_MAP["jackett"]
         version = await d.get_installed_version("10.0.0.19", api_key="jk-secret")
         assert version == "0.22.1423"
-        assert "apikey=jk-secret" in str(route.calls[0].request.url)
+        assert route.calls[0].request.headers["X-Api-Key"] == "jk-secret"
 
     @pytest.mark.asyncio
     async def test_jackett_no_api_key_returns_none(self) -> None:
@@ -390,13 +390,13 @@ class TestApiKeySupport:
     @respx.mock
     @pytest.mark.asyncio
     async def test_sabnzbd_with_api_key(self) -> None:
-        route = respx.get("http://10.0.0.7:8085/api?mode=version&output=json&apikey=sab-key").mock(
+        route = respx.get("http://10.0.0.7:8085/api?mode=version&output=json").mock(
             return_value=httpx.Response(200, json={"version": "4.2.1"})
         )
         d = DETECTOR_MAP["sabnzbd"]
         version = await d.get_installed_version("10.0.0.7", api_key="sab-key")
         assert version == "4.2.1"
-        assert "apikey=sab-key" in str(route.calls[0].request.url)
+        assert route.calls[0].request.headers["X-Api-Key"] == "sab-key"
 
     @respx.mock
     @pytest.mark.asyncio

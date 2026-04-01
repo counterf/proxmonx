@@ -100,6 +100,15 @@ class TaskStore:
             ).fetchone()
         return TaskRecord(**dict(row)) if row else None
 
+    def list_running_for_guest(self, guest_id: str, action: str) -> list[TaskRecord]:
+        """Return all tasks with status='running' for a given guest and action."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM task_history WHERE guest_id = ? AND action = ? AND status = 'running'",
+                (guest_id, action),
+            ).fetchall()
+        return [TaskRecord(**dict(row)) for row in rows]
+
     def clear(self) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM task_history")

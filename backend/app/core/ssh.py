@@ -281,11 +281,12 @@ class SSHClient:
 
         ssh_host = _extract_ssh_host(proxmox_host)
         # Wrap in sh -c so && is interpreted inside the container, not by the Proxmox host shell
-        pct_command = f'pct exec {vmid} -- sh -c "{inner_cmd}"'
+        escaped = inner_cmd.replace("'", "'\\''")
+        pct_command = f"pct exec {vmid} -- sh -c '{escaped}'"
         logger.info("OS update on %s vmid %s (ostype=%s)", ssh_host, vmid, os_type)
         try:
             stdout, stderr, exit_code = await asyncio.to_thread(
-                self._execute_sync_with_exit_code,
+                self._execute_sync,
                 ssh_host,
                 pct_command,
                 timeout,
@@ -332,11 +333,12 @@ class SSHClient:
             return False, f"Invalid vmid: {vmid!r}"
 
         ssh_host = _extract_ssh_host(proxmox_host)
-        pct_command = f'pct exec {vmid} -- sh -c "PHS_SILENT=1 /usr/bin/update"'
+        escaped = "PHS_SILENT=1 /usr/bin/update".replace("'", "'\\''")
+        pct_command = f"pct exec {vmid} -- sh -c '{escaped}'"
         logger.info("App update on %s vmid %s", ssh_host, vmid)
         try:
             stdout, stderr, exit_code = await asyncio.to_thread(
-                self._execute_sync_with_exit_code,
+                self._execute_sync,
                 ssh_host,
                 pct_command,
                 timeout,
@@ -387,11 +389,12 @@ class SSHClient:
             return None
 
         ssh_host = _extract_ssh_host(proxmox_host)
-        pct_command = f'pct exec {vmid} -- sh -c "{check_cmd}"'
+        escaped = check_cmd.replace("'", "'\\''")
+        pct_command = f"pct exec {vmid} -- sh -c '{escaped}'"
         logger.debug("pending updates list on %s vmid %s (ostype=%s)", ssh_host, vmid, os_type)
         try:
             stdout, _stderr, exit_code = await asyncio.to_thread(
-                self._execute_sync_with_exit_code,
+                self._execute_sync,
                 ssh_host,
                 pct_command,
                 timeout,
@@ -435,7 +438,7 @@ class SSHClient:
         logger.debug("reboot-required check on %s vmid %s", ssh_host, vmid)
         try:
             _stdout, _stderr, exit_code = await asyncio.to_thread(
-                self._execute_sync_with_exit_code,
+                self._execute_sync,
                 ssh_host,
                 pct_command,
                 timeout,
@@ -479,7 +482,7 @@ class SSHClient:
         logger.debug("community-script check on %s vmid %s", ssh_host, vmid)
         try:
             _stdout, _stderr, exit_code = await asyncio.to_thread(
-                self._execute_sync_with_exit_code,
+                self._execute_sync,
                 ssh_host,
                 pct_command,
                 timeout,
@@ -500,7 +503,7 @@ class SSHClient:
             logger.debug("community-script check exception on %s vmid %s: %s", ssh_host, vmid, exc)
             return None
 
-    def _execute_sync_with_exit_code(
+    def _execute_sync(
         self,
         host: str,
         command: str,
@@ -508,11 +511,13 @@ class SSHClient:
         username: str | None = None,
         key_path: str | None = None,
         password: str | None = None,
-    ) -> tuple[str, str, int]:
-        """Blocking SSH execution. Returns (stdout, stderr, exit_code).
+        capture_exit_code: bool = False,
+    ) -> tuple[str, str] | tuple[str, str, int]:
+        """Blocking SSH execution (run in thread).
 
+        Returns (stdout, stderr) when capture_exit_code is False.
+        Returns (stdout, stderr, exit_code) when capture_exit_code is True.
         exit_code is -1 if the connection could not be established.
-        Must call recv_exit_status() after reading stdout/stderr (paramiko requirement).
         """
         effective_username = username or self._username
         effective_key_path = key_path or self._key_path
@@ -535,58 +540,21 @@ class SSHClient:
             elif effective_password:
                 connect_kwargs["password"] = effective_password
             else:
-                return "", "no credentials configured", -1
+                if capture_exit_code:
+                    return "", "no credentials configured", -1
+                return "", "no credentials configured"
 
             client.connect(**connect_kwargs)  # type: ignore[arg-type]
             _, stdout_ch, stderr_ch = client.exec_command(command, timeout=timeout)
             out = stdout_ch.read().decode("utf-8", errors="replace").strip()
             err = stderr_ch.read().decode("utf-8", errors="replace").strip()
-            exit_code = stdout_ch.channel.recv_exit_status()
-            return out, err, exit_code
-        except Exception as exc:
-            return "", str(exc), -1
-        finally:
-            client.close()
-
-    def _execute_sync(
-        self,
-        host: str,
-        command: str,
-        timeout: int,
-        username: str | None = None,
-        key_path: str | None = None,
-        password: str | None = None,
-    ) -> tuple[str, str]:
-        """Blocking SSH execution (run in thread). Returns (stdout, stderr)."""
-        effective_username = username or self._username
-        effective_key_path = key_path or self._key_path
-        effective_password = password or self._password
-
-        client = paramiko.SSHClient()
-        if self._known_hosts_path and Path(self._known_hosts_path).is_file():
-            client.load_host_keys(self._known_hosts_path)
-            client.set_missing_host_key_policy(paramiko.RejectPolicy())
-        else:
-            client.set_missing_host_key_policy(paramiko.WarningPolicy())
-        try:
-            connect_kwargs: dict[str, str | int | Path | None] = {
-                "hostname": host,
-                "username": effective_username,
-                "timeout": timeout,
-            }
-            if effective_key_path:
-                connect_kwargs["key_filename"] = effective_key_path
-            elif effective_password:
-                connect_kwargs["password"] = effective_password
-            else:
-                return "", "no credentials configured"
-
-            client.connect(**connect_kwargs)  # type: ignore[arg-type]
-            _, stdout, stderr = client.exec_command(command, timeout=timeout)
-            out = stdout.read().decode("utf-8", errors="replace").strip()
-            err = stderr.read().decode("utf-8", errors="replace").strip()
+            if capture_exit_code:
+                exit_code = stdout_ch.channel.recv_exit_status()
+                return out, err, exit_code
             return out, err
         except Exception as exc:
+            if capture_exit_code:
+                return "", str(exc), -1
             return "", str(exc)
         finally:
             client.close()

@@ -363,6 +363,8 @@ async def os_update_guest(
     if not host_config.pct_exec_enabled:
         raise HTTPException(status_code=400, detail="pct exec is not enabled for this host — enable it in Settings")
 
+    if task_store.list_running_for_guest(guest_id, "os_update"):
+        raise HTTPException(status_code=409, detail="An OS update is already running for this guest")
     if guest_id in _os_update_in_progress:
         raise HTTPException(status_code=409, detail="An OS update is already in progress for this guest")
     _os_update_in_progress.add(guest_id)
@@ -457,6 +459,8 @@ async def app_update_guest(
     if not host_config.pct_exec_enabled:
         raise HTTPException(status_code=400, detail="pct exec is not enabled for this host — enable it in Settings")
 
+    if task_store.list_running_for_guest(guest_id, "app_update"):
+        raise HTTPException(status_code=409, detail="An app update is already running for this guest")
     if guest_id in _app_update_in_progress:
         raise HTTPException(status_code=409, detail="An app update is already in progress for this guest")
     _app_update_in_progress.add(guest_id)

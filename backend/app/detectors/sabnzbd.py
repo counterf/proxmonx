@@ -25,12 +25,13 @@ class SABnzbdDetector(BaseDetector):
     ) -> str | None:
         port = port or self.default_port
         url = f"{scheme}://{host}:{port}/api?mode=version&output=json"
+        headers: dict[str, str] = {}
         if api_key:
-            url += f"&apikey={api_key}"
+            headers["X-Api-Key"] = api_key
         try:
             resp = await self._http_get(
                 url,
-                headers={},
+                headers=headers,
                 http_client=http_client,
             )
             if resp.status_code == 200:
