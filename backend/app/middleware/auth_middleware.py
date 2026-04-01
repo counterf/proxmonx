@@ -92,7 +92,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
 
         data = config_store.load_auth()
-        auth_mode = data.get("auth_mode", "forms")
+        auth_mode = data.get("auth_mode", "disabled")
 
         # 4. Auth disabled -> pass through
         if auth_mode == "disabled":

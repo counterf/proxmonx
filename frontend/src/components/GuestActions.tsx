@@ -1,7 +1,23 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import type { GuestSummary } from '../types';
-import { guestAction, refreshGuest, osUpdateGuest, appUpdateGuest, backupGuest } from '../api/client';
+import type { GuestSummary, TaskRecord } from '../types';
+import { guestAction, refreshGuest, osUpdateGuest, appUpdateGuest, backupGuest, fetchTask } from '../api/client';
+
+async function pollTask(
+  taskId: string,
+  onUpdate?: (r: TaskRecord) => void,
+): Promise<TaskRecord> {
+  const MAX_MS = 10 * 60 * 1000;
+  const INTERVAL_MS = 5_000;
+  const deadline = Date.now() + MAX_MS;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, INTERVAL_MS));
+    const record = await fetchTask(taskId);
+    onUpdate?.(record);
+    if (record.status === 'success' || record.status === 'failed') return record;
+  }
+  throw new Error('Update timed out after 10 minutes');
+}
 
 type ActionKey = 'start' | 'stop' | 'shutdown' | 'restart' | 'snapshot' | 'refresh' | 'os_update' | 'app_update' | 'backup';
 
@@ -45,25 +61,37 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
     try {
       if (action === 'refresh') {
         await refreshGuest(guest.id);
+        setResult({ ok: true, msg: 'Refresh started' });
+        onActionComplete?.();
       } else if (action === 'os_update') {
-        await osUpdateGuest(guest.id);
+        const { task_id } = await osUpdateGuest(guest.id);
+        setResult({ ok: true, msg: 'Update running...' });
+        const record = await pollTask(task_id);
+        setResult({
+          ok: record.status === 'success',
+          msg: record.status === 'success' ? 'Update complete' : (record.detail ?? 'Update failed'),
+        });
+        setTimeout(() => onActionComplete?.(), 2000);
       } else if (action === 'app_update') {
-        await appUpdateGuest(guest.id);
+        const { task_id } = await appUpdateGuest(guest.id);
+        setResult({ ok: true, msg: 'Update running...' });
+        const record = await pollTask(task_id);
+        setResult({
+          ok: record.status === 'success',
+          msg: record.status === 'success' ? 'App update complete' : (record.detail ?? 'App update failed'),
+        });
+        setTimeout(() => onActionComplete?.(), 2000);
       } else if (action === 'backup') {
         await backupGuest(guest.id);
+        setResult({ ok: true, msg: 'Task queued: backup' });
+        onActionComplete?.();
       } else {
         await guestAction(guest.id, action, snapName || undefined);
-      }
-      const labels: Record<ActionKey, string> = {
-        start: 'Task queued: start', stop: 'Task queued: stop', shutdown: 'Task queued: shutdown',
-        restart: 'Task queued: restart', snapshot: 'Task queued: snapshot',
-        refresh: 'Refresh started', os_update: 'Update complete', app_update: 'App update ran — check output', backup: 'Task queued: backup',
-      };
-      setResult({ ok: true, msg: labels[action] });
-      if (action === 'os_update' || action === 'app_update') {
-        // Delay re-fetch to give the backend refresh pipeline time to complete
-        setTimeout(() => onActionComplete?.(), 4000);
-      } else {
+        const labels: Record<string, string> = {
+          start: 'Task queued: start', stop: 'Task queued: stop', shutdown: 'Task queued: shutdown',
+          restart: 'Task queued: restart', snapshot: 'Task queued: snapshot',
+        };
+        setResult({ ok: true, msg: labels[action] ?? 'Done' });
         onActionComplete?.();
       }
     } catch (err) {

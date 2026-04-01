@@ -1,6 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
-import type { GuestSummary } from '../types';
-import { osUpdateGuest, appUpdateGuest } from '../api/client';
+import type { GuestSummary, TaskRecord } from '../types';
+import { osUpdateGuest, appUpdateGuest, fetchTask } from '../api/client';
+
+async function pollTask(
+  taskId: string,
+  onUpdate?: (r: TaskRecord) => void,
+): Promise<TaskRecord> {
+  const MAX_MS = 10 * 60 * 1000;
+  const INTERVAL_MS = 5_000;
+  const deadline = Date.now() + MAX_MS;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, INTERVAL_MS));
+    const record = await fetchTask(taskId);
+    onUpdate?.(record);
+    if (record.status === 'success' || record.status === 'failed') return record;
+  }
+  throw new Error('Update timed out after 10 minutes');
+}
 
 type OpStatus = 'queued' | 'running' | 'done' | 'failed' | 'skipped';
 
@@ -42,12 +58,13 @@ export default function BulkProgressModal({ action, guests, onClose }: Props) {
         if (op.status === 'skipped') continue;
         setOps(prev => prev.map((o, idx) => idx === i ? { ...o, status: 'running' } : o));
         try {
-          if (action === 'os_update') {
-            await osUpdateGuest(op.guest.id, batchId.current);
-          } else {
-            await appUpdateGuest(op.guest.id, batchId.current);
-          }
-          if (!cancelled) setOps(prev => prev.map((o, idx) => idx === i ? { ...o, status: 'done' } : o));
+          const { task_id } = action === 'os_update'
+            ? await osUpdateGuest(op.guest.id, batchId.current)
+            : await appUpdateGuest(op.guest.id, batchId.current);
+          const record = await pollTask(task_id);
+          if (!cancelled) setOps(prev => prev.map((o, idx) =>
+            idx === i ? { ...o, status: record.status === 'success' ? 'done' : 'failed', error: record.status !== 'success' ? (record.detail ?? 'Failed') : undefined } : o
+          ));
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Failed';
           if (!cancelled) setOps(prev => prev.map((o, idx) => idx === i ? { ...o, status: 'failed', error: msg } : o));

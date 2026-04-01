@@ -135,7 +135,7 @@ class Settings(BaseSettings):
     custom_app_defs: list[CustomAppDef] = []
 
     # Authentication
-    auth_mode: str = "forms"  # "disabled" | "forms"
+    auth_mode: str = "disabled"  # "disabled" | "forms"
     auth_username: str = "root"
     # auth_password_hash is stored in the DB JSON blob only — never on Settings,
     # to prevent accidental serialization of the hash.

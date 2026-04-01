@@ -330,14 +330,19 @@ def _apply_auth_settings(
     if body.auth_mode is not None:
         config_data["auth_mode"] = body.auth_mode
     else:
-        config_data["auth_mode"] = existing.get("auth_mode", "forms")
+        config_data["auth_mode"] = existing.get("auth_mode", "disabled")
     if body.auth_username is not None:
         config_data["auth_username"] = body.auth_username
     else:
         config_data["auth_username"] = existing.get("auth_username", "root")
     # Password hash: set from new_password when provided, otherwise preserve existing.
     existing_hash = existing.get("auth_password_hash", "")
-    target_auth_mode = config_data.get("auth_mode", "forms")
+    target_auth_mode = config_data.get("auth_mode", "disabled")
+    if target_auth_mode == "forms" and not existing_hash and not body.new_password:
+        raise HTTPException(
+            status_code=422,
+            detail="Cannot enable forms auth without setting a password",
+        )
     if target_auth_mode == "forms" and body.new_password:
         config_data["auth_password_hash"] = hash_password(body.new_password)
     elif existing_hash:

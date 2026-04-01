@@ -24,4 +24,5 @@ export const API_PATHS = {
   SETUP_STATUS: '/api/setup/status',
   HEALTH: '/health',
   TASKS: '/api/tasks',
+  TASK: (id: string) => `/api/tasks/${encodeURIComponent(id)}`,
 } as const;

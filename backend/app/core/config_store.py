@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS settings (
     github_token                 TEXT,
     log_level                    TEXT     DEFAULT 'info',
     version_detect_method        TEXT     DEFAULT 'pct_first',
-    auth_mode                    TEXT     DEFAULT 'forms',
+    auth_mode                    TEXT     DEFAULT 'disabled',
     auth_username                TEXT     DEFAULT 'root',
     auth_password_hash           TEXT,
     notifications_enabled        INTEGER  DEFAULT 0,

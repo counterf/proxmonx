@@ -17,7 +17,7 @@ from app.api.helpers import _get_task_store
 from app.core.task_store import TaskStore
 from app.config import Settings
 from app.core.alerting import AlertManager
-from app.core.auth import hash_password
+
 from app.core.config_store import ConfigStore
 from app.core.discovery import DiscoveryEngine
 from app.core.github import GitHubClient
@@ -91,15 +91,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Session store for auth (same DB file)
     session_store = SessionStore(db_path)
     app.state.session_store = session_store
-
-    # Bootstrap default password if auth enabled and no hash set.
-    _boot_data = config_store.load()
-    if _boot_data.get("auth_mode", "forms") == "forms" and not _boot_data.get("auth_password_hash", ""):
-        _boot_data["auth_password_hash"] = hash_password("proxmon!")
-        config_store.save(_boot_data)
-        settings = config_store.merge_into_settings(Settings())
-        _settings = settings
-        app.state.settings = settings
 
     # Load custom app detectors from persisted definitions
     from app.detectors.registry import load_custom_detectors

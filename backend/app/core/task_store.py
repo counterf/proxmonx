@@ -93,6 +93,13 @@ class TaskStore:
             ).fetchall()
         return [TaskRecord(**dict(row)) for row in rows]
 
+    def get(self, task_id: str) -> TaskRecord | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM task_history WHERE id = ?", (task_id,)
+            ).fetchone()
+        return TaskRecord(**dict(row)) if row else None
+
     def clear(self) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM task_history")

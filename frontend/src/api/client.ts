@@ -141,10 +141,14 @@ export async function refreshGuest(guestId: string): Promise<{ status: string }>
   return fetchJson<{ status: string }>(API_PATHS.GUEST_REFRESH(guestId), { method: 'POST' });
 }
 
+export async function fetchTask(taskId: string): Promise<TaskRecord> {
+  return fetchJson<TaskRecord>(API_PATHS.TASK(taskId));
+}
+
 export async function osUpdateGuest(
   guestId: string,
   batchId?: string,
-): Promise<{ success: boolean; output: string; os_type: string }> {
+): Promise<{ task_id: string; status: string }> {
   const qs = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : '';
   return fetchJson(API_PATHS.GUEST_OS_UPDATE(guestId) + qs, { method: 'POST' });
 }
@@ -152,7 +156,7 @@ export async function osUpdateGuest(
 export async function appUpdateGuest(
   guestId: string,
   batchId?: string,
-): Promise<{ success: boolean; output: string }> {
+): Promise<{ task_id: string; status: string }> {
   const qs = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : '';
   return fetchJson(API_PATHS.GUEST_APP_UPDATE(guestId) + qs, { method: 'POST' });
 }
