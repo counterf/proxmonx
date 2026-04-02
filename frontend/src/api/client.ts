@@ -5,6 +5,7 @@ import type {
   SetupStatus,
   FullSettings,
   SettingsSaveRequest,
+  ConnectionTestRequest,
   ConnectionTestResult,
   AppConfigDefault,
   AppConfigEntry,
@@ -94,13 +95,7 @@ export async function fetchFullSettings(): Promise<FullSettings> {
 }
 
 export async function testConnection(
-  data: {
-    proxmox_host: string;
-    proxmox_token_id: string;
-    proxmox_token_secret: string;
-    proxmox_node: string;
-    verify_ssl: boolean;
-  },
+  data: ConnectionTestRequest,
 ): Promise<ConnectionTestResult> {
   return fetchJson<ConnectionTestResult>(API_PATHS.SETTINGS_TEST_CONNECTION, {
     method: 'POST',

@@ -18,17 +18,9 @@ class TestResolveConfig:
     """Tests for the _resolve_config layered config resolution."""
 
     def _make_engine(self, **settings_overrides: Any) -> DiscoveryEngine:
-        defaults: dict[str, Any] = {
-            "proxmox_host": "https://pve.local:8006",
-            "proxmox_token_id": "test@pve!token",
-            "proxmox_token_secret": "secret",
-            "proxmox_node": "pve",
-            "ssh_enabled": False,
-        }
-        defaults.update(settings_overrides)
-        settings = Settings(**defaults)
+        settings = _make_settings(**settings_overrides)
         return DiscoveryEngine(
-            ProxmoxClient(settings), GitHubClient(settings),
+            ProxmoxClient(settings.get_hosts()[0]), GitHubClient(settings),
             SSHClient(settings), settings=settings,
         )
 
@@ -95,7 +87,7 @@ class TestForcedDetector:
             },
         )
         engine = DiscoveryEngine(
-            ProxmoxClient(settings),
+            ProxmoxClient(settings.get_hosts()[0]),
             GitHubClient(settings),
             SSHClient(settings),
             settings=settings,
@@ -125,7 +117,7 @@ class TestForcedDetector:
             },
         )
         engine = DiscoveryEngine(
-            ProxmoxClient(settings),
+            ProxmoxClient(settings.get_hosts()[0]),
             GitHubClient(settings),
             SSHClient(settings),
             settings=settings,
@@ -142,23 +134,24 @@ class TestForcedDetector:
         assert guest.detection_method == "name_match"
 
 
-def _make_settings(**overrides: Any) -> Settings:
+def _make_host_config(**overrides: Any) -> ProxmoxHostConfig:
     defaults: dict[str, Any] = {
-        "proxmox_host": "https://pve.local:8006",
-        "proxmox_token_id": "test@pve!token",
-        "proxmox_token_secret": "secret",
-        "proxmox_node": "pve",
+        "id": "default",
+        "label": "Default",
+        "host": "https://pve.local:8006",
+        "token_id": "test@pve!token",
+        "token_secret": "secret",
+        "node": "pve",
+    }
+    defaults.update(overrides)
+    return ProxmoxHostConfig(**defaults)
+
+
+def _make_settings(**overrides: Any) -> Settings:
+    host_config = _make_host_config()
+    defaults: dict[str, Any] = {
         "ssh_enabled": False,
-        "proxmox_hosts": [
-            ProxmoxHostConfig(
-                id="default",
-                label="Default",
-                host="https://pve.local:8006",
-                token_id="test@pve!token",
-                token_secret="secret",
-                node="pve",
-            ),
-        ],
+        "proxmox_hosts": [host_config],
     }
     defaults.update(overrides)
     return Settings(**defaults)
@@ -177,7 +170,7 @@ class TestProxmoxClient:
                 ]
             })
         )
-        client = ProxmoxClient(_make_settings())
+        client = ProxmoxClient(_make_host_config())
         guests = await client.list_guests()
         assert len(guests) == 3
         assert guests[0].id == "100"
@@ -200,7 +193,7 @@ class TestProxmoxClient:
                 ]
             })
         )
-        client = ProxmoxClient(_make_settings(discover_vms=True))
+        client = ProxmoxClient(_make_host_config(), discover_vms=True)
         guests = await client.list_guests()
         assert len(guests) == 1
         assert guests[0].type == "vm"
@@ -215,7 +208,7 @@ class TestProxmoxClient:
                 }
             })
         )
-        client = ProxmoxClient(_make_settings())
+        client = ProxmoxClient(_make_host_config())
         ip, os_type = await client.get_guest_network("100", "lxc")
         assert ip == "10.0.0.100"
 
@@ -249,7 +242,7 @@ class TestDiscoveryEngine:
 
         settings = _make_settings()
         engine = DiscoveryEngine(
-            ProxmoxClient(settings),
+            ProxmoxClient(settings.get_hosts()[0]),
             GitHubClient(settings),
             SSHClient(settings),
             settings=settings,
@@ -277,7 +270,7 @@ class TestDiscoveryEngine:
 
         settings = _make_settings()
         engine = DiscoveryEngine(
-            ProxmoxClient(settings),
+            ProxmoxClient(settings.get_hosts()[0]),
             GitHubClient(settings),
             SSHClient(settings),
             settings=settings,
@@ -316,7 +309,7 @@ class TestDiscoveryEngine:
             app_config={"sonarr": AppConfig(port=9999, api_key="my-key")},
         )
         engine = DiscoveryEngine(
-            ProxmoxClient(settings),
+            ProxmoxClient(settings.get_hosts()[0]),
             GitHubClient(settings),
             SSHClient(settings),
             settings=settings,
@@ -366,7 +359,7 @@ class TestGithubRepoOverride:
             app_config={"sonarr": AppConfig(github_repo="MyFork/Sonarr")},
         )
         engine = DiscoveryEngine(
-            ProxmoxClient(settings),
+            ProxmoxClient(settings.get_hosts()[0]),
             GitHubClient(settings),
             SSHClient(settings),
             settings=settings,
@@ -405,7 +398,7 @@ class TestGithubRepoOverride:
 
         settings = _make_settings()
         engine = DiscoveryEngine(
-            ProxmoxClient(settings),
+            ProxmoxClient(settings.get_hosts()[0]),
             GitHubClient(settings),
             SSHClient(settings),
             settings=settings,

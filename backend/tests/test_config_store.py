@@ -19,16 +19,19 @@ def store(db_path: Path) -> ConfigStore:
 
 
 _FULL_CONFIG = {
-    "proxmox_host": "https://10.0.0.1:8006",
-    "proxmox_token_id": "root@pam!test",
-    "proxmox_token_secret": "secret-uuid",
-    "proxmox_node": "pve",
+    "proxmox_hosts": [{
+        "id": "pve1", "label": "PVE1",
+        "host": "https://10.0.0.1:8006",
+        "token_id": "root@pam!test",
+        "token_secret": "secret-uuid",
+        "node": "pve",
+    }],
 }
 
 
 class TestSaveLoadRoundTrip:
     def test_roundtrip(self, store: ConfigStore) -> None:
-        original = {**_FULL_CONFIG, "poll_interval_seconds": 120, "discover_vms": True}
+        original = {"poll_interval_seconds": 120, "discover_vms": True}
         store.save(original)
         assert store.load() == original
 
@@ -62,18 +65,17 @@ class TestGetMissingFields:
 
 class TestSaveIdempotent:
     def test_second_save_overwrites_first(self, store: ConfigStore) -> None:
-        store.save({"proxmox_host": "https://host1:8006"})
-        store.save({"proxmox_node": "pve"})
+        store.save({"log_level": "debug"})
+        store.save({"poll_interval_seconds": 60})
         data = store.load()
-        assert "proxmox_host" not in data
-        assert data["proxmox_node"] == "pve"
+        assert "log_level" not in data
+        assert data["poll_interval_seconds"] == 60
 
 
 class TestMergeIntoSettings:
     def test_merges_basic_fields(self, store: ConfigStore) -> None:
-        store.save({**_FULL_CONFIG, "poll_interval_seconds": 120})
+        store.save({"poll_interval_seconds": 120})
         result = store.merge_into_settings(Settings())
-        assert result.proxmox_host == "https://10.0.0.1:8006"
         assert result.poll_interval_seconds == 120
 
     def test_merges_app_config(self, store: ConfigStore) -> None:
@@ -171,6 +173,7 @@ class TestMergeIntoSettings:
         assert result.custom_app_defs[0].name == "good-app"
 
 
+
 class TestGetMissingFieldsMultiHost:
     def test_configured_when_host_has_all_fields(self, store: ConfigStore) -> None:
         store.save({
@@ -219,4 +222,3 @@ class TestLoadAuth:
             "auth_mode": "forms",
             "auth_password_hash": "$bcrypt$somehash",
         }
-        assert "proxmox_host" not in auth

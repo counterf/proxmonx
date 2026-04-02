@@ -25,10 +25,6 @@ const TABS: { id: SettingsTab; label: string }[] = [
 ];
 
 interface FormData {
-  proxmox_host: string;
-  proxmox_token_id: string;
-  proxmox_token_secret: string;
-  proxmox_node: string;
   poll_interval_seconds: number;
   discover_vms: boolean;
   verify_ssl: boolean;
@@ -58,10 +54,6 @@ interface FormErrors {
 
 function settingsToFormData(s: FullSettings): FormData {
   return {
-    proxmox_host: s.proxmox_host || '',
-    proxmox_token_id: s.proxmox_token_id || '',
-    proxmox_token_secret: s.proxmox_token_secret || '',
-    proxmox_node: s.proxmox_node || '',
     poll_interval_seconds: s.poll_interval_seconds,
     discover_vms: s.discover_vms,
     verify_ssl: s.verify_ssl,
@@ -90,23 +82,6 @@ function initHostsFromSettings(s: FullSettings): ProxmoxHost[] {
   if (s.proxmox_hosts && s.proxmox_hosts.length > 0) {
     return s.proxmox_hosts;
   }
-  // Seed from flat fields
-  if (s.proxmox_host || s.proxmox_token_id) {
-    return [{
-      id: 'default',
-      label: 'Default',
-      host: s.proxmox_host || '',
-      token_id: s.proxmox_token_id || '',
-      token_secret: s.proxmox_token_secret || '',
-      node: s.proxmox_node || '',
-      verify_ssl: s.verify_ssl,
-      ssh_username: s.ssh_username || 'root',
-      ssh_password: s.ssh_password,
-      ssh_key_path: s.ssh_key_path,
-      pct_exec_enabled: false,
-      backup_storage: null,
-    }];
-  }
   return [{
     id: crypto.randomUUID(),
     label: 'Default',
@@ -134,8 +109,6 @@ export default function Settings() {
   const [authMethod, setAuthMethod] = useState<AuthMethod>('key');
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  // Track whether token_secret was changed from the masked value
-  const tokenSecretChanged = useRef(false);
   const ntfyTokenChanged = useRef(false);
   const apiKeyChanged = useRef(false);
   const githubTokenChanged = useRef(false);
@@ -187,9 +160,6 @@ export default function Settings() {
   const setField = useCallback(<K extends keyof FormData>(key: K, value: FormData[K]) => {
     setForm((prev) => prev ? { ...prev, [key]: value } : prev);
     setErrors((prev) => ({ ...prev, [key]: undefined }));
-    if (key === 'proxmox_token_secret') {
-      tokenSecretChanged.current = true;
-    }
     if (key === 'ntfy_token') {
       ntfyTokenChanged.current = true;
     }
@@ -201,15 +171,12 @@ export default function Settings() {
     }
   }, []);
 
-  // tokenSecretChanged must be ORed in: typing "***" back after changing it would
-  // produce equal JSON strings, hiding a real change from the dirty check.
   const appConfigDirty =
     changedApiKeys.current.size > 0 ||
     JSON.stringify(appConfigs) !== JSON.stringify(savedAppConfigs);
   const hostsDirty = JSON.stringify(proxmoxHosts) !== JSON.stringify(savedProxmoxHosts);
   const passwordDirty = currentPassword !== '' || newPassword !== '' || confirmPassword !== '';
   const isDirty =
-    tokenSecretChanged.current ||
     ntfyTokenChanged.current ||
     apiKeyChanged.current ||
     githubTokenChanged.current ||
@@ -259,13 +226,6 @@ export default function Settings() {
 
     if (proxmoxHosts.length === 0) {
       errs.proxmox_hosts = 'At least one host is required';
-    } else {
-      const first = proxmoxHosts[0];
-      if (!first.host) errs.proxmox_host = 'Host URL is required';
-      else if (!first.host.startsWith('http://') && !first.host.startsWith('https://'))
-        errs.proxmox_host = 'Enter a valid URL starting with http:// or https://';
-      if (!first.token_id.trim()) errs.proxmox_token_id = 'Token ID is required';
-      if (!first.node.trim()) errs.proxmox_node = 'Node name is required';
     }
 
     if (form.poll_interval_seconds < 30 || form.poll_interval_seconds > 3600)
@@ -343,14 +303,7 @@ export default function Settings() {
         };
       });
 
-      // Use first host for flat fields (backward compat)
-      const firstHost = proxmoxHosts[0];
-
       const payload: SettingsSaveRequest = {
-        proxmox_host: firstHost?.host || form.proxmox_host,
-        proxmox_token_id: firstHost?.token_id || form.proxmox_token_id,
-        proxmox_token_secret: tokenSecretChanged.current ? form.proxmox_token_secret : null,
-        proxmox_node: firstHost?.node || form.proxmox_node,
         poll_interval_seconds: form.poll_interval_seconds,
         discover_vms: form.discover_vms,
         verify_ssl: form.verify_ssl,
@@ -385,7 +338,6 @@ export default function Settings() {
       setSavedForm({ ...form });
       setSavedAppConfigs({ ...appConfigs });
       setSavedProxmoxHosts([...proxmoxHosts]);
-      tokenSecretChanged.current = false;
       ntfyTokenChanged.current = false;
       apiKeyChanged.current = false;
       githubTokenChanged.current = false;

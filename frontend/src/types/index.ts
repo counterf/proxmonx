@@ -134,10 +134,6 @@ export interface ProxmoxHost {
 }
 
 export interface FullSettings {
-  proxmox_host: string | null;
-  proxmox_token_id: string | null;
-  proxmox_token_secret: string | null;
-  proxmox_node: string | null;
   poll_interval_seconds: number;
   discover_vms: boolean;
   verify_ssl: boolean;
@@ -165,10 +161,6 @@ export interface FullSettings {
 }
 
 export interface SettingsSaveRequest {
-  proxmox_host: string;
-  proxmox_token_id: string;
-  proxmox_token_secret: string | null;
-  proxmox_node: string;
   poll_interval_seconds: number;
   discover_vms: boolean;
   verify_ssl: boolean;
@@ -194,6 +186,14 @@ export interface SettingsSaveRequest {
   notify_on_outdated?: boolean;
   proxmon_api_key?: string | null;
   trust_proxy_headers?: boolean;
+}
+
+export interface ConnectionTestRequest {
+  host: string;
+  token_id: string;
+  token_secret: string;
+  node: string;
+  verify_ssl: boolean;
 }
 
 export interface ConnectionTestResult {

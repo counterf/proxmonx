@@ -112,6 +112,7 @@ def _reload_settings_into_engine(request: Request, config_store) -> None:
     scheduler = getattr(request.app.state, "scheduler", None)
     if scheduler and hasattr(scheduler, '_engine'):
         scheduler._engine._settings = new_settings
+        scheduler._interval = new_settings.poll_interval_seconds
 
 
 # --- Shared request models ---

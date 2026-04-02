@@ -94,10 +94,10 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
     setTesting((prev) => ({ ...prev, [host.id]: true }));
     try {
       const result = await testConnection({
-        proxmox_host: host.host,
-        proxmox_token_id: host.token_id,
-        proxmox_token_secret: secret,
-        proxmox_node: host.node,
+        host: host.host,
+        token_id: host.token_id,
+        token_secret: secret,
+        node: host.node,
         verify_ssl: host.verify_ssl,
       });
       setTestResult((prev) => ({ ...prev, [host.id]: result }));

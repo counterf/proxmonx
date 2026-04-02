@@ -48,7 +48,9 @@ def build_runtime(settings: Settings) -> tuple[httpx.AsyncClient, Scheduler]:
     Used by both lifespan() and save_settings() to avoid duplicating wiring.
     """
     http_client = httpx.AsyncClient(timeout=10.0, verify=settings.verify_ssl, follow_redirects=True)
-    proxmox = ProxmoxClient(settings, http_client=http_client)
+    hosts = settings.get_hosts()
+    first_host = hosts[0] if hosts else None
+    proxmox = ProxmoxClient(first_host, discover_vms=settings.discover_vms, http_client=http_client) if first_host else None
     github = GitHubClient(settings, http_client=http_client)
     ssh = SSHClient(settings)
     engine = DiscoveryEngine(proxmox, github, ssh, http_client=http_client, settings=settings)

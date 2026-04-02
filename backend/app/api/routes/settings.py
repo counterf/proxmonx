@@ -92,10 +92,6 @@ class ProxmoxHostSaveEntry(BaseModel):
 
 
 class SettingsSaveRequest(BaseModel):
-    proxmox_host: str
-    proxmox_token_id: str
-    proxmox_token_secret: str | None = None
-    proxmox_node: str
     poll_interval_seconds: int = Field(default=300, ge=30, le=3600)
     discover_vms: bool = False
     verify_ssl: bool = False
@@ -120,27 +116,6 @@ class SettingsSaveRequest(BaseModel):
     notify_on_outdated: bool | None = None
     proxmon_api_key: str | None = None
     trust_proxy_headers: bool | None = None
-
-    @field_validator("proxmox_host")
-    @classmethod
-    def validate_host(cls, v: str) -> str:
-        if not v.startswith(("http://", "https://")):
-            raise ValueError("Host must start with http:// or https://")
-        return v.rstrip("/")
-
-    @field_validator("proxmox_token_id")
-    @classmethod
-    def validate_token_id(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("Token ID is required")
-        return v.strip()
-
-    @field_validator("proxmox_node")
-    @classmethod
-    def validate_node(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("Node name is required")
-        return v.strip()
 
     @field_validator("app_config")
     @classmethod
@@ -168,14 +143,14 @@ class GitHubTestResponse(BaseModel):
 
 
 class ConnectionTestRequest(BaseModel):
-    proxmox_host: str
-    proxmox_token_id: str
-    proxmox_token_secret: str
-    proxmox_node: str
+    host: str
+    token_id: str
+    token_secret: str
+    node: str
     verify_ssl: bool = False
     host_id: str | None = None
 
-    @field_validator("proxmox_host")
+    @field_validator("host")
     @classmethod
     def validate_host(cls, v: str) -> str:
         if not v.strip():
@@ -184,14 +159,14 @@ class ConnectionTestRequest(BaseModel):
             raise ValueError("Host must start with http:// or https://")
         return v.rstrip("/")
 
-    @field_validator("proxmox_token_id")
+    @field_validator("token_id")
     @classmethod
     def validate_token_id(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("Token ID is required")
         return v.strip()
 
-    @field_validator("proxmox_node")
+    @field_validator("node")
     @classmethod
     def validate_node(cls, v: str) -> str:
         if not v.strip():
@@ -474,14 +449,7 @@ async def list_host_backup_storages(
 
     try:
         host_config = ProxmoxHostConfig(**host_dict)
-        host_settings = Settings(
-            proxmox_host=host_config.host,
-            proxmox_token_id=host_config.token_id,
-            proxmox_token_secret=host_config.token_secret,
-            proxmox_node=host_config.node,
-            verify_ssl=host_config.verify_ssl,
-        )
-        client = ProxmoxClient(host_settings)
+        client = ProxmoxClient(host_config)
         storages = await client.list_backup_storages()
         return storages
     except Exception as exc:
@@ -494,9 +462,9 @@ async def test_connection(
     body: ConnectionTestRequest,
 ) -> dict[str, bool | str | dict[str, str | int | float | bool | None] | None]:
     """Test Proxmox connectivity without saving settings."""
-    base_url = f"{body.proxmox_host.rstrip('/')}/api2/json"
+    base_url = f"{body.host.rstrip('/')}/api2/json"
     headers = {
-        "Authorization": f"PVEAPIToken={body.proxmox_token_id}={body.proxmox_token_secret}",
+        "Authorization": f"PVEAPIToken={body.token_id}={body.token_secret}",
     }
     try:
         async with httpx.AsyncClient(verify=body.verify_ssl, timeout=10.0) as client:
@@ -507,7 +475,7 @@ async def test_connection(
 
             # Also check the node exists
             node_resp = await client.get(
-                f"{base_url}/nodes/{body.proxmox_node}/status",
+                f"{base_url}/nodes/{body.node}/status",
                 headers=headers,
             )
             node_resp.raise_for_status()
@@ -517,10 +485,10 @@ async def test_connection(
 
             return {
                 "success": True,
-                "message": f"Connected to Proxmox {pve_version} on node {body.proxmox_node}",
+                "message": f"Connected to Proxmox {pve_version} on node {body.node}",
                 "node_info": {
                     "pve_version": pve_version,
-                    "node": body.proxmox_node,
+                    "node": body.node,
                     "uptime": node_data.get("uptime") if isinstance(node_data, dict) else None,
                 },
             }
@@ -535,11 +503,11 @@ async def test_connection(
         logger.warning("Connection test failed: %s", msg)
         return {"success": False, "message": msg, "node_info": None}
     except httpx.ConnectError:
-        msg = f"Connection refused: {body.proxmox_host}"
+        msg = f"Connection refused: {body.host}"
         logger.warning("Connection test failed: %s", msg)
         return {"success": False, "message": msg, "node_info": None}
     except httpx.TimeoutException:
-        msg = f"Connection timed out: {body.proxmox_host}"
+        msg = f"Connection timed out: {body.host}"
         logger.warning("Connection test failed: %s", msg)
         return {"success": False, "message": msg, "node_info": None}
     except Exception as exc:
@@ -589,23 +557,8 @@ async def save_settings(
     # Read existing config once to avoid TOCTOU and preserve values
     current_file = config_store.load()
 
-    # If token_secret is None, empty, or masked sentinel, keep current value
-    token_secret = _keep_or_replace(
-        body.proxmox_token_secret,
-        current_file.get("proxmox_token_secret") or settings.proxmox_token_secret,
-    )
-    if not token_secret:
-        raise HTTPException(
-            status_code=422,
-            detail="Token secret is required (no existing value found)",
-        )
-
     # Build config data to persist
     config_data: dict[str, Any] = {
-        "proxmox_host": body.proxmox_host,
-        "proxmox_token_id": body.proxmox_token_id,
-        "proxmox_token_secret": token_secret,
-        "proxmox_node": body.proxmox_node,
         "poll_interval_seconds": body.poll_interval_seconds,
         "discover_vms": body.discover_vms,
         "verify_ssl": body.verify_ssl,
@@ -637,13 +590,6 @@ async def save_settings(
     merged_hosts = _merge_proxmox_hosts(body, current_file)
     if merged_hosts is not None:
         config_data["proxmox_hosts"] = merged_hosts
-        # Sync first host to flat fields used by ProxmoxClient constructor
-        if merged_hosts:
-            first = merged_hosts[0]
-            config_data["proxmox_host"] = first["host"]
-            config_data["proxmox_token_id"] = first["token_id"]
-            config_data["proxmox_token_secret"] = first["token_secret"]
-            config_data["proxmox_node"] = first["node"]
 
     # Preserve existing proxmox_hosts when payload omits them
     if "proxmox_hosts" not in config_data:

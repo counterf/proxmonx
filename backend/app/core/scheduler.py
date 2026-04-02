@@ -96,8 +96,11 @@ class Scheduler:
             # Re-fetch live status from Proxmox so a guest that was stopped
             # during the last full cycle but is now running gets processed correctly.
             from app.core.proxmox import ProxmoxClient
-            settings = self._engine._build_host_settings(host_config)
-            proxmox = ProxmoxClient(settings, http_client=host_client)
+            proxmox = ProxmoxClient(
+                host_config,
+                discover_vms=self._engine._settings.discover_vms if self._engine._settings else False,
+                http_client=host_client,
+            )
             fresh_guests = await proxmox.list_guests()
             raw_vmid = guest_id.rsplit(":", 1)[-1]
             fresh = next((g for g in fresh_guests if str(g.id) == raw_vmid), None)

@@ -4,7 +4,7 @@ import logging
 
 import httpx
 
-from app.config import Settings
+from app.config import ProxmoxHostConfig
 from app.models.guest import GuestInfo
 
 logger = logging.getLogger(__name__)
@@ -13,14 +13,19 @@ logger = logging.getLogger(__name__)
 class ProxmoxClient:
     """Read-only async client for the Proxmox VE API."""
 
-    def __init__(self, settings: Settings, http_client: httpx.AsyncClient | None = None) -> None:
-        self._base_url = f"{settings.proxmox_host}/api2/json"
-        self._node = settings.proxmox_node
+    def __init__(
+        self,
+        host_config: ProxmoxHostConfig,
+        discover_vms: bool = False,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._base_url = f"{host_config.host}/api2/json"
+        self._node = host_config.node
         self._headers = {
-            "Authorization": f"PVEAPIToken={settings.proxmox_token_id}={settings.proxmox_token_secret}",
+            "Authorization": f"PVEAPIToken={host_config.token_id}={host_config.token_secret}",
         }
-        self._verify_ssl = settings.verify_ssl
-        self._discover_vms = settings.discover_vms
+        self._verify_ssl = host_config.verify_ssl
+        self._discover_vms = discover_vms
         self._http_client = http_client
 
     async def _get(self, path: str) -> dict[str, list[dict[str, str | int | float | bool | None]] | dict[str, str | int | float | bool | None]]:

@@ -9,15 +9,11 @@ from app.config import Settings
 
 
 def _make_settings(**overrides: str | int | bool | None) -> Settings:
-    defaults = {
-        "proxmox_host": "https://localhost:8006",
-        "proxmox_token_id": "test@pve!token",
-        "proxmox_token_secret": "secret",
-        "proxmox_node": "pve",
+    defaults: dict = {
         "github_token": None,
     }
     defaults.update(overrides)
-    return Settings(**defaults)  # type: ignore[arg-type]
+    return Settings(**defaults)
 
 
 class TestParseGithubRepo:

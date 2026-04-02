@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
-from app.config import ProxmoxHostConfig, Settings
+from app.config import ProxmoxHostConfig
 from app.core.proxmox import ProxmoxClient
 from app.core.task_store import TaskRecord, TaskStore
 from app.detectors.registry import DETECTOR_MAP
@@ -51,13 +51,7 @@ async def _poll_upid(
     http_client: httpx.AsyncClient | None = None,
 ) -> None:
     """Background task: poll Proxmox for UPID completion and update the task record."""
-    client = ProxmoxClient(Settings(
-        proxmox_host=host_config.host,
-        proxmox_token_id=host_config.token_id,
-        proxmox_token_secret=host_config.token_secret,
-        proxmox_node=host_config.node,
-        verify_ssl=host_config.verify_ssl,
-    ), http_client=http_client)
+    client = ProxmoxClient(host_config, http_client=http_client)
     for _ in range(60):  # poll every 10s up to 10 min
         await asyncio.sleep(10)
         try:
@@ -170,7 +164,7 @@ async def save_guest_config(
     merged["ssh_key_path"] = _keep_or_replace(body.ssh_key_path, prev.get("ssh_key_path"))
     merged["ssh_password"] = _keep_or_replace(body.ssh_password, prev.get("ssh_password"))
 
-    if body.forced_detector:
+    if body.forced_detector is not None and body.forced_detector != "":
         merged["forced_detector"] = body.forced_detector
     if body.version_host is not None and body.version_host != "":
         merged["version_host"] = body.version_host
@@ -234,14 +228,7 @@ async def perform_guest_action(
 
     # Build per-host client
     host_config = ProxmoxHostConfig(**host_dict)
-    host_settings = Settings(
-        proxmox_host=host_config.host,
-        proxmox_token_id=host_config.token_id,
-        proxmox_token_secret=host_config.token_secret,
-        proxmox_node=host_config.node,
-        verify_ssl=host_config.verify_ssl,
-    )
-    client = ProxmoxClient(host_settings)
+    client = ProxmoxClient(host_config)
 
     # Map model guest_type ("vm") to Proxmox resource ("qemu")
     proxmox_type = "lxc" if guest.type == "lxc" else "qemu"
@@ -514,14 +501,7 @@ async def backup_guest(
     if not host_config.backup_storage:
         raise HTTPException(status_code=400, detail="No backup storage configured for this host — set it in Settings")
 
-    host_settings = Settings(
-        proxmox_host=host_config.host,
-        proxmox_token_id=host_config.token_id,
-        proxmox_token_secret=host_config.token_secret,
-        proxmox_node=host_config.node,
-        verify_ssl=host_config.verify_ssl,
-    )
-    client = ProxmoxClient(host_settings)
+    client = ProxmoxClient(host_config)
     vmid = guest_id.rsplit(":", 1)[-1]
 
     task_id = str(uuid4())

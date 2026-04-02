@@ -90,6 +90,6 @@ class BaseDetector(ABC):
         http_client: httpx.AsyncClient | None = None,
     ) -> httpx.Response:
         """Helper for making HTTP GET requests to guest apps."""
-        ctx = contextlib.nullcontext(http_client) if http_client else httpx.AsyncClient(timeout=timeout, verify=False, follow_redirects=True)
+        ctx = contextlib.nullcontext(http_client) if http_client else httpx.AsyncClient(timeout=timeout, verify=True, follow_redirects=True)
         async with ctx as c:
             return await c.get(url, headers=headers or {})

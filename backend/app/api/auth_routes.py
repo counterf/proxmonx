@@ -36,10 +36,17 @@ def _client_ip(request: Request) -> str:
 
 
 def _is_secure_request(request: Request) -> bool:
-    """Return True if the original client request used HTTPS."""
-    proto = request.headers.get("x-forwarded-proto", "").lower()
-    if proto:
-        return proto == "https"
+    """Return True if the original client request used HTTPS.
+
+    Only trusts x-forwarded-proto when trust_proxy_headers is enabled,
+    consistent with _client_ip().
+    """
+    settings = getattr(request.app.state, "settings", None)
+    trust_proxy = settings.trust_proxy_headers if settings else False
+    if trust_proxy:
+        proto = request.headers.get("x-forwarded-proto", "").lower()
+        if proto:
+            return proto == "https"
     return request.url.scheme == "https"
 
 

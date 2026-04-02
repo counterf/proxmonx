@@ -22,7 +22,6 @@ _HOST_REQUIRED_KEYS = ("host", "token_id", "token_secret", "node")
 # ---------------------------------------------------------------------------
 
 _SCALAR_STR_FIELDS: frozenset[str] = frozenset({
-    "proxmox_host", "proxmox_token_id", "proxmox_token_secret", "proxmox_node",
     "ssh_username", "ssh_key_path", "ssh_password", "ssh_known_hosts_path",
     "github_token", "log_level", "version_detect_method",
     "auth_mode", "auth_username", "auth_password_hash",
@@ -43,10 +42,6 @@ _JSON_FIELDS: frozenset[str] = frozenset({
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS settings (
     id                           INTEGER PRIMARY KEY CHECK (id = 1),
-    proxmox_host                 TEXT,
-    proxmox_token_id             TEXT,
-    proxmox_token_secret         TEXT,
-    proxmox_node                 TEXT,
     poll_interval_seconds        INTEGER  DEFAULT 300,
     discover_vms                 INTEGER  DEFAULT 0,
     verify_ssl                   INTEGER  DEFAULT 0,
@@ -205,18 +200,14 @@ class ConfigStore:
 
     def get_missing_fields(self) -> list[str]:
         """Return names of required fields that are missing or empty."""
-        file_data = self.load()
-        hosts = file_data.get("proxmox_hosts")
-        if isinstance(hosts, list) and hosts:
-            for host in hosts:
-                if isinstance(host, dict) and all(host.get(k) for k in _HOST_REQUIRED_KEYS):
-                    return []
-            first = hosts[0] if hosts else {}
-            if isinstance(first, dict):
-                return [k for k in _HOST_REQUIRED_KEYS if not first.get(k)]
+        hosts = self.load().get("proxmox_hosts", [])
+        if not isinstance(hosts, list) or not hosts:
             return list(_HOST_REQUIRED_KEYS)
-
-        return list(_HOST_REQUIRED_KEYS)
+        for host in hosts:
+            if isinstance(host, dict) and all(host.get(k) for k in _HOST_REQUIRED_KEYS):
+                return []
+        first = hosts[0] if isinstance(hosts[0], dict) else {}
+        return [k for k in _HOST_REQUIRED_KEYS if not first.get(k)]
 
     def merge_into_settings(self, settings: Settings) -> Settings:
         """Return a new Settings instance with DB values taking priority over env/defaults.

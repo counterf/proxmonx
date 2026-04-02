@@ -82,13 +82,7 @@ class ProxmoxHostConfig(BaseModel):
 class Settings(BaseSettings):
     """All settings configurable via SQLite config store (UI/wizard)."""
 
-    # Proxmox connection (flat fields used by save endpoint and ProxmoxClient)
-    proxmox_host: str | None = None
-    proxmox_token_id: str | None = None
-    proxmox_token_secret: str | None = None
-    proxmox_node: str | None = None
-
-    # Multi-host configuration
+    # Multi-host configuration (canonical)
     proxmox_hosts: list[ProxmoxHostConfig] = []
 
     # Discovery

@@ -313,10 +313,10 @@ class TestSetupFlowAuthExemptions:
         resp = client.post(
             "/api/settings/test-connection",
             json={
-                "proxmox_host": "http://127.0.0.1:65535",
-                "proxmox_token_id": "root@pam!token",
-                "proxmox_token_secret": "secret",
-                "proxmox_node": "pve",
+                "host": "http://127.0.0.1:65535",
+                "token_id": "root@pam!token",
+                "token_secret": "secret",
+                "node": "pve",
                 "verify_ssl": False,
             },
         )
@@ -329,10 +329,10 @@ class TestSetupFlowAuthExemptions:
         resp = client.post(
             "/api/settings/test-connection",
             json={
-                "proxmox_host": "http://127.0.0.1:65535",
-                "proxmox_token_id": "root@pam!token",
-                "proxmox_token_secret": "secret",
-                "proxmox_node": "pve",
+                "host": "http://127.0.0.1:65535",
+                "token_id": "root@pam!token",
+                "token_secret": "secret",
+                "node": "pve",
                 "verify_ssl": False,
             },
         )

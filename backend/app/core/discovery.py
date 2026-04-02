@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.config import ProxmoxHostConfig, Settings
+from app.config import ProxmoxHostConfig, Settings  # Settings kept for DiscoveryEngine type hint
 from app.core.github import GitHubClient
 from app.core.proxmox import ProxmoxClient
 from app.core.ssh import SSHClient, _extract_ssh_host
@@ -30,7 +30,7 @@ class DiscoveryEngine:
 
     def __init__(
         self,
-        proxmox: ProxmoxClient,
+        proxmox: ProxmoxClient | None,
         github: GitHubClient,
         ssh: SSHClient,
         http_client: httpx.AsyncClient | None = None,
@@ -96,8 +96,6 @@ class DiscoveryEngine:
         logger.info("Starting discovery for host %s (%s)", host_config.label, host_config.host)
         start = datetime.now(timezone.utc)
 
-        settings = self._build_host_settings(host_config)
-
         # Per-host HTTP client respects the host's own verify_ssl setting
         host_client = httpx.AsyncClient(
             timeout=10.0,
@@ -106,7 +104,11 @@ class DiscoveryEngine:
         )
         updated: dict[str, GuestInfo] = {}
         try:
-            proxmox = ProxmoxClient(settings, http_client=host_client)
+            proxmox = ProxmoxClient(
+                host_config,
+                discover_vms=self._settings.discover_vms if self._settings else False,
+                http_client=host_client,
+            )
 
             guests = await proxmox.list_guests()
             logger.info("Host %s: discovered %d guests", host_config.label, len(guests))
@@ -142,21 +144,6 @@ class DiscoveryEngine:
         )
         return updated
 
-    def _build_host_settings(self, host_config: ProxmoxHostConfig) -> Settings:
-        """Build a Settings instance from a ProxmoxHostConfig for ProxmoxClient."""
-        return Settings(
-            proxmox_host=host_config.host,
-            proxmox_token_id=host_config.token_id,
-            proxmox_token_secret=host_config.token_secret,
-            proxmox_node=host_config.node,
-            verify_ssl=host_config.verify_ssl,
-            discover_vms=self._settings.discover_vms if self._settings else False,
-            ssh_enabled=self._settings.ssh_enabled if self._settings else True,
-            ssh_username=host_config.ssh_username or (self._settings.ssh_username if self._settings else "root"),
-            ssh_key_path=host_config.ssh_key_path or (self._settings.ssh_key_path if self._settings else None),
-            ssh_password=host_config.ssh_password or (self._settings.ssh_password if self._settings else None),
-        )
-
     async def _process_guest(
         self,
         guest: GuestInfo,
@@ -173,8 +160,11 @@ class DiscoveryEngine:
                 proxmox: ProxmoxClient | None = None
                 if not guest.ip or guest.type == "vm":
                     if host_config:
-                        settings = self._build_host_settings(host_config)
-                        proxmox = ProxmoxClient(settings, http_client=host_http_client)
+                        proxmox = ProxmoxClient(
+                            host_config,
+                            discover_vms=self._settings.discover_vms if self._settings else False,
+                            http_client=host_http_client,
+                        )
                     else:
                         proxmox = self._proxmox
 
