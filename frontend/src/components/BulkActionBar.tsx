@@ -1,9 +1,9 @@
-import type { GuestSummary } from '../types';
+import type { Guest } from '../types';
 import { isEligible } from './BulkProgressModal';
 
 interface Props {
   selectionSize: number;
-  selectedGuests: GuestSummary[];
+  selectedGuests: Guest[];
   onOsUpdate: () => void;
   onAppUpdate: () => void;
   onClear: () => void;

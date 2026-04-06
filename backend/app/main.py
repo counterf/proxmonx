@@ -23,7 +23,6 @@ from app.core.config_store import ConfigStore
 from app.core.discovery import DiscoveryEngine
 from app.core.github import GitHubClient
 from app.core.notifier import NtfyNotifier
-from app.core.proxmox import ProxmoxClient
 from app.core.scheduler import Scheduler
 from app.core.session_store import SessionStore
 from app.core.ssh import SSHClient
@@ -48,12 +47,9 @@ def build_runtime(settings: Settings) -> tuple[httpx.AsyncClient, Scheduler]:
     Used by both lifespan() and save_settings() to avoid duplicating wiring.
     """
     http_client = httpx.AsyncClient(timeout=10.0, verify=settings.verify_ssl, follow_redirects=True)
-    hosts = settings.get_hosts()
-    first_host = hosts[0] if hosts else None
-    proxmox = ProxmoxClient(first_host, discover_vms=settings.discover_vms, http_client=http_client) if first_host else None
-    github = GitHubClient(settings, http_client=http_client)
+    github = GitHubClient(settings)
     ssh = SSHClient(settings)
-    engine = DiscoveryEngine(proxmox, github, ssh, http_client=http_client, settings=settings)
+    engine = DiscoveryEngine(github, ssh, http_client=http_client, settings=settings)
 
     alert_manager: AlertManager | None = None
     if settings.notifications_enabled and settings.ntfy_url:
@@ -89,6 +85,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Task history store (same DB file)
     task_store = TaskStore(db_path)
+    stale_update_count = task_store.reconcile_stale_running_updates()
+    if stale_update_count:
+        logging.getLogger(__name__).warning(
+            "Marked %s stale update task(s) as failed after restart",
+            stale_update_count,
+        )
     app.dependency_overrides[_get_task_store] = lambda: task_store
 
     # Bulk job store (same DB file)
@@ -165,7 +167,7 @@ _SECURITY_HEADERS = {
         "default-src 'self'; "
         "script-src 'self'; "
         "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; "
+        "img-src 'self' data: https://cdn.jsdelivr.net; "
         "connect-src 'self'"
     ),
 }

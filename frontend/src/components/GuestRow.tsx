@@ -1,12 +1,12 @@
 import { useNavigate } from 'react-router-dom';
-import type { GuestSummary } from '../types';
+import type { Guest } from '../types';
 import type { ColumnKey } from '../hooks/useColumnVisibility';
 import StatusBadge from './StatusBadge';
 import AppIcon from './AppIcon';
 import GuestActions from './GuestActions';
 
 interface GuestRowProps {
-  guest: GuestSummary;
+  guest: Guest;
   visibleColumns?: Set<ColumnKey>;
   bulkMode?: boolean;
   selected?: boolean;
@@ -47,7 +47,7 @@ function diskBarColor(pct: number): string {
   return 'bg-blue-500';
 }
 
-function DiskUsageCell({ guest }: { guest: GuestSummary }) {
+function DiskUsageCell({ guest }: { guest: Guest }) {
   if (guest.disk_used == null || guest.disk_total == null || guest.disk_total === 0) {
     return <span className="text-gray-500">{'\u2014'}</span>;
   }
@@ -70,7 +70,7 @@ const VERSION_SOURCE_STYLES: Record<string, { label: string; bg: string; text: s
   pct_exec: { label: 'PCT', bg: 'bg-purple-900/40', text: 'text-purple-300' },
 };
 
-function VersionSourceCell({ guest }: { guest: GuestSummary }) {
+function VersionSourceCell({ guest }: { guest: Guest }) {
   const method = guest.version_detection_method;
   if (!method) return <span className="text-gray-500">{'\u2014'}</span>;
   const style = VERSION_SOURCE_STYLES[method];
@@ -119,14 +119,14 @@ function PendingUpdatesCell({
   );
 }
 
-function OsTypeCell({ guest }: { guest: GuestSummary }) {
+function OsTypeCell({ guest }: { guest: Guest }) {
   const os = guest.os_type;
   if (!os) return <span className="text-gray-500">{'\u2014'}</span>;
   const label = os.charAt(0).toUpperCase() + os.slice(1);
   return <span className="text-xs text-gray-300">{label}</span>;
 }
 
-function AppNameCell({ guest }: { guest: GuestSummary }) {
+function AppNameCell({ guest }: { guest: Guest }) {
   if (!guest.app_name) {
     return <span className="text-gray-500">{'\u2014'}</span>;
   }
@@ -364,9 +364,4 @@ export function GuestCard({ guest, bulkMode, selected, onToggleSelect }: GuestRo
       </div>
     </div>
   );
-}
-
-/** Default export for backward compatibility */
-export default function GuestRow({ guest }: GuestRowProps) {
-  return <GuestTableRow guest={guest} />;
 }

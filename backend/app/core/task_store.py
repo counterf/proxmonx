@@ -2,6 +2,8 @@
 
 import logging
 import sqlite3
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel
@@ -50,16 +52,24 @@ class TaskStore:
 
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
-        with self._conn() as conn:
+        with self._connect() as conn:
             conn.execute(_CREATE_TABLE)
 
-    def _conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         conn = sqlite3.connect(self._db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def create(self, record: TaskRecord) -> None:
-        with self._conn() as conn:
+        with self._connect() as conn:
             conn.execute(
                 """INSERT INTO task_history
                    (id, guest_id, guest_name, host_id, action, status,
@@ -80,13 +90,13 @@ class TaskStore:
             return
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = list(updates.values()) + [task_id]
-        with self._conn() as conn:
+        with self._connect() as conn:
             conn.execute(
                 f"UPDATE task_history SET {set_clause} WHERE id = ?", values
             )
 
     def list_recent(self, limit: int = 200) -> list[TaskRecord]:
-        with self._conn() as conn:
+        with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM task_history ORDER BY started_at DESC LIMIT ?",
                 (limit,),
@@ -94,7 +104,7 @@ class TaskStore:
         return [TaskRecord(**dict(row)) for row in rows]
 
     def get(self, task_id: str) -> TaskRecord | None:
-        with self._conn() as conn:
+        with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM task_history WHERE id = ?", (task_id,)
             ).fetchone()
@@ -102,13 +112,28 @@ class TaskStore:
 
     def list_running_for_guest(self, guest_id: str, action: str) -> list[TaskRecord]:
         """Return all tasks with status='running' for a given guest and action."""
-        with self._conn() as conn:
+        with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM task_history WHERE guest_id = ? AND action = ? AND status = 'running'",
                 (guest_id, action),
             ).fetchall()
         return [TaskRecord(**dict(row)) for row in rows]
 
+    def reconcile_stale_running_updates(self) -> int:
+        """Mark orphaned running update tasks as failed after a restart."""
+        finished_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        detail = "Interrupted by proxmon restart"
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE task_history
+                SET status = 'failed', detail = ?, finished_at = ?
+                WHERE status = 'running' AND action IN ('os_update', 'app_update')
+                """,
+                (detail, finished_at),
+            )
+            return cursor.rowcount
+
     def clear(self) -> None:
-        with self._conn() as conn:
+        with self._connect() as conn:
             conn.execute("DELETE FROM task_history")

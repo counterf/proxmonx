@@ -107,6 +107,7 @@ class GuestInfo(BaseModel):
     reboot_required: bool | None = None
     has_community_script: bool | None = None
     version_host: str | None = None  # override hostname/IP used for version probe and web URL
+    pending_updates_checked_at: datetime | None = None  # when pending-updates SSH check last ran
 
     @computed_field  # type: ignore[prop-decorator]
     @property

@@ -92,7 +92,8 @@ class ProxmoxHostSaveEntry(BaseModel):
 
 
 class SettingsSaveRequest(BaseModel):
-    poll_interval_seconds: int = Field(default=300, ge=30, le=3600)
+    poll_interval_seconds: int = Field(default=3600, ge=30, le=86400)
+    pending_updates_interval_seconds: int = Field(default=3600, ge=3600, le=86400)
     discover_vms: bool = False
     verify_ssl: bool = False
     ssh_enabled: bool = True
@@ -560,6 +561,7 @@ async def save_settings(
     # Build config data to persist
     config_data: dict[str, Any] = {
         "poll_interval_seconds": body.poll_interval_seconds,
+        "pending_updates_interval_seconds": body.pending_updates_interval_seconds,
         "discover_vms": body.discover_vms,
         "verify_ssl": body.verify_ssl,
         "ssh_enabled": body.ssh_enabled,
@@ -652,16 +654,18 @@ async def test_notification(
     if not settings.ntfy_url:
         return {"success": False, "message": "ntfy URL is not configured"}
 
-    notifier = NtfyNotifier(
-        url=settings.ntfy_url,
-        token=settings.ntfy_token,
-        priority=settings.ntfy_priority,
-    )
-    sent = await notifier.send(
-        title="proxmon Test",
-        message="This is a test notification from proxmon.",
-        tags="white_check_mark",
-    )
+    async with httpx.AsyncClient(timeout=10.0, verify=settings.verify_ssl) as client:
+        notifier = NtfyNotifier(
+            url=settings.ntfy_url,
+            token=settings.ntfy_token,
+            priority=settings.ntfy_priority,
+            http_client=client,
+        )
+        sent = await notifier.send(
+            title="proxmon Test",
+            message="This is a test notification from proxmon.",
+            tags="white_check_mark",
+        )
     if sent:
         return {"success": True, "message": "Test notification sent successfully"}
     return {"success": False, "message": "Failed to send notification -- check ntfy URL and token"}

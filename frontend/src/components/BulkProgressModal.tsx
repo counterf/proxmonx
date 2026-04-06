@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { GuestSummary, BulkJob } from '../types';
+import type { Guest, BulkJob } from '../types';
 import { startBulkJob, fetchBulkJob } from '../api/client';
 
 interface Props {
   action: 'os_update' | 'app_update';
-  guests: GuestSummary[];  // all selected; modal determines eligibility
+  guests: Guest[];  // all selected; modal determines eligibility
   onClose: () => void;
 }
 
@@ -13,7 +13,7 @@ const SUPPORTED_OS_TYPES = [
   'alpine', 'debian', 'ubuntu', 'devuan', 'fedora', 'centos', 'archlinux', 'opensuse',
 ];
 
-export function isEligible(guest: GuestSummary, action: 'os_update' | 'app_update'): boolean {
+export function isEligible(guest: Guest, action: 'os_update' | 'app_update'): boolean {
   if (guest.type !== 'lxc' || guest.status !== 'running') return false;
   if (action === 'os_update') {
     if (!guest.os_type || !SUPPORTED_OS_TYPES.includes(guest.os_type)) return false;

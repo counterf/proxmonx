@@ -37,7 +37,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             addr = ipaddress.ip_address(addr_str)
             return addr.is_loopback or addr.is_private
         except ValueError:
-            return True
+            return addr_str.lower() in {"localhost", "testclient", ""}
 
     @classmethod
     def _is_local_network(cls, request: Request) -> bool:

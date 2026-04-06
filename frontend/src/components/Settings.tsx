@@ -26,6 +26,7 @@ const TABS: { id: SettingsTab; label: string }[] = [
 
 interface FormData {
   poll_interval_seconds: number;
+  pending_updates_interval_seconds: number;
   discover_vms: boolean;
   verify_ssl: boolean;
   ssh_enabled: boolean;
@@ -55,6 +56,7 @@ interface FormErrors {
 function settingsToFormData(s: FullSettings): FormData {
   return {
     poll_interval_seconds: s.poll_interval_seconds,
+    pending_updates_interval_seconds: s.pending_updates_interval_seconds ?? 3600,
     discover_vms: s.discover_vms,
     verify_ssl: s.verify_ssl,
     ssh_enabled: s.ssh_enabled,
@@ -228,8 +230,10 @@ export default function Settings() {
       errs.proxmox_hosts = 'At least one host is required';
     }
 
-    if (form.poll_interval_seconds < 30 || form.poll_interval_seconds > 3600)
-      errs.poll_interval_seconds = 'Must be between 30 and 3600 seconds';
+    if (form.poll_interval_seconds < 30 || form.poll_interval_seconds > 86400)
+      errs.poll_interval_seconds = 'Must be between 30 and 86400 seconds';
+    if (form.pending_updates_interval_seconds < 3600 || form.pending_updates_interval_seconds > 86400)
+      errs.pending_updates_interval_seconds = 'Must be between 3600 and 86400 seconds';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -256,14 +260,6 @@ export default function Settings() {
     setSaving(true);
     setSaveError(null);
     try {
-      // Change password (existing) only when not enabling from Disabled
-      if (newPassword && authPasswordSet && savedForm?.auth_mode !== 'disabled') {
-        await changePassword(currentPassword, newPassword);
-        setCurrentPassword('');
-        setNewPassword('');
-        setConfirmPassword('');
-        setAuthPasswordSet(true);
-      }
       // Build app_config payload: include all overridden fields
       const appConfigPayload: Record<string, AppConfigEntry> = {};
       for (const [name, cfg] of Object.entries(appConfigs)) {
@@ -305,6 +301,7 @@ export default function Settings() {
 
       const payload: SettingsSaveRequest = {
         poll_interval_seconds: form.poll_interval_seconds,
+        pending_updates_interval_seconds: form.pending_updates_interval_seconds,
         discover_vms: form.discover_vms,
         verify_ssl: form.verify_ssl,
         ssh_enabled: form.ssh_enabled,
@@ -346,8 +343,21 @@ export default function Settings() {
       setToast('Settings saved. Discovery restarting...');
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save settings');
+      return;
     } finally {
       setSaving(false);
+    }
+    // Change password (existing) only after settings are fully committed
+    if (newPassword && authPasswordSet && savedForm?.auth_mode !== 'disabled') {
+      try {
+        await changePassword(currentPassword, newPassword);
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setAuthPasswordSet(true);
+      } catch (err) {
+        setSaveError('Settings saved, but password change failed: ' + (err instanceof Error ? err.message : 'unknown error'));
+      }
     }
   };
 
@@ -439,11 +449,13 @@ export default function Settings() {
             />
             <DiscoverySection
               pollInterval={form.poll_interval_seconds}
+              pendingUpdatesInterval={form.pending_updates_interval_seconds}
               discoverVms={form.discover_vms}
               verifySsl={form.verify_ssl}
               versionDetectMethod={form.version_detect_method}
               errors={errors}
               onPollIntervalChange={(v) => setField('poll_interval_seconds', v)}
+              onPendingUpdatesIntervalChange={(v) => setField('pending_updates_interval_seconds', v)}
               onDiscoverVmsChange={(v) => setField('discover_vms', v)}
               onVerifySslChange={(v) => setField('verify_ssl', v)}
               onVersionDetectMethodChange={(v) => setField('version_detect_method', v)}

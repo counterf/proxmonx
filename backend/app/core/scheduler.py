@@ -35,8 +35,10 @@ class Scheduler:
         self._lock = asyncio.Lock()
         self._running = False
         self._refresh_event = asyncio.Event()
+        self._manual_refresh = False
         self._last_poll: datetime | None = None
         self._task: asyncio.Task[None] | None = None
+        self._in_flight_refreshes: set[str] = set()
 
     @property
     def guests(self) -> dict[str, GuestInfo]:
@@ -68,21 +70,31 @@ class Scheduler:
 
     def trigger_refresh(self) -> None:
         """Trigger an immediate refresh cycle."""
+        self._manual_refresh = True
         self._refresh_event.set()
 
     def trigger_guest_refresh(self, guest_id: str) -> bool:
-        """Schedule a single-guest re-detection out-of-band. Returns False if not found."""
+        """Schedule a single-guest re-detection out-of-band. Returns False if not found or already in-flight."""
         if guest_id not in self._guests:
             return False
+        if guest_id in self._in_flight_refreshes:
+            return True  # already running, treat as success
+        self._in_flight_refreshes.add(guest_id)
         asyncio.create_task(self._refresh_single_guest(guest_id))
         return True
 
     async def _refresh_single_guest(self, guest_id: str) -> None:
         """Re-process one guest: re-detect app and re-check versions."""
+        try:
+            await self._do_refresh_single_guest(guest_id)
+        finally:
+            self._in_flight_refreshes.discard(guest_id)
+
+    async def _do_refresh_single_guest(self, guest_id: str) -> None:
         existing = self._guests.get(guest_id)
         if not existing:
             return
-        hosts = self._engine._settings.get_hosts() if self._engine._settings else []
+        hosts = list(self._engine._settings.proxmox_hosts) if self._engine._settings else []
         host_config = next((h for h in hosts if h.id == existing.host_id), None)
         if not host_config:
             logger.warning("No host config found for guest %s (host_id=%s)", guest_id, existing.host_id)
@@ -121,6 +133,7 @@ class Scheduler:
                 existing,
                 host_config=host_config,
                 host_http_client=host_client,
+                is_manual=True,
             )
         except Exception:
             logger.exception("Single-guest refresh failed for %s", guest_id)
@@ -159,10 +172,12 @@ class Scheduler:
     async def _run_cycle(self) -> None:
         """Execute one discovery cycle."""
         async with self._lock:
+            is_manual = self._manual_refresh
+            self._manual_refresh = False
             self._running = True
             try:
                 old_guests = dict(self._guests)
-                self._guests = await self._engine.run_full_cycle(self._guests)
+                self._guests = await self._engine.run_full_cycle(self._guests, is_manual=is_manual)
                 self._last_poll = datetime.now(timezone.utc)
                 if self._alert_manager:
                     try:

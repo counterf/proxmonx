@@ -3,11 +3,13 @@ import Toggle from '../setup/Toggle';
 
 interface DiscoverySectionProps {
   pollInterval: number;
+  pendingUpdatesInterval: number;
   discoverVms: boolean;
   verifySsl: boolean;
   versionDetectMethod: string;
   errors: Record<string, string | undefined>;
   onPollIntervalChange: (v: number) => void;
+  onPendingUpdatesIntervalChange: (v: number) => void;
   onDiscoverVmsChange: (v: boolean) => void;
   onVerifySslChange: (v: boolean) => void;
   onVersionDetectMethodChange: (v: string) => void;
@@ -21,11 +23,13 @@ const inputClass = (field: string, errors: Record<string, string | undefined>) =
 
 export default function DiscoverySection({
   pollInterval,
+  pendingUpdatesInterval,
   discoverVms,
   verifySsl,
   versionDetectMethod,
   errors,
   onPollIntervalChange,
+  onPendingUpdatesIntervalChange,
   onDiscoverVmsChange,
   onVerifySslChange,
   onVersionDetectMethodChange,
@@ -35,16 +39,29 @@ export default function DiscoverySection({
     <div className="p-4 rounded bg-surface border border-gray-800">
       <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Discovery</h2>
       <div className="space-y-3">
-        <FormField label="Poll Interval (seconds)" required error={errors.poll_interval_seconds} htmlFor="s_poll_interval" hint="How often proxmon re-scans guests and checks for new versions (30 -- 3600)">
+        <FormField label="Poll Interval (seconds)" required error={errors.poll_interval_seconds} htmlFor="s_poll_interval" hint="How often proxmon re-scans guests and checks for new versions (30 – 86400)">
           <input
             id="s_poll_interval"
             type="number"
             min={30}
-            max={3600}
+            max={86400}
             value={pollInterval}
-            onChange={(e) => onPollIntervalChange(parseInt(e.target.value) || 300)}
+            onChange={(e) => onPollIntervalChange(parseInt(e.target.value) || 3600)}
             disabled={disabled}
             className={inputClass('poll_interval_seconds', errors)}
+          />
+        </FormField>
+
+        <FormField label="Package Index Refresh Interval (seconds)" error={errors.pending_updates_interval_seconds} htmlFor="s_pending_updates_interval" hint="How often to run apt-get update / dnf check-update per container (3600 – 86400)">
+          <input
+            id="s_pending_updates_interval"
+            type="number"
+            min={3600}
+            max={86400}
+            value={pendingUpdatesInterval}
+            onChange={(e) => onPendingUpdatesIntervalChange(parseInt(e.target.value) || 3600)}
+            disabled={disabled}
+            className={inputClass('pending_updates_interval_seconds', errors)}
           />
         </FormField>
 

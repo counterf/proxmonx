@@ -5,7 +5,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from app.api.routes import _AppConfigBase, GuestConfigSaveRequest, _keep_or_replace
+from app.api.helpers import _AppConfigBase, _keep_or_replace
+from app.api.routes.guests import GuestConfigSaveRequest
 from app.api.helpers import _get_scheduler, _get_settings, _get_config_store
 from app.core.config_store import ConfigStore
 from app.config import Settings

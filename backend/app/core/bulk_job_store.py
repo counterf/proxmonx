@@ -3,6 +3,7 @@
 import json
 import logging
 import sqlite3
+from contextlib import contextmanager
 from typing import Any
 
 from pydantic import BaseModel
@@ -57,13 +58,21 @@ class BulkJob(BaseModel):
 class BulkJobStore:
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
-        with self._conn() as conn:
+        with self._connect() as conn:
             conn.execute(_CREATE_TABLE)
 
-    def _conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         conn = sqlite3.connect(self._db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _row_to_job(self, row: sqlite3.Row) -> BulkJob:
         d = dict(row)
@@ -74,7 +83,7 @@ class BulkJobStore:
         return BulkJob(**d)
 
     def create(self, job: BulkJob) -> None:
-        with self._conn() as conn:
+        with self._connect() as conn:
             conn.execute(
                 """INSERT INTO bulk_jobs
                    (id, action, status, guest_ids, results, total, completed, failed, skipped,
@@ -102,36 +111,39 @@ class BulkJobStore:
             )
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = list(updates.values()) + [job_id]
-        with self._conn() as conn:
+        with self._connect() as conn:
             conn.execute(f"UPDATE bulk_jobs SET {set_clause} WHERE id = ?", values)
 
     def update_result(self, job_id: str, guest_id: str, status: str, task_id: str | None = None, error: str | None = None) -> None:
-        """Update a single guest result within the job, incrementing counters."""
-        job = self.get(job_id)
-        if not job:
-            return
-        job.results[guest_id] = BulkJobResult(status=status, task_id=task_id, error=error)
-        if status == "success":
-            job.completed += 1
-        elif status == "failed":
-            job.failed += 1
-        elif status == "skipped":
-            job.skipped += 1
-        self.update(
-            job_id,
-            results=job.results,
-            completed=job.completed,
-            failed=job.failed,
-            skipped=job.skipped,
-        )
+        """Update a single guest result within the job, incrementing counters atomically."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM bulk_jobs WHERE id = ?", (job_id,)).fetchone()
+            if not row:
+                return
+            job = self._row_to_job(row)
+            prev = job.results.get(guest_id)
+            prev_status = prev.status if prev else None
+            job.results[guest_id] = BulkJobResult(status=status, task_id=task_id, error=error)
+            if status != prev_status:
+                if status == "success":
+                    job.completed += 1
+                elif status == "failed":
+                    job.failed += 1
+                elif status == "skipped":
+                    job.skipped += 1
+            results_json = json.dumps({k: v.model_dump() for k, v in job.results.items()})
+            conn.execute(
+                "UPDATE bulk_jobs SET results = ?, completed = ?, failed = ?, skipped = ? WHERE id = ?",
+                (results_json, job.completed, job.failed, job.skipped, job_id),
+            )
 
     def get(self, job_id: str) -> BulkJob | None:
-        with self._conn() as conn:
+        with self._connect() as conn:
             row = conn.execute("SELECT * FROM bulk_jobs WHERE id = ?", (job_id,)).fetchone()
         return self._row_to_job(row) if row else None
 
     def list_recent(self, limit: int = 50) -> list[BulkJob]:
-        with self._conn() as conn:
+        with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM bulk_jobs ORDER BY created_at DESC LIMIT ?", (limit,)
             ).fetchall()

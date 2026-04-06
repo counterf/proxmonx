@@ -53,7 +53,11 @@ class SessionStore:
             if row is None:
                 return False
             expires_at = datetime.fromisoformat(row[0])
-            return datetime.now(timezone.utc) < expires_at
+            if datetime.now(timezone.utc) >= expires_at:
+                conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+                conn.commit()
+                return False
+            return True
         finally:
             conn.close()
 

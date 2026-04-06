@@ -30,6 +30,7 @@ _SCALAR_STR_FIELDS: frozenset[str] = frozenset({
 _SCALAR_INT_FIELDS: frozenset[str] = frozenset({
     "poll_interval_seconds", "ntfy_priority",
     "notify_disk_threshold", "notify_disk_cooldown_minutes",
+    "pending_updates_interval_seconds",
 })
 _SCALAR_BOOL_FIELDS: frozenset[str] = frozenset({
     "discover_vms", "verify_ssl", "ssh_enabled", "notifications_enabled",
@@ -42,7 +43,8 @@ _JSON_FIELDS: frozenset[str] = frozenset({
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS settings (
     id                           INTEGER PRIMARY KEY CHECK (id = 1),
-    poll_interval_seconds        INTEGER  DEFAULT 300,
+    poll_interval_seconds        INTEGER  DEFAULT 3600,
+    pending_updates_interval_seconds INTEGER DEFAULT 3600,
     discover_vms                 INTEGER  DEFAULT 0,
     verify_ssl                   INTEGER  DEFAULT 0,
     ssh_enabled                  INTEGER  DEFAULT 1,
@@ -206,8 +208,12 @@ class ConfigStore:
         for host in hosts:
             if isinstance(host, dict) and all(host.get(k) for k in _HOST_REQUIRED_KEYS):
                 return []
-        first = hosts[0] if isinstance(hosts[0], dict) else {}
-        return [k for k in _HOST_REQUIRED_KEYS if not first.get(k)]
+        best = max(
+            (h for h in hosts if isinstance(h, dict)),
+            key=lambda h: sum(1 for k in _HOST_REQUIRED_KEYS if h.get(k)),
+            default={},
+        )
+        return [k for k in _HOST_REQUIRED_KEYS if not best.get(k)]
 
     def merge_into_settings(self, settings: Settings) -> Settings:
         """Return a new Settings instance with DB values taking priority over env/defaults.

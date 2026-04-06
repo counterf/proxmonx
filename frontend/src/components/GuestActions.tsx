@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import type { GuestSummary, TaskRecord } from '../types';
+import type { Guest, TaskRecord } from '../types';
 import { guestAction, refreshGuest, osUpdateGuest, appUpdateGuest, backupGuest, fetchTask } from '../api/client';
 
 async function pollTask(
@@ -10,19 +10,24 @@ async function pollTask(
   const MAX_MS = 10 * 60 * 1000;
   const INTERVAL_MS = 5_000;
   const deadline = Date.now() + MAX_MS;
+  let lastRecord: TaskRecord | null = null;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, INTERVAL_MS));
     const record = await fetchTask(taskId);
+    lastRecord = record;
     onUpdate?.(record);
     if (record.status === 'success' || record.status === 'failed') return record;
   }
+  // Timed out — return last known record with status 'running' so the UI
+  // shows a neutral state rather than a failure (the task may still succeed).
+  if (lastRecord) return { ...lastRecord, status: 'running' };
   throw new Error('Update timed out after 10 minutes');
 }
 
 type ActionKey = 'start' | 'stop' | 'shutdown' | 'restart' | 'snapshot' | 'refresh' | 'os_update' | 'app_update' | 'backup';
 
 interface Props {
-  guest: GuestSummary;
+  guest: Guest;
   onActionComplete?: () => void;
 }
 
@@ -31,7 +36,7 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
   const [pending, setPending] = useState<ActionKey | null>(null);
   const [confirm, setConfirm] = useState<ActionKey | null>(null);
   const [snapshotName, setSnapshotName] = useState('');
-  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [result, setResult] = useState<{ ok: boolean | null; msg: string } | null>(null);
   const [dropdownPos, setDropdownPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -46,6 +51,7 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
       ) {
         setOpen(false);
         setConfirm(null);
+        setResult(null);
       }
     };
     document.addEventListener('mousedown', handler);
@@ -67,20 +73,28 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
         const { task_id } = await osUpdateGuest(guest.id);
         setResult({ ok: true, msg: 'Update running...' });
         const record = await pollTask(task_id);
-        setResult({
-          ok: record.status === 'success',
-          msg: record.status === 'success' ? 'Update complete' : (record.detail ?? 'Update failed'),
-        });
-        setTimeout(() => onActionComplete?.(), 2000);
+        if (record.status === 'running') {
+          setResult({ ok: null, msg: 'Task is still running — check the Tasks panel for results' });
+        } else {
+          setResult({
+            ok: record.status === 'success',
+            msg: record.status === 'success' ? 'Update complete' : (record.detail ?? 'Update failed'),
+          });
+          setTimeout(() => onActionComplete?.(), 2000);
+        }
       } else if (action === 'app_update') {
         const { task_id } = await appUpdateGuest(guest.id);
         setResult({ ok: true, msg: 'Update running...' });
         const record = await pollTask(task_id);
-        setResult({
-          ok: record.status === 'success',
-          msg: record.status === 'success' ? 'App update complete' : (record.detail ?? 'App update failed'),
-        });
-        setTimeout(() => onActionComplete?.(), 2000);
+        if (record.status === 'running') {
+          setResult({ ok: null, msg: 'Task is still running — check the Tasks panel for results' });
+        } else {
+          setResult({
+            ok: record.status === 'success',
+            msg: record.status === 'success' ? 'App update complete' : (record.detail ?? 'App update failed'),
+          });
+          setTimeout(() => onActionComplete?.(), 2000);
+        }
       } else if (action === 'backup') {
         await backupGuest(guest.id);
         setResult({ ok: true, msg: 'Task queued: backup' });
@@ -160,7 +174,7 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
           onClick={(e) => e.stopPropagation()}
         >
           {result ? (
-            <div className={`px-3 py-2 text-xs ${result.ok ? 'text-green-400' : 'text-red-400'}`}>
+            <div className={`px-3 py-2 text-xs ${result.ok === null ? 'text-amber-400' : result.ok ? 'text-green-400' : 'text-red-400'}`}>
               {result.msg}
             </div>
           ) : pending === 'os_update' || pending === 'app_update' ? (

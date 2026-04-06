@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { GuestSummary } from '../types';
-import { fetchGuests, triggerRefresh, HttpError } from '../api/client';
+import type { Guest } from '../types';
+import { fetchGuests, triggerRefresh, fetchHealth, HttpError } from '../api/client';
 
 interface UseGuestsResult {
-  guests: GuestSummary[];
+  guests: Guest[];
   loading: boolean;
   error: string | null;
   refreshing: boolean;
+  isDiscovering: boolean;
   lastRefreshed: Date | null;
   refresh: () => Promise<void>;
 }
@@ -14,10 +15,11 @@ interface UseGuestsResult {
 const POLL_INTERVAL = 60_000; // 60 seconds
 
 export function useGuests(): UseGuestsResult {
-  const [guests, setGuests] = useState<GuestSummary[]>([]);
+  const [guests, setGuests] = useState<Guest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [isDiscovering, setIsDiscovering] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
@@ -61,8 +63,20 @@ export function useGuests(): UseGuestsResult {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await triggerRefresh();
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const { snapshot_at } = await triggerRefresh();
+      setIsDiscovering(true);
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+        if (!mountedRef.current) return;
+        try {
+          const health = await fetchHealth();
+          if (!snapshot_at || (health.last_poll && health.last_poll > snapshot_at)) break;
+        } catch (err) {
+          if (err instanceof HttpError && err.status === 401) return;
+          // ignore other transient health check errors
+        }
+      }
       await load();
     } catch (err) {
       if (!mountedRef.current) return;
@@ -71,6 +85,7 @@ export function useGuests(): UseGuestsResult {
     } finally {
       if (mountedRef.current) {
         setRefreshing(false);
+        setIsDiscovering(false);
       }
     }
   }, [load]);
@@ -85,5 +100,5 @@ export function useGuests(): UseGuestsResult {
     };
   }, [load, stopPolling]);
 
-  return { guests, loading, error, refreshing, lastRefreshed, refresh };
+  return { guests, loading, error, refreshing, isDiscovering, lastRefreshed, refresh };
 }

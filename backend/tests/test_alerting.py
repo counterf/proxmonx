@@ -223,18 +223,3 @@ class TestAlertManagerDisabled:
         notifier.send.assert_not_called()
 
 
-@pytest.mark.asyncio
-class TestUpdateSettings:
-
-    async def test_update_settings_changes_threshold(self):
-        notifier = NtfyNotifier(url="https://ntfy.example.com/test")
-        notifier.send = AsyncMock(return_value=True)
-        am = AlertManager(notifier, _make_settings(notify_disk_threshold=95))
-
-        guest = _make_guest(disk_used=92, disk_total=100)
-        await am.evaluate({}, {"host1:100": guest})
-        notifier.send.assert_not_called()
-
-        am.update_settings(_make_settings(notify_disk_threshold=90))
-        await am.evaluate({}, {"host1:100": guest})
-        notifier.send.assert_called_once()

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import type { GuestDetail as GuestDetailType, AppConfigEntry, AppConfigDefault, CustomAppDef, GitHubTestResult } from '../types';
+import type { Guest as GuestDetailType, AppConfigEntry, AppConfigDefault, CustomAppDef, GitHubTestResult } from '../types';
 import { fetchGuest, fetchGuestConfig, saveGuestConfig, deleteGuestConfig, triggerRefresh, fetchAppConfigDefaults, fetchCustomApps, testGithubRepo } from '../api/client';
 import StatusBadge from './StatusBadge';
 import LoadingSpinner from './LoadingSpinner';

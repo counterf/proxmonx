@@ -1,6 +1,5 @@
 import type {
-  GuestSummary,
-  GuestDetail,
+  Guest,
   HealthStatus,
   SetupStatus,
   FullSettings,
@@ -70,16 +69,16 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   }
 }
 
-export async function fetchGuests(): Promise<GuestSummary[]> {
-  return fetchJson<GuestSummary[]>(API_PATHS.GUESTS);
+export async function fetchGuests(): Promise<Guest[]> {
+  return fetchJson<Guest[]>(API_PATHS.GUESTS);
 }
 
-export async function fetchGuest(id: string): Promise<GuestDetail> {
-  return fetchJson<GuestDetail>(API_PATHS.GUEST(id));
+export async function fetchGuest(id: string): Promise<Guest> {
+  return fetchJson<Guest>(API_PATHS.GUEST(id));
 }
 
-export async function triggerRefresh(): Promise<{ status: string }> {
-  return fetchJson<{ status: string }>(API_PATHS.REFRESH, { method: 'POST' });
+export async function triggerRefresh(): Promise<{ status: string; snapshot_at: string | null }> {
+  return fetchJson<{ status: string; snapshot_at: string | null }>(API_PATHS.REFRESH, { method: 'POST' });
 }
 
 export async function fetchHealth(): Promise<HealthStatus> {

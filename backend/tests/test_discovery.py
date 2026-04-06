@@ -20,7 +20,7 @@ class TestResolveConfig:
     def _make_engine(self, **settings_overrides: Any) -> DiscoveryEngine:
         settings = _make_settings(**settings_overrides)
         return DiscoveryEngine(
-            ProxmoxClient(settings.get_hosts()[0]), GitHubClient(settings),
+            GitHubClient(settings),
             SSHClient(settings), settings=settings,
         )
 
@@ -87,7 +87,6 @@ class TestForcedDetector:
             },
         )
         engine = DiscoveryEngine(
-            ProxmoxClient(settings.get_hosts()[0]),
             GitHubClient(settings),
             SSHClient(settings),
             settings=settings,
@@ -117,7 +116,6 @@ class TestForcedDetector:
             },
         )
         engine = DiscoveryEngine(
-            ProxmoxClient(settings.get_hosts()[0]),
             GitHubClient(settings),
             SSHClient(settings),
             settings=settings,
@@ -242,7 +240,6 @@ class TestDiscoveryEngine:
 
         settings = _make_settings()
         engine = DiscoveryEngine(
-            ProxmoxClient(settings.get_hosts()[0]),
             GitHubClient(settings),
             SSHClient(settings),
             settings=settings,
@@ -270,7 +267,6 @@ class TestDiscoveryEngine:
 
         settings = _make_settings()
         engine = DiscoveryEngine(
-            ProxmoxClient(settings.get_hosts()[0]),
             GitHubClient(settings),
             SSHClient(settings),
             settings=settings,
@@ -309,7 +305,6 @@ class TestDiscoveryEngine:
             app_config={"sonarr": AppConfig(port=9999, api_key="my-key")},
         )
         engine = DiscoveryEngine(
-            ProxmoxClient(settings.get_hosts()[0]),
             GitHubClient(settings),
             SSHClient(settings),
             settings=settings,
@@ -359,7 +354,6 @@ class TestGithubRepoOverride:
             app_config={"sonarr": AppConfig(github_repo="MyFork/Sonarr")},
         )
         engine = DiscoveryEngine(
-            ProxmoxClient(settings.get_hosts()[0]),
             GitHubClient(settings),
             SSHClient(settings),
             settings=settings,
@@ -398,7 +392,6 @@ class TestGithubRepoOverride:
 
         settings = _make_settings()
         engine = DiscoveryEngine(
-            ProxmoxClient(settings.get_hosts()[0]),
             GitHubClient(settings),
             SSHClient(settings),
             settings=settings,

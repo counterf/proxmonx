@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useGuests } from '../hooks/useGuests';
-import type { UpdateStatus, GuestType, GuestSummary } from '../types';
+import type { UpdateStatus, GuestType, Guest } from '../types';
 import FilterBar from './FilterBar';
 import { GuestTableRow, GuestCard } from './GuestRow';
 import LoadingSpinner from './LoadingSpinner';
@@ -28,12 +28,12 @@ export function compareSemver(a: string, b: string): number {
   return 0;
 }
 
-export function diskPercent(g: GuestSummary): number | null {
+export function diskPercent(g: Guest): number | null {
   if (g.disk_used == null || g.disk_total == null || g.disk_total === 0) return null;
   return g.disk_used / g.disk_total;
 }
 
-export function compareGuests(a: GuestSummary, b: GuestSummary, col: SortColumn, dir: SortDirection): number {
+export function compareGuests(a: Guest, b: Guest, col: SortColumn, dir: SortDirection): number {
   if (col === 'pending_updates') {
     const pa = a.pending_updates ?? -1;
     const pb = b.pending_updates ?? -1;
@@ -51,7 +51,7 @@ export function compareGuests(a: GuestSummary, b: GuestSummary, col: SortColumn,
     return dir === 'desc' ? -cmp : cmp;
   }
 
-  const getVal = (g: GuestSummary): string | null => {
+  const getVal = (g: Guest): string | null => {
     switch (col) {
       case 'name': return g.name;
       case 'type': return g.type;
@@ -103,7 +103,7 @@ function SortIcon({ active, direction }: { active: boolean; direction: SortDirec
 }
 
 export default function Dashboard({ configured }: { configured: boolean }) {
-  const { guests, loading, error, refreshing, lastRefreshed, refresh } = useGuests();
+  const { guests, loading, error, refreshing, isDiscovering, lastRefreshed, refresh } = useGuests();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [search, setSearch] = useState(searchParams.get('q') || '');
@@ -295,7 +295,7 @@ export default function Dashboard({ configured }: { configured: boolean }) {
             onClick={refresh}
             disabled={refreshing}
             aria-disabled={refreshing}
-            aria-label={refreshing ? 'Refreshing...' : 'Refresh'}
+            aria-label={isDiscovering ? 'Discovering...' : refreshing ? 'Refreshing...' : 'Refresh'}
             className="inline-flex items-center gap-1.5 px-3 py-2.5 sm:py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors"
           >
             {refreshing && (
@@ -304,7 +304,7 @@ export default function Dashboard({ configured }: { configured: boolean }) {
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
             )}
-            {refreshing ? 'Refreshing...' : 'Refresh'}
+            {isDiscovering ? 'Discovering...' : refreshing ? 'Refreshing...' : 'Refresh'}
           </button>
 
           <ColumnToggle visibleColumns={visibleColumns} onToggle={toggleColumn} onReset={resetToDefaults} />

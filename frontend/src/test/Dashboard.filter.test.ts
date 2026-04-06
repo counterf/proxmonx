@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { compareSemver, compareGuests, diskPercent } from '../components/Dashboard';
-import type { GuestSummary } from '../types';
+import type { Guest } from '../types';
 
-function makeGuest(overrides: Partial<GuestSummary> = {}): GuestSummary {
+function makeGuest(overrides: Partial<Guest> = {}): Guest {
   return {
     id: '100',
     name: 'test-guest',
@@ -146,7 +146,7 @@ describe('compareGuests', () => {
 
 // --- filtering logic (pure function test) ---
 describe('filtering guests', () => {
-  const guests: GuestSummary[] = [
+  const guests: Guest[] = [
     makeGuest({ id: '1', name: 'plex-server', type: 'lxc', update_status: 'up-to-date', host_id: 'h1', app_name: 'Plex' }),
     makeGuest({ id: '2', name: 'sonarr-vm', type: 'vm', update_status: 'outdated', host_id: 'h1', app_name: 'Sonarr' }),
     makeGuest({ id: '3', name: 'radarr-ct', type: 'lxc', update_status: 'outdated', host_id: 'h2', app_name: 'Radarr' }),
@@ -155,9 +155,9 @@ describe('filtering guests', () => {
 
   // Replicate the filter logic from Dashboard.tsx
   function filterGuests(
-    all: GuestSummary[],
+    all: Guest[],
     opts: { status?: string; type?: string; host?: string; search?: string },
-  ): GuestSummary[] {
+  ): Guest[] {
     return all.filter((g) => {
       if (opts.status && opts.status !== 'all' && g.update_status !== opts.status) return false;
       if (opts.type && opts.type !== 'all' && g.type !== opts.type) return false;

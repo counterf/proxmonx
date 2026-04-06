@@ -30,13 +30,11 @@ class DiscoveryEngine:
 
     def __init__(
         self,
-        proxmox: ProxmoxClient | None,
         github: GitHubClient,
         ssh: SSHClient,
         http_client: httpx.AsyncClient | None = None,
         settings: Settings | None = None,
     ) -> None:
-        self._proxmox = proxmox
         self._github = github
         self._ssh = ssh
         self._http_client = http_client
@@ -46,6 +44,7 @@ class DiscoveryEngine:
     async def run_full_cycle(
         self,
         existing_guests: dict[str, GuestInfo],
+        is_manual: bool = False,
     ) -> dict[str, GuestInfo]:
         """Run a complete discovery + detection + version check cycle.
 
@@ -53,20 +52,20 @@ class DiscoveryEngine:
         results are merged.  Guest IDs are namespaced as
         ``{host_id}:{vmid}`` to avoid collisions.
         """
-        hosts = self._settings.get_hosts() if self._settings else []
+        hosts = list(self._settings.proxmox_hosts) if self._settings else []
 
         if not hosts:
             logger.warning("No Proxmox hosts configured -- skipping discovery")
             return {}
 
         if len(hosts) == 1:
-            return await self._run_host_cycle(hosts[0], existing_guests)
+            return await self._run_host_cycle(hosts[0], existing_guests, is_manual=is_manual)
 
         logger.info("Starting multi-host discovery across %d hosts", len(hosts))
         start = datetime.now(timezone.utc)
 
         tasks = [
-            self._run_host_cycle(host, existing_guests)
+            self._run_host_cycle(host, existing_guests, is_manual=is_manual)
             for host in hosts
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -91,6 +90,7 @@ class DiscoveryEngine:
         self,
         host_config: ProxmoxHostConfig,
         existing_guests: dict[str, GuestInfo],
+        is_manual: bool = False,
     ) -> dict[str, GuestInfo]:
         """Run discovery for a single Proxmox host, namespacing guest IDs."""
         logger.info("Starting discovery for host %s (%s)", host_config.label, host_config.host)
@@ -124,6 +124,7 @@ class DiscoveryEngine:
                     existing_guests.get(guest.id),
                     host_config=host_config,
                     host_http_client=host_client,
+                    is_manual=is_manual,
                 )
                 for guest in guests
             ]
@@ -150,6 +151,7 @@ class DiscoveryEngine:
         previous: GuestInfo | None,
         host_config: ProxmoxHostConfig | None = None,
         host_http_client: httpx.AsyncClient | None = None,
+        is_manual: bool = False,
     ) -> GuestInfo:
         """Process a single guest: resolve IP, detect app, check versions."""
         async with self._semaphore:
@@ -166,7 +168,7 @@ class DiscoveryEngine:
                             http_client=host_http_client,
                         )
                     else:
-                        proxmox = self._proxmox
+                        proxmox = None
 
                 if proxmox and not guest.ip:
                     guest.ip, guest.os_type = await proxmox.get_guest_network(
@@ -199,15 +201,16 @@ class DiscoveryEngine:
 
                 # Get installed version
                 if guest.detector_used and guest.ip:
-                    await self._check_version(guest, host_config=host_config)
+                    await self._check_version(guest, host_config=host_config, http_client=host_http_client)
 
                 # Check pending OS package updates and reboot status (LXC only)
                 if previous:
                     guest.pending_updates = previous.pending_updates
                     guest.pending_update_packages = previous.pending_update_packages
                     guest.reboot_required = previous.reboot_required
+                    guest.pending_updates_checked_at = previous.pending_updates_checked_at
                 if host_config:
-                    await self._check_pending_updates(guest, host_config)
+                    await self._check_pending_updates(guest, host_config, previous=previous, is_manual=is_manual)
 
                 # Check community-script presence (once per session; preserved if already known)
                 if previous and previous.has_community_script is not None:
@@ -419,16 +422,32 @@ class DiscoveryEngine:
         self,
         guest: GuestInfo,
         host_config: ProxmoxHostConfig,
+        previous: GuestInfo | None = None,
+        is_manual: bool = False,
     ) -> None:
         """Check pending OS package updates and reboot status for an LXC container.
 
         Only runs for running LXC containers with pct_exec_enabled and a known os_type.
+        Respects the pending_updates_interval_seconds TTL for automatic cycles; manual
+        refreshes always run the SSH check regardless of when it last ran.
         Updates guest.pending_updates, guest.pending_update_packages, guest.reboot_required in place.
         Both checks run in parallel to reduce SSH round-trips.
         """
         if guest.type != "lxc" or guest.status != "running":
             return
         if not guest.os_type or not host_config.pct_exec_enabled:
+            return
+
+        # TTL guard: skip SSH check if within the configured interval (automatic cycles only)
+        ttl = (self._settings.pending_updates_interval_seconds
+               if self._settings else 3600)
+        if (
+            not is_manual
+            and previous
+            and previous.pending_updates_checked_at is not None
+            and (datetime.now(timezone.utc) - previous.pending_updates_checked_at).total_seconds() < ttl
+        ):
+            # Cached values already copied by _process_guest — nothing to do
             return
 
         vmid = guest.id.rsplit(":", 1)[-1]
@@ -451,6 +470,11 @@ class DiscoveryEngine:
             guest.pending_updates = len(packages)
         if reboot is not None:
             guest.reboot_required = reboot
+        # Only record freshness when the primary probe succeeded.
+        # If SSH was unreachable (packages is None), leave the timestamp unset
+        # so the next cycle retries rather than serving stale counts for the full TTL.
+        if packages is not None:
+            guest.pending_updates_checked_at = datetime.now(timezone.utc)
 
     async def _check_community_script(
         self,
@@ -481,6 +505,7 @@ class DiscoveryEngine:
         self,
         guest: GuestInfo,
         host_config: ProxmoxHostConfig | None = None,
+        http_client: httpx.AsyncClient | None = None,
     ) -> None:
         """Check installed and latest versions for a detected app."""
         from app.detectors.registry import DETECTOR_MAP
@@ -520,9 +545,13 @@ class DiscoveryEngine:
         # Track TrueNAS latest version from the same probe (avoids race on singleton)
         _truenas_latest: str | None = None
         try:
+            extra_kwargs: dict = {}
+            if detector.name == "truenas":
+                extra_kwargs["verify_ssl"] = host_config.verify_ssl if host_config else False
             result = await detector.get_installed_version(
                 probe_host, port=port_override, api_key=api_key, scheme=scheme,
-                http_client=self._http_client,
+                http_client=http_client or self._http_client,
+                **extra_kwargs,
             )
             # TrueNAS returns (installed, latest) tuple; others return str|None
             if isinstance(result, tuple):
@@ -565,7 +594,7 @@ class DiscoveryEngine:
                 )
 
         # Get latest version: use TrueNAS probe result if available, then custom, then GitHub
-        custom_latest = _truenas_latest or await detector.get_latest_version(http_client=self._http_client)
+        custom_latest = _truenas_latest or await detector.get_latest_version(http_client=http_client or self._http_client)
         if custom_latest:
             guest.latest_version = custom_latest
             guest.latest_version_source = "custom"
@@ -714,15 +743,6 @@ def _extract_host_ip(host_url: str) -> str | None:
     return host_url.split(":")[0]
 
 
-def _normalize_version_string(version: str) -> str:
-    """Strip v prefix and build-hash suffixes (e.g. '1.40.0.7998-c29d4c0c8' -> '1.40.0.7998').
-
-    Preserves legitimate pre-release suffixes like '1.0.0-beta.1'.
-    Only strips suffixes that look like build hashes (7+ hex chars after a hyphen).
-    """
-    return normalize_version(version, strip_v=True)
-
-
 def _determine_update_status(
     installed: str | None, latest: str | None
 ) -> str:
@@ -732,8 +752,8 @@ def _determine_update_status(
 
     from packaging.version import Version, InvalidVersion
 
-    norm_installed = _normalize_version_string(installed)
-    norm_latest = _normalize_version_string(latest)
+    norm_installed = normalize_version(installed, strip_v=True)
+    norm_latest = normalize_version(latest, strip_v=True)
 
     try:
         return "up-to-date" if Version(norm_installed) >= Version(norm_latest) else "outdated"

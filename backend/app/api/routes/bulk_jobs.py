@@ -16,12 +16,7 @@ from app.api.helpers import (
     _get_task_store,
     _require_api_key,
 )
-from app.api.routes.guests import (
-    _app_update_in_progress,
-    _os_update_in_progress,
-    _run_app_update_bg,
-    _run_os_update_bg,
-)
+from app.api.routes.guests import _run_app_update_bg, _run_os_update_bg
 from app.config import ProxmoxHostConfig, Settings
 from app.core.bulk_job_store import BulkJob, BulkJobResult, BulkJobStore
 from app.core.task_store import TaskRecord, TaskStore
@@ -49,7 +44,7 @@ async def _run_bulk_job(
     config_store: Any,
 ) -> None:
     """Background coroutine: process guests sequentially, update job state."""
-    from app.core.ssh import SSHClient
+    from app.core.ssh import OS_UPDATE_COMMANDS, SSHClient
 
     bulk_job_store.update(job_id, status="running", started_at=_now_iso())
 
@@ -87,6 +82,11 @@ async def _run_bulk_job(
             bulk_job_store.update_result(job_id, guest_id, "skipped", error="Guest not eligible")
             continue
 
+        if action == "os_update" and (not guest.os_type or guest.os_type not in OS_UPDATE_COMMANDS):
+            task_store.update(task_id, status="failed", detail=f"Unsupported OS: {guest.os_type!r}", finished_at=_now_iso())
+            bulk_job_store.update_result(job_id, guest_id, "skipped", error=f"Unsupported OS: {guest.os_type!r}")
+            continue
+
         # Resolve host config
         try:
             settings_data = config_store.load()
@@ -115,15 +115,13 @@ async def _run_bulk_job(
         )
         ssh = SSHClient(ssh_settings)
 
-        task_store.update(task_id, status="running")
-
         try:
             if action == "os_update":
-                if guest_id in _os_update_in_progress:
+                if task_store.list_running_for_guest(guest_id, "os_update"):
                     task_store.update(task_id, status="failed", detail="Update already in progress", finished_at=_now_iso())
                     bulk_job_store.update_result(job_id, guest_id, "skipped", error="Update already in progress")
                     continue
-                _os_update_in_progress.add(guest_id)
+                task_store.update(task_id, status="running")
                 await _run_os_update_bg(
                     task_id=task_id,
                     guest_id=guest_id,
@@ -135,11 +133,11 @@ async def _run_bulk_job(
                     task_store=task_store,
                 )
             else:
-                if guest_id in _app_update_in_progress:
+                if task_store.list_running_for_guest(guest_id, "app_update"):
                     task_store.update(task_id, status="failed", detail="Update already in progress", finished_at=_now_iso())
                     bulk_job_store.update_result(job_id, guest_id, "skipped", error="Update already in progress")
                     continue
-                _app_update_in_progress.add(guest_id)
+                task_store.update(task_id, status="running")
                 await _run_app_update_bg(
                     task_id=task_id,
                     guest_id=guest_id,

@@ -86,7 +86,8 @@ class Settings(BaseSettings):
     proxmox_hosts: list[ProxmoxHostConfig] = []
 
     # Discovery
-    poll_interval_seconds: int = 300
+    poll_interval_seconds: int = 3600
+    pending_updates_interval_seconds: int = 3600  # minimum TTL between apt-get update runs
     discover_vms: bool = False
     verify_ssl: bool = False
 
@@ -149,7 +150,4 @@ class Settings(BaseSettings):
     # Trust X-Forwarded-* headers from reverse proxies
     trust_proxy_headers: bool = False
 
-    def get_hosts(self) -> list[ProxmoxHostConfig]:
-        """Return the list of configured Proxmox hosts."""
-        return list(self.proxmox_hosts)
 

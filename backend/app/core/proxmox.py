@@ -44,6 +44,10 @@ class ProxmoxClient:
     async def _post(self, path: str, data: dict | None = None) -> dict:
         """Execute a POST request against the Proxmox API."""
         url = f"{self._base_url}{path}"
+        if self._http_client:
+            response = await self._http_client.post(url, headers=self._headers, json=data or {})
+            response.raise_for_status()
+            return response.json()
         async with httpx.AsyncClient(verify=self._verify_ssl, timeout=15.0) as client:
             response = await client.post(url, headers=self._headers, json=data or {})
             response.raise_for_status()

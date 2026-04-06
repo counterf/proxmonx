@@ -43,11 +43,6 @@ export interface Guest {
   has_community_script?: boolean | null;
 }
 
-/** @deprecated Use Guest instead */
-export type GuestSummary = Guest;
-/** @deprecated Use Guest instead */
-export type GuestDetail = Guest;
-
 export interface TaskRecord {
   id: string;
   guest_id: string;
@@ -135,6 +130,7 @@ export interface ProxmoxHost {
 
 export interface FullSettings {
   poll_interval_seconds: number;
+  pending_updates_interval_seconds: number;
   discover_vms: boolean;
   verify_ssl: boolean;
   ssh_enabled: boolean;
@@ -162,6 +158,7 @@ export interface FullSettings {
 
 export interface SettingsSaveRequest {
   poll_interval_seconds: number;
+  pending_updates_interval_seconds?: number;
   discover_vms: boolean;
   verify_ssl: boolean;
   ssh_enabled: boolean;

@@ -37,6 +37,7 @@ class TrueNASDetector(BaseDetector):
         api_key: str | None = None,
         scheme: str = "https",
         http_client=None,
+        verify_ssl: bool = False,
     ) -> tuple[str, str | None]:
         port = port or self.default_port
         # wss:// for https (default), ws:// for http
@@ -50,10 +51,10 @@ class TrueNASDetector(BaseDetector):
 
         ssl_ctx: ssl.SSLContext | bool
         if ws_scheme == "wss":
-            # TrueNAS commonly uses self-signed certificates; skip verification.
             ssl_ctx = ssl.create_default_context()
-            ssl_ctx.check_hostname = False
-            ssl_ctx.verify_mode = ssl.CERT_NONE
+            if not verify_ssl:
+                ssl_ctx.check_hostname = False
+                ssl_ctx.verify_mode = ssl.CERT_NONE
         else:
             ssl_ctx = False  # type: ignore[assignment]
 

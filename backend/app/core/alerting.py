@@ -31,15 +31,6 @@ class AlertManager:
         self._enabled = settings.notifications_enabled
         self._cooldowns: dict[tuple[str, str], datetime] = {}
 
-    def update_settings(self, settings: Settings) -> None:
-        self._disk_threshold = settings.notify_disk_threshold
-        self._cooldown_minutes = settings.notify_disk_cooldown_minutes
-        self._notify_outdated = settings.notify_on_outdated
-        self._enabled = settings.notifications_enabled
-
-    def update_notifier(self, notifier: NtfyNotifier) -> None:
-        self._notifier = notifier
-
     def _cooldown_expired(self, key: tuple[str, str]) -> bool:
         last = self._cooldowns.get(key)
         if last is None:

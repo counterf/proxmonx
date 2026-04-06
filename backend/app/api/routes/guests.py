@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
-from app.config import ProxmoxHostConfig
+from app.config import ProxmoxHostConfig, Settings
 from app.core.proxmox import ProxmoxClient
 from app.core.task_store import TaskRecord, TaskStore
 from app.detectors.registry import DETECTOR_MAP
@@ -31,11 +31,6 @@ from app.api.helpers import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# Tracks guest IDs with an OS update currently in progress to prevent concurrent runs.
-_os_update_in_progress: set[str] = set()
-# Tracks guest IDs with an app update currently in progress to prevent concurrent runs.
-_app_update_in_progress: set[str] = set()
 
 
 def _now_iso() -> str:
@@ -315,8 +310,6 @@ async def _run_os_update_bg(
             detail=str(exc),
             finished_at=_now_iso(),
         )
-    finally:
-        _os_update_in_progress.discard(guest_id)
 
 
 @router.post("/api/guests/{guest_id}/os-update", dependencies=[Depends(_require_api_key)])
@@ -352,9 +345,6 @@ async def os_update_guest(
 
     if task_store.list_running_for_guest(guest_id, "os_update"):
         raise HTTPException(status_code=409, detail="An OS update is already running for this guest")
-    if guest_id in _os_update_in_progress:
-        raise HTTPException(status_code=409, detail="An OS update is already in progress for this guest")
-    _os_update_in_progress.add(guest_id)
 
     ssh_settings = Settings(
         ssh_enabled=True,
@@ -373,9 +363,18 @@ async def os_update_guest(
         batch_id=batch_id,
     ))
 
-    asyncio.create_task(_run_os_update_bg(
-        task_id, guest_id, ssh, host_config, vmid, guest.os_type, scheduler, task_store,
-    ))
+    try:
+        asyncio.create_task(_run_os_update_bg(
+            task_id, guest_id, ssh, host_config, vmid, guest.os_type, scheduler, task_store,
+        ))
+    except Exception as exc:
+        task_store.update(
+            task_id,
+            status="failed",
+            detail=f"Failed to schedule OS update: {exc}",
+            finished_at=_now_iso(),
+        )
+        raise HTTPException(status_code=500, detail="Failed to schedule OS update") from exc
 
     return {"task_id": task_id, "status": "running"}
 
@@ -411,8 +410,6 @@ async def _run_app_update_bg(
             detail=str(exc),
             finished_at=_now_iso(),
         )
-    finally:
-        _app_update_in_progress.discard(guest_id)
 
 
 @router.post("/api/guests/{guest_id}/app-update", dependencies=[Depends(_require_api_key)])
@@ -448,9 +445,6 @@ async def app_update_guest(
 
     if task_store.list_running_for_guest(guest_id, "app_update"):
         raise HTTPException(status_code=409, detail="An app update is already running for this guest")
-    if guest_id in _app_update_in_progress:
-        raise HTTPException(status_code=409, detail="An app update is already in progress for this guest")
-    _app_update_in_progress.add(guest_id)
 
     ssh_settings = Settings(
         ssh_enabled=True,
@@ -469,9 +463,18 @@ async def app_update_guest(
         batch_id=batch_id,
     ))
 
-    asyncio.create_task(_run_app_update_bg(
-        task_id, guest_id, ssh, host_config, vmid, scheduler, task_store,
-    ))
+    try:
+        asyncio.create_task(_run_app_update_bg(
+            task_id, guest_id, ssh, host_config, vmid, scheduler, task_store,
+        ))
+    except Exception as exc:
+        task_store.update(
+            task_id,
+            status="failed",
+            detail=f"Failed to schedule app update: {exc}",
+            finished_at=_now_iso(),
+        )
+        raise HTTPException(status_code=500, detail="Failed to schedule app update") from exc
 
     return {"task_id": task_id, "status": "running"}
 
@@ -537,9 +540,12 @@ async def backup_guest(
 
 
 @router.post("/api/refresh", status_code=202, dependencies=[Depends(_require_api_key)])
-async def refresh(scheduler=Depends(_get_scheduler)) -> dict[str, str]:
+async def refresh(scheduler=Depends(_get_scheduler)) -> dict[str, str | None]:
     """Trigger an immediate re-discovery cycle."""
     if scheduler is None:
         raise HTTPException(status_code=503, detail="proxmon is not configured")
+    if scheduler.is_running:
+        return {"status": "busy", "snapshot_at": None}
+    snapshot = scheduler.last_poll
     scheduler.trigger_refresh()
-    return {"status": "started"}
+    return {"status": "started", "snapshot_at": snapshot.isoformat() if snapshot else None}
