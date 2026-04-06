@@ -41,6 +41,7 @@ export interface Guest {
   pending_update_packages?: string[] | null;
   reboot_required?: boolean | null;
   has_community_script?: boolean | null;
+  pending_updates_checked_at?: string | null;
 }
 
 export interface TaskRecord {
@@ -191,6 +192,7 @@ export interface ConnectionTestRequest {
   token_secret: string;
   node: string;
   verify_ssl: boolean;
+  host_id?: string;
 }
 
 export interface ConnectionTestResult {

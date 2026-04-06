@@ -172,6 +172,8 @@ async def start_bulk_job(
     scheduler=Depends(_get_scheduler),
     config_store=Depends(_get_config_store),
 ) -> dict:
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="Proxmon is not configured yet")
     if request_body.action not in ("os_update", "app_update"):
         raise HTTPException(status_code=400, detail="action must be os_update or app_update")
     if not request_body.guest_ids:

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import type { Guest as GuestDetailType, AppConfigEntry, AppConfigDefault, CustomAppDef, GitHubTestResult } from '../types';
-import { fetchGuest, fetchGuestConfig, saveGuestConfig, deleteGuestConfig, triggerRefresh, fetchAppConfigDefaults, fetchCustomApps, testGithubRepo } from '../api/client';
+import { fetchGuest, fetchGuestConfig, saveGuestConfig, deleteGuestConfig, triggerRefresh, refreshGuest, fetchAppConfigDefaults, fetchCustomApps, testGithubRepo } from '../api/client';
 import StatusBadge from './StatusBadge';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorBanner from './ErrorBanner';
@@ -66,7 +66,7 @@ function InstanceSettings({ guestId, appName, detectorUsed }: { guestId: string;
     try {
       await saveGuestConfig(guestId, cfg);
       setMessage('Saved. Refreshing...');
-      await triggerRefresh();
+      await refreshGuest(guestId);
       setMessage('Saved successfully.');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Save failed');
@@ -82,7 +82,7 @@ function InstanceSettings({ guestId, appName, detectorUsed }: { guestId: string;
       await deleteGuestConfig(guestId);
       setCfg({});
       setMessage('Reset to defaults. Refreshing...');
-      await triggerRefresh();
+      await refreshGuest(guestId);
       setMessage('Reset to defaults.');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Reset failed');
@@ -113,7 +113,7 @@ function InstanceSettings({ guestId, appName, detectorUsed }: { guestId: string;
       await saveGuestConfig(guestId, updated);
       setCfg(updated);
       setMessage('Cleared. Refreshing...');
-      await triggerRefresh();
+      await refreshGuest(guestId);
       setMessage('Cleared successfully.');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Clear failed');
@@ -497,9 +497,9 @@ export default function GuestDetail() {
                     ))}
                   </ul>
                 )}
-                {guest.last_checked && (
+                {guest.pending_updates_checked_at && (
                   <p className="text-xs text-gray-600 mt-1">
-                    Last checked: {new Date(guest.last_checked).toLocaleString()}
+                    Last checked: {new Date(guest.pending_updates_checked_at).toLocaleString()}
                   </p>
                 )}
               </div>
@@ -515,9 +515,9 @@ export default function GuestDetail() {
                     <span className="text-green-400">{'\u2713'} No reboot needed</span>
                   )}
                 </div>
-                {guest.last_checked && (
+                {guest.pending_updates_checked_at && (
                   <p className="text-xs text-gray-600 mt-1">
-                    Last checked: {new Date(guest.last_checked).toLocaleString()}
+                    Last checked: {new Date(guest.pending_updates_checked_at).toLocaleString()}
                   </p>
                 )}
               </div>

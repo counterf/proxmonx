@@ -44,7 +44,7 @@ async def _poll_upid(
     http_client: httpx.AsyncClient | None = None,
 ) -> None:
     """Background task: poll Proxmox for UPID completion and update the task record."""
-    client = ProxmoxClient(host_config, http_client=http_client)
+    client = ProxmoxClient(host_config, http_client=None)
     for _ in range(60):  # poll every 10s up to 10 min
         await asyncio.sleep(10)
         try:

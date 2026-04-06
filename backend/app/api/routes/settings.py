@@ -461,11 +461,19 @@ async def list_host_backup_storages(
 @router.post("/api/settings/test-connection", dependencies=[Depends(_require_api_key)])
 async def test_connection(
     body: ConnectionTestRequest,
+    config_store=Depends(_get_config_store),
 ) -> dict[str, bool | str | dict[str, str | int | float | bool | None] | None]:
     """Test Proxmox connectivity without saving settings."""
+    token_secret = body.token_secret
+    if token_secret == "***" and body.host_id is not None:
+        data = config_store.load()
+        host_dict = next((h for h in data.get("proxmox_hosts", []) if h.get("id") == body.host_id), None)
+        if host_dict is None:
+            return {"success": False, "message": "Saved host not found", "node_info": None}
+        token_secret = host_dict.get("token_secret", "")
     base_url = f"{body.host.rstrip('/')}/api2/json"
     headers = {
-        "Authorization": f"PVEAPIToken={body.token_id}={body.token_secret}",
+        "Authorization": f"PVEAPIToken={body.token_id}={token_secret}",
     }
     try:
         async with httpx.AsyncClient(verify=body.verify_ssl, timeout=10.0) as client:

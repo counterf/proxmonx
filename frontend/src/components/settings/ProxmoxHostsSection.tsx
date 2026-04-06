@@ -83,22 +83,15 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
   };
 
   const handleTest = async (host: ProxmoxHost) => {
-    const secret = host.token_secret;
-    if (!secret || secret === '***') {
-      setTestResult((prev) => ({
-        ...prev,
-        [host.id]: { success: false, message: 'Please enter the token secret to test the connection', node_info: null },
-      }));
-      return;
-    }
     setTesting((prev) => ({ ...prev, [host.id]: true }));
     try {
       const result = await testConnection({
         host: host.host,
         token_id: host.token_id,
-        token_secret: secret,
+        token_secret: host.token_secret || '',
         node: host.node,
         verify_ssl: host.verify_ssl,
+        host_id: host.id,
       });
       setTestResult((prev) => ({ ...prev, [host.id]: result }));
     } catch {
