@@ -362,13 +362,13 @@ export default function Settings() {
   };
 
   if (loading) return <LoadingSpinner text="Loading settings..." />;
-  if (error) return <ErrorBanner message={error} />;
+  if (error) return <ErrorBanner key={error} message={error} />;
   if (!form) return null;
 
   return (
     <div className="space-y-4 pb-20">
       {/* Error banner */}
-      {saveError && <ErrorBanner message={`Save failed: ${saveError}`} />}
+      {saveError && <ErrorBanner key={saveError} message={`Save failed: ${saveError}`} />}
 
       {/* Toast */}
       {toast && <SuccessToast message={toast} onDismiss={() => setToast(null)} />}

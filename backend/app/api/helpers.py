@@ -2,15 +2,17 @@
 
 import hmac
 import logging
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field, field_validator
 
-from app.config import Settings
+from app.config import ProxmoxHostConfig, Settings
 from app.core.github import parse_github_repo
 from app.core.ssh import SSHClient
+from app.core.task_store import TaskStore
 
 logger = logging.getLogger(__name__)
 
@@ -110,9 +112,8 @@ def _reload_settings_into_engine(request: Request, config_store) -> None:
     request.app.dependency_overrides[_get_settings] = lambda: new_settings
     request.app.state.settings = new_settings
     scheduler = getattr(request.app.state, "scheduler", None)
-    if scheduler and hasattr(scheduler, '_engine'):
-        scheduler._engine._settings = new_settings
-        scheduler._interval = new_settings.poll_interval_seconds
+    if scheduler:
+        scheduler.reload_settings(new_settings)
 
 
 # --- Shared request models ---
@@ -150,3 +151,74 @@ class _AppConfigBase(BaseModel):
             return parse_github_repo(v)
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+async def run_os_update_bg(
+    task_id: str,
+    guest_id: str,
+    ssh: SSHClient,
+    host_config: ProxmoxHostConfig,
+    vmid: str,
+    os_type: str,
+    scheduler: Any,
+    task_store: TaskStore,
+) -> None:
+    try:
+        success, output = await ssh.run_os_update(
+            host_config.host, vmid, os_type,
+            ssh_username=host_config.ssh_username,
+            ssh_key_path=host_config.ssh_key_path,
+            ssh_password=host_config.ssh_password,
+        )
+        task_store.update(
+            task_id,
+            status="success" if success else "failed",
+            output=output,
+            finished_at=_now_iso(),
+        )
+        if success:
+            scheduler.trigger_guest_refresh(guest_id)
+    except Exception as exc:
+        task_store.update(
+            task_id,
+            status="failed",
+            detail=str(exc),
+            finished_at=_now_iso(),
+        )
+
+
+async def run_app_update_bg(
+    task_id: str,
+    guest_id: str,
+    ssh: SSHClient,
+    host_config: ProxmoxHostConfig,
+    vmid: str,
+    scheduler: Any,
+    task_store: TaskStore,
+) -> None:
+    try:
+        success, output = await ssh.run_app_update(
+            host_config.host, vmid,
+            ssh_username=host_config.ssh_username,
+            ssh_key_path=host_config.ssh_key_path,
+            ssh_password=host_config.ssh_password,
+        )
+        task_store.update(
+            task_id,
+            status="success" if success else "failed",
+            output=output,
+            finished_at=_now_iso(),
+        )
+        if success:
+            scheduler.trigger_guest_refresh(guest_id)
+    except Exception as exc:
+        task_store.update(
+            task_id,
+            status="failed",
+            detail=str(exc),
+            finished_at=_now_iso(),
+        )

@@ -282,7 +282,7 @@ export default function Dashboard({ configured }: { configured: boolean }) {
         </div>
       )}
 
-      {error && <ErrorBanner message={error} onRetry={refresh} />}
+      {error && <ErrorBanner key={error} message={error} onRetry={refresh} />}
 
       {/* Header row */}
       <div className="flex items-center justify-between flex-wrap gap-3">

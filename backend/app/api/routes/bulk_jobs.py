@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,18 +14,16 @@ from app.api.helpers import (
     _get_scheduler,
     _get_task_store,
     _require_api_key,
+    run_app_update_bg,
+    run_os_update_bg,
+    _now_iso,
 )
-from app.api.routes.guests import _run_app_update_bg, _run_os_update_bg
 from app.config import ProxmoxHostConfig, Settings
 from app.core.bulk_job_store import BulkJob, BulkJobResult, BulkJobStore
 from app.core.task_store import TaskRecord, TaskStore
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class StartBulkJobRequest(BaseModel):
@@ -87,6 +84,11 @@ async def _run_bulk_job(
             bulk_job_store.update_result(job_id, guest_id, "skipped", error=f"Unsupported OS: {guest.os_type!r}")
             continue
 
+        if action == "app_update" and not guest.has_community_script:
+            task_store.update(task_id, status="failed", detail="/usr/bin/update not found on this container", finished_at=_now_iso())
+            bulk_job_store.update_result(job_id, guest_id, "skipped", error="/usr/bin/update not found on this container")
+            continue
+
         # Resolve host config
         try:
             settings_data = config_store.load()
@@ -122,7 +124,7 @@ async def _run_bulk_job(
                     bulk_job_store.update_result(job_id, guest_id, "skipped", error="Update already in progress")
                     continue
                 task_store.update(task_id, status="running")
-                await _run_os_update_bg(
+                await run_os_update_bg(
                     task_id=task_id,
                     guest_id=guest_id,
                     ssh=ssh,
@@ -138,7 +140,7 @@ async def _run_bulk_job(
                     bulk_job_store.update_result(job_id, guest_id, "skipped", error="Update already in progress")
                     continue
                 task_store.update(task_id, status="running")
-                await _run_app_update_bg(
+                await run_app_update_bg(
                     task_id=task_id,
                     guest_id=guest_id,
                     ssh=ssh,

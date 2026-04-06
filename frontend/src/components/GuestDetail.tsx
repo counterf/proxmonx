@@ -341,7 +341,7 @@ export default function GuestDetail() {
   }, [id, loadGuest]);
 
   if (loading) return <LoadingSpinner text="Loading guest details..." />;
-  if (error) return <ErrorBanner message={error} />;
+  if (error) return <ErrorBanner key={error} message={error} />;
   if (!guest) return <ErrorBanner message="Guest not found" />;
 
   const githubRepo = guest.github_repo_queried;

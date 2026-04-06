@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -26,15 +25,14 @@ from app.api.helpers import (
     _keep_or_replace,
     _reload_settings_into_engine,
     _require_api_key,
+    run_app_update_bg,
+    run_os_update_bg,
+    _now_iso,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 async def _poll_upid(
@@ -123,9 +121,12 @@ async def get_guest_config(
     """Return per-guest config overrides (API keys masked)."""
     data = config_store.load()
     guest_cfg = data.get("guest_config", {}).get(guest_id, {})
-    if guest_cfg.get("api_key"):
+    if guest_cfg.get("api_key") or guest_cfg.get("ssh_password"):
         guest_cfg = dict(guest_cfg)
-        guest_cfg["api_key"] = "***"
+        if guest_cfg.get("api_key"):
+            guest_cfg["api_key"] = "***"
+        if guest_cfg.get("ssh_password"):
+            guest_cfg["ssh_password"] = "***"
     return guest_cfg
 
 
@@ -278,40 +279,6 @@ async def refresh_guest(
     return {"status": "started"}
 
 
-async def _run_os_update_bg(
-    task_id: str,
-    guest_id: str,
-    ssh: SSHClient,
-    host_config: ProxmoxHostConfig,
-    vmid: str,
-    os_type: str,
-    scheduler: Any,
-    task_store: TaskStore,
-) -> None:
-    try:
-        success, output = await ssh.run_os_update(
-            host_config.host, vmid, os_type,
-            ssh_username=host_config.ssh_username,
-            ssh_key_path=host_config.ssh_key_path,
-            ssh_password=host_config.ssh_password,
-        )
-        task_store.update(
-            task_id,
-            status="success" if success else "failed",
-            output=output,
-            finished_at=_now_iso(),
-        )
-        if success:
-            scheduler.trigger_guest_refresh(guest_id)
-    except Exception as exc:
-        task_store.update(
-            task_id,
-            status="failed",
-            detail=str(exc),
-            finished_at=_now_iso(),
-        )
-
-
 @router.post("/api/guests/{guest_id}/os-update", dependencies=[Depends(_require_api_key)])
 async def os_update_guest(
     guest_id: str,
@@ -364,7 +331,7 @@ async def os_update_guest(
     ))
 
     try:
-        asyncio.create_task(_run_os_update_bg(
+        asyncio.create_task(run_os_update_bg(
             task_id, guest_id, ssh, host_config, vmid, guest.os_type, scheduler, task_store,
         ))
     except Exception as exc:
@@ -377,39 +344,6 @@ async def os_update_guest(
         raise HTTPException(status_code=500, detail="Failed to schedule OS update") from exc
 
     return {"task_id": task_id, "status": "running"}
-
-
-async def _run_app_update_bg(
-    task_id: str,
-    guest_id: str,
-    ssh: SSHClient,
-    host_config: ProxmoxHostConfig,
-    vmid: str,
-    scheduler: Any,
-    task_store: TaskStore,
-) -> None:
-    try:
-        success, output = await ssh.run_app_update(
-            host_config.host, vmid,
-            ssh_username=host_config.ssh_username,
-            ssh_key_path=host_config.ssh_key_path,
-            ssh_password=host_config.ssh_password,
-        )
-        task_store.update(
-            task_id,
-            status="success" if success else "failed",
-            output=output,
-            finished_at=_now_iso(),
-        )
-        if success:
-            scheduler.trigger_guest_refresh(guest_id)
-    except Exception as exc:
-        task_store.update(
-            task_id,
-            status="failed",
-            detail=str(exc),
-            finished_at=_now_iso(),
-        )
 
 
 @router.post("/api/guests/{guest_id}/app-update", dependencies=[Depends(_require_api_key)])
@@ -464,7 +398,7 @@ async def app_update_guest(
     ))
 
     try:
-        asyncio.create_task(_run_app_update_bg(
+        asyncio.create_task(run_app_update_bg(
             task_id, guest_id, ssh, host_config, vmid, scheduler, task_store,
         ))
     except Exception as exc:

@@ -65,21 +65,13 @@ def build_runtime(settings: Settings) -> tuple[httpx.AsyncClient, Scheduler]:
     return http_client, scheduler
 
 
-# Global references for dependency injection
-_scheduler: Scheduler | None = None
-_settings: Settings | None = None
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: start/stop the scheduler."""
-    global _scheduler, _settings
-
     db_path = os.environ.get("CONFIG_DB_PATH", "/app/data/proxmon.db")
     config_store = ConfigStore(db_path)
     settings = config_store.merge_into_settings(Settings())
 
-    _settings = settings
     app.state.config_store = config_store
     app.state.settings = settings
 
@@ -131,8 +123,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     http_client, scheduler = build_runtime(settings)
     app.state.http_client = http_client
-    _scheduler = scheduler
-
     if settings.notifications_enabled and settings.ntfy_url:
         logger.info("Notifications enabled -> %s", settings.ntfy_url)
 

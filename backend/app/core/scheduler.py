@@ -52,6 +52,11 @@ class Scheduler:
     def is_running(self) -> bool:
         return self._running
 
+    def reload_settings(self, settings: Settings) -> None:
+        """Update the discovery engine's settings and the polling interval."""
+        self._engine._settings = settings
+        self._interval = settings.poll_interval_seconds
+
     def start(self) -> None:
         """Start the background polling loop."""
         self._task = asyncio.create_task(self._loop())

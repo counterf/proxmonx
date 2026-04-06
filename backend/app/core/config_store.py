@@ -172,7 +172,7 @@ class ConfigStore:
             if row is None:
                 return {}
             return {
-                "auth_mode": row["auth_mode"] or "forms",
+                "auth_mode": row["auth_mode"] or "disabled",
                 "auth_password_hash": row["auth_password_hash"] or "",
             }
 

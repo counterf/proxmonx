@@ -132,7 +132,7 @@ async def auth_status(request: Request):
     config_store = request.app.state.config_store
     session_store = request.app.state.session_store
     data = config_store.load()
-    auth_mode = data.get("auth_mode", "forms")
+    auth_mode = data.get("auth_mode", "disabled")
 
     if auth_mode == "disabled":
         # Auth is off — caller is always implicitly authenticated.

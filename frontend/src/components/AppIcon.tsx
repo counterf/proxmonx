@@ -5,7 +5,6 @@ const ICON_BASE = 'https://cdn.jsdelivr.net/gh/selfhst/icons/png';
 /** When detector id does not match a selfhst/icons PNG basename. */
 const DETECTOR_ICON_ALIASES: Record<string, string> = {
   'librespeed-rust': 'librespeed',
-  'homeassistant': 'home-assistant',
   'truenas': 'truenas-core',
 };
 
