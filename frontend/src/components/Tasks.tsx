@@ -54,6 +54,7 @@ const STATUS_STYLES: Record<string, { label: string; bg: string; text: string; p
   running: { label: 'Running', bg: 'bg-blue-900/40',   text: 'text-blue-300',   pulse: true },
   success: { label: 'Success', bg: 'bg-green-900/40',  text: 'text-green-300' },
   failed:  { label: 'Failed',  bg: 'bg-red-900/40',    text: 'text-red-400' },
+  partial: { label: 'Partial', bg: 'bg-amber-900/40',  text: 'text-amber-300' },
 };
 
 function StatusBadge({ status }: { status: TaskRecord['status'] }) {
@@ -136,13 +137,26 @@ function InfoCell({ task }: { task: TaskRecord }) {
 
 type TaskGroupBatch = { type: 'batch'; batchId: string; tasks: TaskRecord[] };
 
+function batchAggregateStatus(tasks: TaskRecord[]): string {
+  if (tasks.some(t => t.status === 'running' || t.status === 'pending')) return 'running';
+  const failed = tasks.filter(t => t.status === 'failed').length;
+  const success = tasks.filter(t => t.status === 'success').length;
+  if (failed > 0 && success > 0) return 'partial';
+  if (failed > 0) return 'failed';
+  return 'success';
+}
+
 function BatchGroupRows({ group }: { group: TaskGroupBatch }) {
   const hasActive = group.tasks.some(t => t.status === 'pending' || t.status === 'running');
   const [expanded, setExpanded] = useState(hasActive);
   const doneCount = group.tasks.filter(t => t.status === 'success').length;
   const failedCount = group.tasks.filter(t => t.status === 'failed').length;
   const action = group.tasks[0]?.action;
-  const actionLabel = action === 'os_update' ? 'Bulk OS Update' : action === 'app_update' ? 'Bulk App Update' : 'Bulk Action';
+
+  const earliestStart = group.tasks.reduce((a, b) => a.started_at < b.started_at ? a : b).started_at;
+  const latestFinish = group.tasks.every(t => t.finished_at)
+    ? group.tasks.reduce((a, b) => a.finished_at! > b.finished_at! ? a : b).finished_at
+    : null;
 
   return (
     <>
@@ -150,19 +164,40 @@ function BatchGroupRows({ group }: { group: TaskGroupBatch }) {
         className="border-b border-gray-800 hover:bg-gray-800/30 cursor-pointer select-none"
         onClick={() => setExpanded(p => !p)}
       >
-        <td colSpan={6} className="px-3 py-2">
-          <div className="flex items-center gap-2 text-xs text-gray-400">
-            <span>{expanded ? '\u25BC' : '\u25B6'}</span>
-            <span className="font-medium text-gray-300">{actionLabel} — {group.tasks.length} guests</span>
-            <span className="text-gray-600">{'\u00B7'}</span>
-            <span className="text-gray-500">{formatRelativeTime(group.tasks[0]?.started_at)}</span>
-            <span className="text-gray-600">{'\u00B7'}</span>
-            {doneCount > 0 && <span className="text-green-400">{doneCount} done</span>}
-            {failedCount > 0 && <span className="text-red-400 ml-1">{failedCount} failed</span>}
-            {group.tasks.some(t => t.status === 'running' || t.status === 'pending') && (
-              <span className="text-blue-400 animate-pulse ml-1">running...</span>
-            )}
+        <td className="px-3 py-2">
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              aria-expanded={expanded}
+              aria-label="Toggle bulk job details"
+              className="text-gray-500 hover:text-gray-300"
+              onClick={e => { e.stopPropagation(); setExpanded(p => !p); }}
+            >
+              {expanded ? '\u25BC' : '\u25B6'}
+            </button>
+            <span className="text-gray-400">Bulk Job ({group.tasks.length} guest{group.tasks.length !== 1 ? 's' : ''})</span>
           </div>
+        </td>
+        <td className="px-3 py-2">
+          {action && <ActionBadge action={action} />}
+        </td>
+        <td className="px-3 py-2">
+          <StatusBadge status={batchAggregateStatus(group.tasks) as TaskRecord['status']} />
+        </td>
+        <td className="px-3 py-2 text-xs text-gray-500" title={earliestStart}>
+          {formatRelativeTime(earliestStart)}
+        </td>
+        <td className="px-3 py-2 text-xs text-gray-500 tabular-nums">
+          {formatDuration(earliestStart, latestFinish)}
+        </td>
+        <td className="px-3 py-2 text-xs">
+          {hasActive ? (
+            <span className="text-gray-400">{doneCount} / {group.tasks.length}</span>
+          ) : (
+            <>
+              {doneCount > 0 && <span className="text-green-400">{doneCount} done</span>}
+              {failedCount > 0 && <span className="text-red-400 ml-1">{doneCount > 0 ? '\u00B7 ' : ''}{failedCount} failed</span>}
+            </>
+          )}
         </td>
       </tr>
       {expanded && group.tasks.map(task => (
@@ -189,18 +224,22 @@ function BatchGroupCard({ group }: { group: TaskGroupBatch }) {
   const doneCount = group.tasks.filter(t => t.status === 'success').length;
   const failedCount = group.tasks.filter(t => t.status === 'failed').length;
   const action = group.tasks[0]?.action;
-  const actionLabel = action === 'os_update' ? 'Bulk OS Update' : action === 'app_update' ? 'Bulk App Update' : 'Bulk Action';
+  const earliestStart = group.tasks.reduce((a, b) => a.started_at < b.started_at ? a : b).started_at;
 
   return (
     <div className="border border-gray-800 rounded px-4 py-3 cursor-pointer" onClick={() => setExpanded(p => !p)}>
       <div className="flex items-center justify-between mb-1">
-        <span className="text-sm font-medium text-gray-300">{actionLabel} — {group.tasks.length} guests</span>
+        <span className="text-sm font-medium text-gray-300">Bulk Job ({group.tasks.length} guest{group.tasks.length !== 1 ? 's' : ''})</span>
         <span className="text-xs text-gray-500">{expanded ? '\u25BC' : '\u25B6'}</span>
       </div>
-      <div className="flex items-center gap-2 text-xs text-gray-500">
-        <span>{formatRelativeTime(group.tasks[0]?.started_at)}</span>
-        {doneCount > 0 && <span className="text-green-400">{'\u00B7'} {doneCount} done</span>}
-        {failedCount > 0 && <span className="text-red-400">{'\u00B7'} {failedCount} failed</span>}
+      <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
+        {action && <ActionBadge action={action} />}
+        <StatusBadge status={batchAggregateStatus(group.tasks) as TaskRecord['status']} />
+        <span className="text-gray-600">{'\u00B7'}</span>
+        <span>{formatRelativeTime(earliestStart)}</span>
+        {!hasActive && doneCount > 0 && <span className="text-green-400">{'\u00B7'} {doneCount} done</span>}
+        {!hasActive && failedCount > 0 && <span className="text-red-400">{'\u00B7'} {failedCount} failed</span>}
+        {hasActive && <span className="text-gray-400">{doneCount} / {group.tasks.length}</span>}
       </div>
       {expanded && (
         <div className="mt-2 space-y-2">
