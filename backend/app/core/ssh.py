@@ -67,6 +67,11 @@ COMMAND_WHITELIST = frozenset({
 # because Docker --format uses Go templates (e.g. {{.Image}}) and the
 # command whitelist already prevents execution of arbitrary commands.
 SHELL_METACHARACTERS = re.compile(r'[;&|`$<>()!\n\\#]')
+_ANSI_ESCAPE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_ESCAPE.sub('', text)
 
 # For user-configured version commands: reject dangerous injection patterns.
 # Bare pipes are allowed only when the next token is a safe filter command.
@@ -350,7 +355,7 @@ class SSHClient:
             )
             success = (exit_code == 0)
             output = (stdout or "") + ("\n" + stderr if stderr else "")
-            output = output.strip()
+            output = _strip_ansi(output).strip()
             tail = "\n".join(output.splitlines()[-10:]) if output else "(no output)"
             if success:
                 logger.info(

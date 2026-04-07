@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -238,10 +239,13 @@ async def perform_guest_action(
     ))
 
     try:
-        upid = await client.guest_action(vmid, proxmox_type, body.action, body.snapshot_name)
+        snapshot_name = None
+        if body.action == "snapshot":
+            snapshot_name = body.snapshot_name or f"proxmon-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        upid = await client.guest_action(vmid, proxmox_type, body.action, snapshot_name)
         logger.info("Action %s on guest %s -> task %s", body.action, guest_id, upid)
         task_store.update(task_id, status="running", detail=upid)
-        success_detail = f"Snapshot '{body.snapshot_name}' created" if body.action == "snapshot" and body.snapshot_name else None
+        success_detail = f"Snapshot '{snapshot_name}' created" if snapshot_name else None
         http_client = getattr(request.app.state, "http_client", None)
         asyncio.create_task(_poll_upid(task_store, host_config, task_id, upid, success_detail, http_client=http_client))
         return {"status": "ok", "task": upid}

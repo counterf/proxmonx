@@ -191,6 +191,16 @@ async def run_os_update_bg(
         )
 
 
+_APP_UPDATE_PROBE_INTERVAL = 5  # seconds between version probes (initial + retries)
+_APP_UPDATE_RETRY_BUDGET = 60   # max seconds to keep retrying after first probe
+
+
+def _last_lines(text: str, n: int = 3) -> str:
+    """Return the last *n* non-empty lines of *text*."""
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    return "\n".join(lines[-n:]) if lines else text
+
+
 async def run_app_update_bg(
     task_id: str,
     guest_id: str,
@@ -210,11 +220,18 @@ async def run_app_update_bg(
         task_store.update(
             task_id,
             status="success" if success else "failed",
+            detail=_last_lines(output) if output else None,
             output=output,
             finished_at=_now_iso(),
         )
         if success:
-            scheduler.trigger_guest_refresh(guest_id)
+            await asyncio.sleep(_APP_UPDATE_PROBE_INTERVAL)
+            deadline = asyncio.get_event_loop().time() + _APP_UPDATE_RETRY_BUDGET
+            while True:
+                ok = await scheduler.refresh_single_guest_awaitable(guest_id)
+                if ok or asyncio.get_event_loop().time() >= deadline:
+                    break
+                await asyncio.sleep(_APP_UPDATE_PROBE_INTERVAL)
     except Exception as exc:
         task_store.update(
             task_id,

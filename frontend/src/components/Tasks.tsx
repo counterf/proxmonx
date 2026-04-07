@@ -72,31 +72,7 @@ function StatusBadge({ status }: { status: TaskRecord['status'] }) {
 function InfoCell({ task }: { task: TaskRecord }) {
   const [expanded, setExpanded] = useState(false);
 
-  if (task.status === 'failed') {
-    const text = task.detail || (task.output ? task.output.slice(0, 400) : null) || 'Unknown error';
-    const truncated = text.length > 200 ? text.slice(0, 200) : text;
-    const needsExpand = text.length > 200;
-    return (
-      <div>
-        <p
-          className="text-xs text-red-400 break-words"
-          title={needsExpand ? text : undefined}
-        >
-          {expanded ? text : truncated}
-          {needsExpand && !expanded && '\u2026'}
-        </p>
-        {needsExpand && (
-          <button
-            onClick={() => setExpanded(p => !p)}
-            className="text-[10px] text-gray-500 hover:text-gray-300 mt-0.5"
-          >
-            {expanded ? 'Show less' : 'Show more'}
-          </button>
-        )}
-      </div>
-    );
-  }
-
+  // Running: show UPID
   if (task.status === 'running' && task.detail) {
     return (
       <span className="text-[10px] font-mono text-gray-600 break-all" title="Proxmox task ID">
@@ -105,12 +81,10 @@ function InfoCell({ task }: { task: TaskRecord }) {
     );
   }
 
-  if (task.status === 'success' && task.output) {
+  // Success or failed with output: unified summary + toggle
+  if ((task.status === 'success' || task.status === 'failed') && task.output) {
     return (
       <div>
-        {task.detail && (
-          <p className="text-xs text-gray-400 mb-1">{task.detail}</p>
-        )}
         <button
           onClick={() => setExpanded(p => !p)}
           className="text-xs text-blue-400 hover:text-blue-300"
@@ -126,6 +100,12 @@ function InfoCell({ task }: { task: TaskRecord }) {
     );
   }
 
+  // Failed without output: inline detail only (SSH exception path)
+  if (task.status === 'failed' && task.detail) {
+    return <p className="text-xs text-red-400 break-words">{task.detail}</p>;
+  }
+
+  // Success without output: detail only
   if (task.status === 'success' && task.detail) {
     return <span className="text-xs text-gray-400">{task.detail}</span>;
   }

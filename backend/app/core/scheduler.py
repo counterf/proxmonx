@@ -95,6 +95,15 @@ class Scheduler:
         finally:
             self._in_flight_refreshes.discard(guest_id)
 
+    async def refresh_single_guest_awaitable(self, guest_id: str) -> bool:
+        """Refresh one guest and return True if probe succeeded (no probe_error).
+        Meant for post-update retry loops; bypasses the in-flight guard intentionally."""
+        if guest_id not in self._guests:
+            return False
+        await self._do_refresh_single_guest(guest_id)
+        guest = self._guests.get(guest_id)
+        return guest is not None and not guest.probe_error
+
     async def _do_refresh_single_guest(self, guest_id: str) -> None:
         existing = self._guests.get(guest_id)
         if not existing:
