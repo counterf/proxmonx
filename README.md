@@ -47,7 +47,7 @@ No agents are installed on guests. No configuration is required on the guest sid
 Proxmox API → discover guests → detect app → query local API → compare to GitHub → dashboard
 ```
 
-Every N seconds (default: 5 minutes), a background scheduler runs a full discovery cycle. Results are cached in memory and served to the React frontend via a REST API. The frontend polls every 60 seconds and renders the current state. A manual refresh button is also available.
+Every N seconds (default: 1 hour), a background scheduler runs a full discovery cycle. Results are cached in memory and served to the React frontend via a REST API. The frontend polls every 60 seconds and renders the current state. A manual refresh button is also available.
 
 ---
 
@@ -133,13 +133,13 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 ### Phase 1 — Current
 
 - **Proxmox API integration** — connects via token-based auth; no password stored
-- **Continuous discovery** — configurable polling interval (default: 5 min)
-- **LXC + VM support** — LXC always; VMs optional (`DISCOVER_VMS=true`)
+- **Continuous discovery** — configurable polling interval (default: 1 hour, min 30s)
+- **LXC + VM support** — LXC always; VMs optional (toggle in Settings)
 - **Multi-strategy app detection**:
   - Proxmox tag matching (`sonarr`, `app:sonarr`)
   - Guest name token matching (`sonarr-lxc` → sonarr)
   - Docker container inspection via SSH (`docker ps`)
-- **19 built-in app detectors** — arr-stack (Sonarr, Radarr, Bazarr, Prowlarr, Lidarr, Readarr, Whisparr), Plex, Immich, Gitea, Seerr, Overseerr, qBittorrent, SABnzbd, Jackett, LibreSpeed, Traefik, Caddy, ntfy; most are config-driven via `http_json.py`; specialized detectors (Plex, qBittorrent, SABnzbd, Caddy, Jackett, LibreSpeed) subclass `BaseDetector` directly
+- **21 built-in app detectors** — arr-stack (Sonarr, Radarr, Bazarr, Prowlarr, Lidarr, Readarr, Whisparr), Plex, Immich, Gitea, Seerr, Overseerr, qBittorrent, SABnzbd, Jackett, LibreSpeed-Rust, Traefik, Caddy, ntfy, TrueNAS, Docker Generic; most are config-driven via `http_json.py`; specialized detectors subclass `BaseDetector` directly
 - **Custom app definitions** — define your own apps in the UI (display name, port, version endpoint, GitHub repo, aliases, docker image patterns); stored persistently in SQLite; appear alongside built-in apps in detection and version tracking
 - **Installed version detection** — queries each app's own HTTP API
 - **Latest version lookup** — GitHub Releases API with 1-hour cache; 3-level fallback (releases/latest → releases list → tags)
@@ -167,18 +167,18 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 - **SQLite-backed config store** — settings persisted in SQLite (`/app/data/proxmon.db`)
 - **GitHub Actions CI** — auto-builds and pushes a single Docker image to `ghcr.io` on every push to main
 - **SQLite-only config** — all settings stored in SQLite; no `.env` file needed
-- **Guest actions** — start, stop, shutdown, restart, snapshot, and per-guest refresh from the dashboard dropdown; Proxmox returns a task ID (UPID) for async operations
-- **OS update action** — "Update OS" in the guest actions dropdown runs the appropriate package manager (`apt-get`, `apk`, `dnf`, `pacman`, `zypper`) inside running LXC containers via `pct exec`; requires `pct_exec_enabled` on the host; concurrency-guarded; triggers a guest refresh after completion
+- **Guest actions** — start, stop, shutdown, restart, snapshot (auto-named `proxmon-YYYYMMDD-HHMMSS` if no name given), backup, and per-guest refresh from the dashboard dropdown; Proxmox UPID polled for completion (up to 10 min)
+- **OS update** — runs the appropriate package manager (`apt-get`, `apk`, `dnf`, `pacman`, `zypper`) inside running LXC containers via `pct exec`; supports alpine, debian, ubuntu, devuan, fedora, centos, archlinux, opensuse
+- **App update** — runs the [ProxmoxVE community script](https://community-scripts.github.io/ProxmoxVE/) updater (`/usr/bin/update`) inside LXC containers; ANSI-stripped output stored in task history; version re-probed every 5s for up to 60s after completion
+- **Bulk operations** — trigger OS update or app update across multiple selected guests simultaneously; sequential execution with per-guest status tracking
+- **Task history** — all guest actions (start, stop, snapshot, OS update, app update, backup) logged with status, duration, and full output; stored in SQLite (last 500 records); accessible via Tasks page or API
 - **TrueNAS detector** — version probe via JSON-RPC 2.0 over WebSocket (`wss://{host}/api/current`); auth via API key; fetches installed version from `system.info` and latest from `update.status`
 
-### Phase 2 — Planned
+### Roadmap
 
-- Pre-update Proxmox snapshot hook (safety net before every update)
-- App-specific update handlers (plugin per app, e.g. `apt upgrade sonarr`, Docker pull + restart)
-- Audit log (who triggered what, when, outcome)
 - Health checks per app (is the app actually responding?)
 - Additional notification channels (Gotify, Discord, webhooks)
-- Persistent version history (SQLite instead of in-memory)
+- Audit log (who triggered what, when, outcome)
 
 ---
 
@@ -205,6 +205,7 @@ Every N seconds (default: 5 minutes), a background scheduler runs a full discove
 | **Caddy** | `caddy` | `GET :2019/config/` (admin API) | caddyserver/caddy | 2019 |
 | **ntfy** | `ntfy` | `GET /v1/info` → `version` | binwiederhier/ntfy | 80 |
 | **Seerr** | `seerr`, `seer` | `GET /api/v1/status` → `version` | seerr-team/seerr | 5055 |
+| **TrueNAS** | `truenas` | JSON-RPC 2.0 WebSocket `wss://{host}/api/current` | truenas/truenas-scale | 443 |
 | **Docker (generic)** | any Docker image | image tag parsing | N/A | N/A |
 
 **Detection keys** are matched against guest names (token-split on `-_.\s`) and Proxmox tags (exact match or `app:<key>`). For Docker detection, the image name substrings listed in each detector's `docker_images` list are matched against `docker ps` output.
@@ -407,7 +408,7 @@ Step 1 — Proxmox Connection
   • Node Name         (required, e.g. pve)
 
 Step 2 — Discovery
-  • Poll Interval     (seconds, 30–3600, default 300)
+  • Poll Interval     (seconds, 30–86400, default 3600)
   • Include VMs       (toggle, default off)
   • Verify SSL        (toggle, default off — amber warning shown when off)
 
@@ -449,20 +450,19 @@ Settings are stored in a SQLite database at `/app/data/proxmon.db` (mounted as `
 
 ## 9. Login & Authentication
 
-proxmon ships with a built-in forms-based authentication system enabled by default. On first start, a default admin account is automatically created.
+proxmon ships with authentication **disabled by default**. Enable it in Settings → Security by switching `auth_mode` to `forms` and setting a password.
 
-### Default credentials
+### Enabling authentication
 
-| Field | Value |
-|---|---|
-| Username | `root` |
-| Password | `proxmon!` |
+1. Go to **Settings → Security**
+2. Set `auth_mode` to `forms`
+3. Set a password (minimum 8 characters) and click **Save Changes**
 
-**Change the default password immediately** via Settings → Security → Change Password.
+On next page load, you will be redirected to the login form. The default username is `root`.
 
 ### How it works
 
-- Sessions are stored in the same SQLite database (`/app/data/proxmon.db`) using UUID tokens with a 24-hour TTL
+- Sessions are stored in SQLite (`/app/data/proxmon.db`) using UUID tokens with a 24-hour TTL
 - The session token is set as an `HttpOnly`, `SameSite=Lax` cookie (`proxmon_session`)
 - Password hashing uses **scrypt** (stdlib, no extra dependencies) with a random salt per password
 - All `/api/*` routes (except `/api/auth/*` and `/api/setup/status`) require a valid session when `auth_mode=forms`
@@ -651,10 +651,10 @@ COMMAND_WHITELIST = frozenset({
 **Metacharacter guard**: before the prefix check, the command string is rejected if it contains:
 
 ```
-; & | ` $ < > ( ) { } ! \n \ #
+; & | ` $ < > ( ) ! \n \ #
 ```
 
-This prevents injection like `"docker ps; rm -rf /"` — the `;` is caught before the prefix is checked.
+This prevents injection like `"docker ps; rm -rf /"` — the `;` is caught before the prefix is checked. Note: `{` and `}` are intentionally **not** blocked — Docker's `--format '{{.Image}}'` Go template syntax requires them.
 
 **Host key policy**:
 
@@ -836,6 +836,60 @@ Response:
 
 ---
 
+### `GET /api/tasks`
+
+Returns recent task history (up to 200 records), newest first. Tasks cover all guest actions: start, stop, shutdown, restart, snapshot, backup, os_update, app_update.
+
+```json
+[
+  {
+    "id": "abc123",
+    "guest_id": "pve1:101",
+    "guest_name": "sonarr-lxc",
+    "host_id": "pve1",
+    "action": "app_update",
+    "status": "success",
+    "started_at": "2026-04-07T14:00:00Z",
+    "finished_at": "2026-04-07T14:00:45Z",
+    "detail": "Updated Sonarr to 4.0.14",
+    "output": "...(full script output)...",
+    "batch_id": null
+  }
+]
+```
+
+### `DELETE /api/tasks`
+
+Clears all task history. Irreversible.
+
+---
+
+### `POST /api/bulk-jobs`
+
+Triggers a bulk action (os_update or app_update) across multiple guests. Execution is sequential per guest.
+
+Request body:
+```json
+{
+  "action": "os_update",
+  "guest_ids": ["pve1:101", "pve1:102", "pve1:103"]
+}
+```
+
+Response:
+```json
+{
+  "job_id": "bulk-abc123",
+  "results": {
+    "pve1:101": {"status": "queued", "task_id": "task-xyz"},
+    "pve1:102": {"status": "skipped", "error": "/usr/bin/update not found"},
+    "pve1:103": {"status": "queued", "task_id": "task-uvw"}
+  }
+}
+```
+
+---
+
 ### `POST /api/notifications/test`
 
 Sends a test notification via ntfy using the currently saved notification settings. Useful for verifying ntfy URL, token, and connectivity.
@@ -870,7 +924,7 @@ Returns all settings for pre-populating the settings form. Secrets shown as `"**
       "pct_exec_enabled": true
     }
   ],
-  "poll_interval_seconds": 300,
+  "poll_interval_seconds": 3600,
   "discover_vms": false,
   "verify_ssl": false,
   "ssh_enabled": true,
@@ -944,7 +998,7 @@ Request body (all fields):
   "proxmox_token_id": "root@pam!proxmon",
   "proxmox_token_secret": null,
   "proxmox_node": "pve",
-  "poll_interval_seconds": 300,
+  "poll_interval_seconds": 3600,
   "discover_vms": false,
   "verify_ssl": false,
   "ssh_enabled": true,
