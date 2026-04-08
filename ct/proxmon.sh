@@ -66,7 +66,7 @@ start
 # community-scripts/ProxmoxVE with no override. We replicate the essential
 # pct create → pct start → lxc-attach sequence manually to invoke our own script.
 
-select_storage "rootfs" "$NSAPP"
+select_storage "rootdir" "$NSAPP"
 select_template
 
 CTID=$(get_valid_container_id)
