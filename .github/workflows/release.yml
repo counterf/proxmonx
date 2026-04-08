@@ -34,9 +34,10 @@ jobs:
       - uses: astral-sh/setup-uv@v5
 
       - name: Generate pinned requirements
+        # dev groups are excluded by default in uv pip compile (no --no-dev needed)
         # --python-version 3.13: matches Debian 13 LXC runtime
         # --universal: removes platform-specific markers so the file works on any arch
-        run: uv pip compile backend/pyproject.toml --no-dev --python-version 3.13 --universal -o requirements.txt
+        run: uv pip compile backend/pyproject.toml --python-version 3.13 --universal -o requirements.txt
 
       - name: Assemble tarball
         run: |
