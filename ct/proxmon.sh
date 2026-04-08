@@ -107,10 +107,11 @@ done
 msg_ok "Started LXC Container"
 
 msg_info "Running Install Script"
-# lxc-attach does NOT forward host environment variables — FUNCTIONS_FILE_PATH must
-# be fetched inside the container. The install script handles this itself (self-fetches
-# install.func if FUNCTIONS_FILE_PATH is absent).
-lxc-attach -n "$CTID" -- bash -c \
+# pct exec is the Proxmox-native way to run commands in a container (lxc-attach
+# is not available on Proxmox 8.x). The install script is fetched on the host
+# and passed as a bash -c argument, so it runs inside the container.
+# FUNCTIONS_FILE_PATH is self-fetched by the install script if absent.
+pct exec "$CTID" -- bash -c \
   "$(curl -fsSL https://raw.githubusercontent.com/counterf/proxmonx/main/install/proxmon-install.sh)"
 msg_ok "Completed Install Script"
 
