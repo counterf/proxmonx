@@ -63,24 +63,38 @@ function update_script() {
 
 start
 # NOTE: build_container is NOT used — it hardcodes the install script URL to
-# community-scripts/ProxmoxVE with no override. We replicate the essential
-# pct create → pct start → lxc-attach sequence manually to invoke our own script.
+# community-scripts/ProxmoxVE with no override. We use create_lxc_container
+# directly (a standalone function that handles storage, template, and pct create)
+# then invoke our own install script via lxc-attach.
 
-select_storage "container"
-select_template
+# Container ID is set by the wizard via CT_ID
+CTID="${CT_ID}"
+export CTID
 
-CTID=$(get_valid_container_id)
+# OS/disk exports required by create_lxc_container
+export PCT_OSTYPE="$var_os"
+export PCT_OSVERSION="$var_version"
+export PCT_DISK_SIZE="${DISK_SIZE:-$var_disk}"
 
-msg_info "Creating LXC Container"
-pct create "$CTID" "$TEMPLATE_PATH" \
-  -hostname "${HN:-proxmon}" \
-  -cores "${CORE_COUNT:-$var_cpu}" \
-  -memory "${RAM_SIZE:-$var_ram}" \
-  -rootfs "${CONTAINER_STORAGE}:${DISK_SIZE:-$var_disk}" \
-  -net0 "name=eth0,bridge=${BRG:-vmbr0},ip=dhcp" \
-  -unprivileged "$CT_TYPE" \
-  -features "keyctl=1,nesting=1" \
+# Build features string — nesting required for systemd inside the container
+FEATURES="nesting=1"
+[[ "${CT_TYPE:-1}" == "1" ]] && FEATURES="${FEATURES},keyctl=1"
+
+# Build PCT_OPTIONS — create_lxc_container appends -rootfs automatically
+export PCT_OPTIONS="  -features ${FEATURES}
+  -hostname ${HN:-proxmon}
+  -net0 name=eth0,bridge=${BRG:-vmbr0},ip=${NET:-dhcp}
   -onboot 1
+  -cores ${CORE_COUNT:-$var_cpu}
+  -memory ${RAM_SIZE:-$var_ram}
+  -unprivileged ${CT_TYPE:-1}"
+
+[[ -n "${TAGS:-}" ]] && PCT_OPTIONS="${PCT_OPTIONS}
+  -tags ${TAGS}"
+
+# create_lxc_container handles: storage selection, template download, pct create + retry logic
+msg_info "Creating LXC Container"
+create_lxc_container || exit $?
 msg_ok "Created LXC Container ($CTID)"
 
 msg_info "Starting LXC Container"
