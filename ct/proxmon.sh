@@ -66,17 +66,17 @@ start
 # community-scripts/ProxmoxVE with no override. We replicate the essential
 # pct create → pct start → lxc-attach sequence manually to invoke our own script.
 
-select_storage "rootdir" "$NSAPP"
+select_storage "container"
 select_template
 
 CTID=$(get_valid_container_id)
 
 msg_info "Creating LXC Container"
-pct create "$CTID" "$TEMPLATE" \
+pct create "$CTID" "$TEMPLATE_PATH" \
   -hostname "${HN:-proxmon}" \
   -cores "${CORE_COUNT:-$var_cpu}" \
   -memory "${RAM_SIZE:-$var_ram}" \
-  -rootfs "${STORAGE}:${DISK_SIZE:-$var_disk}" \
+  -rootfs "${CONTAINER_STORAGE}:${DISK_SIZE:-$var_disk}" \
   -net0 "name=eth0,bridge=${BRG:-vmbr0},ip=dhcp" \
   -unprivileged "$CT_TYPE" \
   -features "keyctl=1,nesting=1" \
