@@ -14,8 +14,6 @@ var_disk="${var_disk:-4}"
 var_os="${var_os:-debian}"
 var_version="${var_version:-13}"
 var_unprivileged="${var_unprivileged:-1}"
-# Use minimal Debian 13 template (fewer pre-installed packages, smaller footprint)
-TEMPLATE_FILTER="${TEMPLATE_FILTER:-minimal}"
 
 header_info "$APP"
 variables
@@ -23,9 +21,6 @@ color
 catch_errors
 
 function update_script() {
-  # NOTE: this function runs INSIDE the container when the user executes /usr/bin/update.
-  # ct/proxmon.sh is re-downloaded and re-run inside the container by the update wrapper;
-  # build.func's start() detects the existing installation and routes here.
   header_info
   check_container_storage
   check_container_resources
@@ -65,7 +60,7 @@ start
 # NOTE: build_container is NOT used — it hardcodes the install script URL to
 # community-scripts/ProxmoxVE with no override. We use create_lxc_container
 # directly (a standalone function that handles storage, template, and pct create)
-# then invoke our own install script via lxc-attach.
+# then invoke our own install script via pct exec.
 
 # Container ID is set by the wizard via CT_ID
 CTID="${CT_ID}"
@@ -107,15 +102,15 @@ done
 msg_ok "Started LXC Container"
 
 msg_info "Running Install Script"
-# pct exec is the Proxmox-native way to run commands in a container (lxc-attach
-# is not available on Proxmox 8.x). The install script is fetched on the host
-# and passed as a bash -c argument, so it runs inside the container.
-# FUNCTIONS_FILE_PATH is self-fetched by the install script if absent.
-pct exec "$CTID" -- bash -c \
-  "$(curl -fsSL https://raw.githubusercontent.com/counterf/proxmonx/main/install/proxmon-install.sh)"
+# The install script must run inside the container WITHOUT host-side shell
+# expansion. Using 'bash -c "$(curl ...)"' would cause the host shell to expand
+# every $VAR and $(cmd) in the fetched script before passing it to the container,
+# breaking variable assignments and command substitutions that must run inside.
+# Piping via 'bash -s' sends the script verbatim through stdin, avoiding this.
+curl -fsSL https://raw.githubusercontent.com/counterf/proxmonx/main/install/proxmon-install.sh \
+  | pct exec "$CTID" -- bash -s
 msg_ok "Completed Install Script"
 
-IP=$(pct exec "$CTID" -- hostname -I | awk '{print $1}')
 description
 
 msg_ok "Completed successfully!\n"
