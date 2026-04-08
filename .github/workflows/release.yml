@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate version sync
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          TOML=$(grep '^version' backend/pyproject.toml | cut -d'"' -f2)
+          INIT=$(grep '__version__' backend/app/__init__.py | cut -d'"' -f2)
+          PKG=$(node -p "require('./frontend/package.json').version")
+          [ "$TAG" = "$TOML" ] && [ "$TAG" = "$INIT" ] && [ "$TAG" = "$PKG" ] || \
+            { echo "Version mismatch: tag=$TAG pyproject=$TOML __init__=$INIT package.json=$PKG"; exit 1; }
+          echo "Version sync OK: $TAG"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build frontend
+        run: cd frontend && npm ci && npm run build
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Generate pinned requirements
+        # --python-version 3.13: matches Debian 13 LXC runtime
+        # --universal: removes platform-specific markers so the file works on any arch
+        run: uv pip compile backend/pyproject.toml --no-dev --python-version 3.13 --universal -o requirements.txt
+
+      - name: Assemble tarball
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          DIST="proxmon-${TAG}"
+          mkdir -p "${DIST}/app" "${DIST}/static"
+          cp -r backend/app/. "${DIST}/app/"
+          cp -r frontend/dist/. "${DIST}/static/"
+          cp backend/pyproject.toml "${DIST}/pyproject.toml"
+          cp requirements.txt "${DIST}/requirements.txt"
+          tar -czf "proxmon-${TAG}-linux.tar.gz" "${DIST}/"
+          echo "Tarball contents:"
+          tar -tzf "proxmon-${TAG}-linux.tar.gz" | head -20
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: proxmon-*-linux.tar.gz
+          generate_release_notes: true
