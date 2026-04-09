@@ -4,7 +4,9 @@
 # License: MIT | https://github.com/community-scripts/ProxmoxVE/raw/main/LICENSE
 # Source: https://github.com/counterf/proxmonx
 
-source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
+# Forked build.func: identical to community-scripts except the install script
+# URL points to counterf/proxmonx instead of community-scripts/ProxmoxVE.
+source <(curl -fsSL https://raw.githubusercontent.com/counterf/proxmonx/main/misc/build.func)
 
 APP="proxmon"
 var_tags="${var_tags:-monitoring}"
@@ -57,68 +59,7 @@ function update_script() {
 }
 
 start
-# NOTE: build_container is NOT used — it hardcodes the install script URL to
-# community-scripts/ProxmoxVE with no override. We use create_lxc_container
-# directly (a standalone function that handles storage, template, and pct create)
-# then invoke our own install script via pct exec.
-
-# Container ID is set by the wizard via CT_ID
-CTID="${CT_ID}"
-export CTID
-
-# OS/disk exports required by create_lxc_container
-export PCT_OSTYPE="$var_os"
-export PCT_OSVERSION="$var_version"
-export PCT_DISK_SIZE="${DISK_SIZE:-$var_disk}"
-
-# Build features string — nesting required for systemd inside the container
-FEATURES="nesting=1"
-[[ "${CT_TYPE:-1}" == "1" ]] && FEATURES="${FEATURES},keyctl=1"
-
-# Build PCT_OPTIONS — create_lxc_container appends -rootfs automatically
-export PCT_OPTIONS="  -features ${FEATURES}
-  -hostname ${HN:-proxmon}
-  -net0 name=eth0,bridge=${BRG:-vmbr0},ip=${NET:-dhcp}
-  -onboot 1
-  -cores ${CORE_COUNT:-$var_cpu}
-  -memory ${RAM_SIZE:-$var_ram}
-  -unprivileged ${CT_TYPE:-1}"
-
-[[ -n "${TAGS:-}" ]] && PCT_OPTIONS="${PCT_OPTIONS}
-  -tags ${TAGS}"
-
-# create_lxc_container handles: storage selection, template download, pct create + retry logic
-msg_info "Creating LXC Container"
-create_lxc_container || exit $?
-msg_ok "Created LXC Container ($CTID)"
-
-msg_info "Starting LXC Container"
-pct start "$CTID"
-# Poll for network readiness instead of a fixed sleep (15 attempts × 2s = 30s max)
-for i in $(seq 1 15); do
-  pct exec "$CTID" -- ping -c1 -W1 8.8.8.8 &>/dev/null && break
-  sleep 2
-done
-msg_ok "Started LXC Container"
-
-msg_info "Setting Up Container"
-# build_container normally installs curl before running any install script.
-# We skip build_container, so we replicate that essential bootstrap step here.
-pct exec "$CTID" -- bash -c "apt-get update -qq && apt-get install -y curl" \
-  >>"${BUILD_LOG:-/dev/null}" 2>&1
-msg_ok "Set Up Container"
-
-msg_info "Running Install Script"
-# Fetch the install script on the host and push it into the container via
-# pct push (avoids stdin-forwarding issues with pct exec).
-INSTALL_TMP=$(mktemp)
-curl -fsSL https://raw.githubusercontent.com/counterf/proxmonx/main/install/proxmon-install.sh \
-  >"$INSTALL_TMP"
-pct push "$CTID" "$INSTALL_TMP" /tmp/proxmon-install.sh --perms 0755
-rm -f "$INSTALL_TMP"
-pct exec "$CTID" -- bash /tmp/proxmon-install.sh
-msg_ok "Completed Install Script"
-
+build_container
 description
 
 msg_ok "Completed successfully!\n"
