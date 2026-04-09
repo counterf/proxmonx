@@ -13,9 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth_routes import auth_router
 from app.api.routes import router, _get_scheduler, _get_settings, _get_config_store
-from app.api.helpers import _get_task_store, _get_bulk_job_store
+from app.api.helpers import _get_task_store
 from app.core.task_store import TaskStore
-from app.core.bulk_job_store import BulkJobStore
 from app.config import Settings
 from app.core.alerting import AlertManager
 
@@ -84,10 +83,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             stale_update_count,
         )
     app.dependency_overrides[_get_task_store] = lambda: task_store
-
-    # Bulk job store (same DB file)
-    bulk_job_store = BulkJobStore(db_path)
-    app.dependency_overrides[_get_bulk_job_store] = lambda: bulk_job_store
 
     # Session store for auth (same DB file)
     session_store = SessionStore(db_path)

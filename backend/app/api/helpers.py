@@ -40,11 +40,6 @@ def _get_task_store():
     raise RuntimeError("TaskStore not initialized")
 
 
-def _get_bulk_job_store():
-    """Dependency placeholder -- overridden in main.py."""
-    raise RuntimeError("BulkJobStore not initialized")
-
-
 _api_key_header = APIKeyHeader(name="X-Api-Key", auto_error=False)
 
 

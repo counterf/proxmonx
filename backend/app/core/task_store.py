@@ -103,6 +103,25 @@ class TaskStore:
             ).fetchall()
         return [TaskRecord(**dict(row)) for row in rows]
 
+    def list_recent_batched_tasks(self, limit: int = 50) -> list[TaskRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM task_history
+                   WHERE batch_id IN (
+                       SELECT batch_id FROM (
+                           SELECT batch_id, MAX(started_at) AS m
+                           FROM task_history
+                           WHERE batch_id IS NOT NULL
+                           GROUP BY batch_id
+                           ORDER BY m DESC
+                           LIMIT ?
+                       )
+                   )
+                   ORDER BY batch_id, started_at""",
+                (limit,),
+            ).fetchall()
+        return [TaskRecord(**dict(r)) for r in rows]
+
     def get(self, task_id: str) -> TaskRecord | None:
         with self._connect() as conn:
             row = conn.execute(
@@ -118,6 +137,32 @@ class TaskStore:
                 (guest_id, action),
             ).fetchall()
         return [TaskRecord(**dict(row)) for row in rows]
+
+    def list_by_batch_id(self, batch_id: str) -> list[TaskRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM task_history WHERE batch_id = ? ORDER BY started_at",
+                (batch_id,),
+            ).fetchall()
+        return [TaskRecord(**dict(r)) for r in rows]
+
+    def list_batch_ids(self, limit: int = 50) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT batch_id
+                FROM (
+                    SELECT batch_id, MAX(started_at) AS latest_started_at
+                    FROM task_history
+                    WHERE batch_id IS NOT NULL
+                    GROUP BY batch_id
+                )
+                ORDER BY latest_started_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [r["batch_id"] for r in rows]
 
     def reconcile_stale_running_updates(self) -> int:
         """Mark orphaned running update tasks as failed after a restart."""
