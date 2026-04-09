@@ -5385,7 +5385,7 @@ create_lxc_container() {
   # ------------------------------------------------------------------------------
   TEMPLATE_SEARCH="${PCT_OSTYPE}-${PCT_OSVERSION:-}"
   case "$PCT_OSTYPE" in
-  debian | ubuntu) TEMPLATE_PATTERN="-standard_" ;;
+  debian | ubuntu) TEMPLATE_PATTERN="${TEMPLATE_PATTERN:--standard_}" ;;
   alpine | fedora | rocky | centos) TEMPLATE_PATTERN="-default_" ;;
   *) TEMPLATE_PATTERN="" ;;
   esac

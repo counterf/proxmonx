@@ -59,6 +59,7 @@ function update_script() {
 }
 
 start
+TEMPLATE_PATTERN="-minimal_"
 build_container
 description
 
