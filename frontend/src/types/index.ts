@@ -50,7 +50,7 @@ export interface TaskRecord {
   guest_name: string;
   host_id: string;
   action: string;
-  status: 'pending' | 'running' | 'success' | 'failed';
+  status: 'pending' | 'running' | 'success' | 'failed' | 'skipped';
   started_at: string;
   finished_at: string | null;
   output: string | null;

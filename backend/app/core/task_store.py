@@ -39,7 +39,7 @@ class TaskRecord(BaseModel):
     guest_name: str
     host_id: str
     action: str          # start|stop|shutdown|restart|snapshot|os_update|backup
-    status: str          # pending|running|success|failed
+    status: str          # pending|running|success|failed|skipped
     started_at: str      # ISO 8601
     finished_at: str | None = None
     output: str | None = None   # SSH output for os_update

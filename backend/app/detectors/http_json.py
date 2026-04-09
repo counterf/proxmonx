@@ -150,6 +150,8 @@ class HttpJsonDetector(BaseDetector):
         scheme: str = "http",
         http_client: httpx.AsyncClient | None = None,
     ) -> str | None:
+        if not self._path:
+            return None
         port = port or self.default_port
         headers: dict[str, str] = {}
         if api_key and self._auth_header:
