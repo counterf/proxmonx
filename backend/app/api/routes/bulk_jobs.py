@@ -75,17 +75,17 @@ async def _run_bulk_job(
             continue
 
         if guest.type != "lxc" or guest.status != "running":
-            task_store.update(task_id, status="failed", detail="Guest not eligible", finished_at=_now_iso())
+            task_store.update(task_id, status="skipped", detail="Guest not eligible", finished_at=_now_iso())
             bulk_job_store.update_result(job_id, guest_id, "skipped", error="Guest not eligible")
             continue
 
         if action == "os_update" and (not guest.os_type or guest.os_type not in OS_UPDATE_COMMANDS):
-            task_store.update(task_id, status="failed", detail=f"Unsupported OS: {guest.os_type!r}", finished_at=_now_iso())
+            task_store.update(task_id, status="skipped", detail=f"Unsupported OS: {guest.os_type!r}", finished_at=_now_iso())
             bulk_job_store.update_result(job_id, guest_id, "skipped", error=f"Unsupported OS: {guest.os_type!r}")
             continue
 
         if action == "app_update" and not guest.has_community_script:
-            task_store.update(task_id, status="failed", detail="/usr/bin/update not found on this container", finished_at=_now_iso())
+            task_store.update(task_id, status="skipped", detail="/usr/bin/update not found on this container", finished_at=_now_iso())
             bulk_job_store.update_result(job_id, guest_id, "skipped", error="/usr/bin/update not found on this container")
             continue
 
@@ -103,7 +103,7 @@ async def _run_bulk_job(
             continue
 
         if not host_config.pct_exec_enabled:
-            task_store.update(task_id, status="failed", detail="pct exec not enabled", finished_at=_now_iso())
+            task_store.update(task_id, status="skipped", detail="pct exec not enabled", finished_at=_now_iso())
             bulk_job_store.update_result(job_id, guest_id, "skipped", error="pct exec not enabled")
             continue
 
@@ -120,7 +120,7 @@ async def _run_bulk_job(
         try:
             if action == "os_update":
                 if task_store.list_running_for_guest(guest_id, "os_update"):
-                    task_store.update(task_id, status="failed", detail="Update already in progress", finished_at=_now_iso())
+                    task_store.update(task_id, status="skipped", detail="Update already in progress", finished_at=_now_iso())
                     bulk_job_store.update_result(job_id, guest_id, "skipped", error="Update already in progress")
                     continue
                 task_store.update(task_id, status="running")
@@ -136,7 +136,7 @@ async def _run_bulk_job(
                 )
             else:
                 if task_store.list_running_for_guest(guest_id, "app_update"):
-                    task_store.update(task_id, status="failed", detail="Update already in progress", finished_at=_now_iso())
+                    task_store.update(task_id, status="skipped", detail="Update already in progress", finished_at=_now_iso())
                     bulk_job_store.update_result(job_id, guest_id, "skipped", error="Update already in progress")
                     continue
                 task_store.update(task_id, status="running")

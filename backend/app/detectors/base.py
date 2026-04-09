@@ -6,8 +6,6 @@ from abc import ABC, abstractmethod
 
 import httpx
 
-from app.models.guest import GuestInfo
-
 
 class BaseDetector(ABC):
     """Every detector plugin must implement this interface."""
@@ -26,26 +24,6 @@ class BaseDetector(ABC):
         """Word-boundary/token matching to avoid substring false positives."""
         name_tokens = set(re.split(r'[-_.\s]+', guest_name.lower()))
         return self.name in name_tokens or any(alias in name_tokens for alias in self.aliases)
-
-    def detect(self, guest: GuestInfo) -> str | None:
-        """Check if this detector matches a guest by name or tags.
-
-        Returns the detection method string or None.
-        """
-        # Check tags first (higher priority per PRD)
-        for tag in guest.tags:
-            tag_lower = tag.lower()
-            if tag_lower == self.name or tag_lower == f"app:{self.name}":
-                return "tag_match"
-            for alias in self.aliases:
-                if tag_lower == alias or tag_lower == f"app:{alias}":
-                    return "tag_match"
-
-        # Check guest name using token matching
-        if self._name_matches(guest.name):
-            return "name_match"
-
-        return None
 
     def match_docker_image(self, image: str) -> bool:
         """Return True if a Docker image string matches this app."""
@@ -90,6 +68,6 @@ class BaseDetector(ABC):
         http_client: httpx.AsyncClient | None = None,
     ) -> httpx.Response:
         """Helper for making HTTP GET requests to guest apps."""
-        ctx = contextlib.nullcontext(http_client) if http_client else httpx.AsyncClient(timeout=timeout, verify=False, follow_redirects=True)
+        ctx = contextlib.nullcontext(http_client) if http_client else httpx.AsyncClient(timeout=timeout, verify=True, follow_redirects=True)
         async with ctx as c:
             return await c.get(url, headers=headers or {})

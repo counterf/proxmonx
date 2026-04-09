@@ -54,6 +54,7 @@ const STATUS_STYLES: Record<string, { label: string; bg: string; text: string; p
   running: { label: 'Running', bg: 'bg-blue-900/40',   text: 'text-blue-300',   pulse: true },
   success: { label: 'Success', bg: 'bg-green-900/40',  text: 'text-green-300' },
   failed:  { label: 'Failed',  bg: 'bg-red-900/40',    text: 'text-red-400' },
+  skipped: { label: 'Skipped', bg: 'bg-gray-800/40',   text: 'text-gray-400' },
   partial: { label: 'Partial', bg: 'bg-amber-900/40',  text: 'text-amber-300' },
 };
 
@@ -123,7 +124,8 @@ function batchAggregateStatus(tasks: TaskRecord[]): string {
   const success = tasks.filter(t => t.status === 'success').length;
   if (failed > 0 && success > 0) return 'partial';
   if (failed > 0) return 'failed';
-  return 'success';
+  if (success > 0) return 'success';
+  return 'skipped';
 }
 
 function BatchGroupRows({ group }: { group: TaskGroupBatch }) {

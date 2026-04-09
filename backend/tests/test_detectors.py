@@ -6,31 +6,22 @@ import respx
 
 from app.detectors.registry import DETECTOR_MAP
 from app.detectors.docker_generic import DockerGenericDetector
-from app.models.guest import GuestInfo
 
 
-# -- Detection (name/tag matching) --
+# -- Detection (name/tag matching via runtime methods) --
 
 class TestDetection:
     def test_sonarr_name_match(self) -> None:
         d = DETECTOR_MAP["sonarr"]
-        guest = GuestInfo(id="100", name="sonarr-lxc", type="lxc", status="running")
-        assert d.detect(guest) == "name_match"
-
-    def test_sonarr_tag_match(self) -> None:
-        d = DETECTOR_MAP["sonarr"]
-        guest = GuestInfo(id="100", name="media-server", type="lxc", status="running", tags=["app:sonarr"])
-        assert d.detect(guest) == "tag_match"
+        assert d._name_matches("sonarr-lxc") is True
 
     def test_sonarr_no_match(self) -> None:
         d = DETECTOR_MAP["sonarr"]
-        guest = GuestInfo(id="100", name="database", type="lxc", status="running")
-        assert d.detect(guest) is None
+        assert d._name_matches("database") is False
 
     def test_plex_alias_match(self) -> None:
         d = DETECTOR_MAP["plex"]
-        guest = GuestInfo(id="101", name="plexmediaserver-01", type="lxc", status="running")
-        assert d.detect(guest) == "name_match"
+        assert d._name_matches("plexmediaserver-01") is True
 
     def test_docker_image_match(self) -> None:
         d = DETECTOR_MAP["sonarr"]
@@ -39,33 +30,23 @@ class TestDetection:
 
     def test_radarr_name_match(self) -> None:
         d = DETECTOR_MAP["radarr"]
-        guest = GuestInfo(id="102", name="radarr", type="lxc", status="running")
-        assert d.detect(guest) == "name_match"
-
-    def test_prowlarr_tag_match(self) -> None:
-        d = DETECTOR_MAP["prowlarr"]
-        guest = GuestInfo(id="103", name="indexer", type="lxc", status="running", tags=["prowlarr"])
-        assert d.detect(guest) == "tag_match"
+        assert d._name_matches("radarr") is True
 
     def test_lidarr_name_match(self) -> None:
         d = DETECTOR_MAP["lidarr"]
-        guest = GuestInfo(id="104", name="lidarr", type="lxc", status="running")
-        assert d.detect(guest) == "name_match"
+        assert d._name_matches("lidarr") is True
 
     def test_readarr_name_match(self) -> None:
         d = DETECTOR_MAP["readarr"]
-        guest = GuestInfo(id="105", name="readarr-lxc", type="lxc", status="running")
-        assert d.detect(guest) == "name_match"
+        assert d._name_matches("readarr-lxc") is True
 
     def test_whisparr_name_match(self) -> None:
         d = DETECTOR_MAP["whisparr"]
-        guest = GuestInfo(id="106", name="whisparr", type="lxc", status="running")
-        assert d.detect(guest) == "name_match"
+        assert d._name_matches("whisparr") is True
 
     def test_jackett_name_match(self) -> None:
         d = DETECTOR_MAP["jackett"]
-        guest = GuestInfo(id="107", name="jackett", type="lxc", status="running")
-        assert d.detect(guest) == "name_match"
+        assert d._name_matches("jackett") is True
 
     def test_jackett_docker_image_match(self) -> None:
         d = DETECTOR_MAP["jackett"]
@@ -73,15 +54,7 @@ class TestDetection:
 
     def test_librespeed_rust_name_match(self) -> None:
         d = DETECTOR_MAP["librespeed-rust"]
-        guest = GuestInfo(id="108", name="librespeed-rust", type="lxc", status="running")
-        assert d.detect(guest) == "name_match"
-
-    def test_librespeed_rust_tag_match(self) -> None:
-        d = DETECTOR_MAP["librespeed-rust"]
-        guest = GuestInfo(
-            id="109", name="speedtest", type="lxc", status="running", tags=["app:librespeed-rust"]
-        )
-        assert d.detect(guest) == "tag_match"
+        assert d._name_matches("librespeed-rust") is True
 
     def test_librespeed_rust_docker_image_match(self) -> None:
         d = DETECTOR_MAP["librespeed-rust"]
@@ -311,6 +284,19 @@ class TestInstalledVersion:
         d = DETECTOR_MAP["librespeed-rust"]
         version = await d.get_installed_version("10.0.0.20")
         assert version is None
+
+    @pytest.mark.asyncio
+    async def test_blank_version_path_returns_none(self) -> None:
+        from app.detectors.http_json import DetectorConfig, HttpJsonDetector
+        cfg = DetectorConfig(
+            name="test", display_name="Test", github_repo=None,
+            default_port=8080, path="", docker_images=[],
+            version_keys=("version",), accepts_api_key=False,
+            auth_header=None, strip_v=False, aliases=[],
+        )
+        d = HttpJsonDetector(cfg)
+        result = await d.get_installed_version("10.0.0.1")
+        assert result is None
 
 
 # -- API key support --
