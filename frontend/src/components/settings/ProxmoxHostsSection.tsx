@@ -13,7 +13,7 @@ const MAX_HOSTS = 10;
 
 function emptyHost(): ProxmoxHost {
   return {
-    id: crypto.randomUUID(),
+    id: (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)),
     label: 'New Host',
     host: '',
     token_id: '',

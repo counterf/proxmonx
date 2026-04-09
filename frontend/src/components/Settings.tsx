@@ -85,7 +85,7 @@ function initHostsFromSettings(s: FullSettings): ProxmoxHost[] {
     return s.proxmox_hosts;
   }
   return [{
-    id: crypto.randomUUID(),
+    id: (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)),
     label: 'Default',
     host: '',
     token_id: '',
