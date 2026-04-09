@@ -102,11 +102,15 @@ done
 msg_ok "Started LXC Container"
 
 msg_info "Running Install Script"
-# curl runs INSIDE the container — pct exec does not forward host stdin to the
-# container process, so piping via 'curl | pct exec -- bash -s' doesn't work.
-# Single-quoted -c string prevents any host-side variable/command expansion.
-pct exec "$CTID" -- bash -c \
-  'curl -fsSL https://raw.githubusercontent.com/counterf/proxmonx/main/install/proxmon-install.sh | bash'
+# curl is not available inside the minimal/standard Debian 13 container at this
+# stage. Fetch the script on the host (where curl exists), push it in via
+# pct push, then execute it inside the container.
+INSTALL_TMP=$(mktemp)
+curl -fsSL https://raw.githubusercontent.com/counterf/proxmonx/main/install/proxmon-install.sh \
+  >"$INSTALL_TMP"
+pct push "$CTID" "$INSTALL_TMP" /tmp/proxmon-install.sh --perms 0755
+rm -f "$INSTALL_TMP"
+pct exec "$CTID" -- bash /tmp/proxmon-install.sh
 msg_ok "Completed Install Script"
 
 description
