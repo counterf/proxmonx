@@ -102,13 +102,11 @@ done
 msg_ok "Started LXC Container"
 
 msg_info "Running Install Script"
-# The install script must run inside the container WITHOUT host-side shell
-# expansion. Using 'bash -c "$(curl ...)"' would cause the host shell to expand
-# every $VAR and $(cmd) in the fetched script before passing it to the container,
-# breaking variable assignments and command substitutions that must run inside.
-# Piping via 'bash -s' sends the script verbatim through stdin, avoiding this.
-curl -fsSL https://raw.githubusercontent.com/counterf/proxmonx/main/install/proxmon-install.sh \
-  | pct exec "$CTID" -- bash -s
+# curl runs INSIDE the container — pct exec does not forward host stdin to the
+# container process, so piping via 'curl | pct exec -- bash -s' doesn't work.
+# Single-quoted -c string prevents any host-side variable/command expansion.
+pct exec "$CTID" -- bash -c \
+  'curl -fsSL https://raw.githubusercontent.com/counterf/proxmonx/main/install/proxmon-install.sh | bash'
 msg_ok "Completed Install Script"
 
 description
