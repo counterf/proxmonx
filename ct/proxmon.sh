@@ -101,10 +101,16 @@ for i in $(seq 1 15); do
 done
 msg_ok "Started LXC Container"
 
+msg_info "Setting Up Container"
+# build_container normally installs curl before running any install script.
+# We skip build_container, so we replicate that essential bootstrap step here.
+pct exec "$CTID" -- bash -c "apt-get update -qq && apt-get install -y curl" \
+  >>"${BUILD_LOG:-/dev/null}" 2>&1
+msg_ok "Set Up Container"
+
 msg_info "Running Install Script"
-# curl is not available inside the minimal/standard Debian 13 container at this
-# stage. Fetch the script on the host (where curl exists), push it in via
-# pct push, then execute it inside the container.
+# Fetch the install script on the host and push it into the container via
+# pct push (avoids stdin-forwarding issues with pct exec).
 INSTALL_TMP=$(mktemp)
 curl -fsSL https://raw.githubusercontent.com/counterf/proxmonx/main/install/proxmon-install.sh \
   >"$INSTALL_TMP"
