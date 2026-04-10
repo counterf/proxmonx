@@ -284,7 +284,7 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
                           id={`host-ssh-pass-${host.id}`}
                           type={showSshPass[host.id] ? 'text' : 'password'}
                           value={host.ssh_password || ''}
-                          onChange={(e) => updateHost(host.id, { ssh_password: e.target.value || null })}
+                          onChange={(e) => updateHost(host.id, { ssh_password: e.target.value })}
                           placeholder="leave blank to keep"
                           disabled={disabled}
                           className={`${inputClass} pr-10`}

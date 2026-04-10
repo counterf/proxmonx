@@ -96,7 +96,7 @@ export default function BulkProgressModal({ action, guests, onClose }: Props) {
   const failedCount = job ? job.failed : 0;
   const skippedCount = job ? job.skipped : 0;
   const completedCount = job ? job.completed : 0;
-  const successCount = completedCount - failedCount - skippedCount;
+  const successCount = Math.max(0, completedCount - failedCount - skippedCount);
   const totalEligible = eligibleGuests.length;
 
   const title = action === 'os_update' ? 'Bulk OS Update' : 'Bulk App Update';

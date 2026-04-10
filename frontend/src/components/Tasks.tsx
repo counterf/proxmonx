@@ -132,7 +132,7 @@ function BatchGroupRows({ group }: { group: TaskGroupBatch }) {
   const hasActive = group.tasks.some(t => t.status === 'pending' || t.status === 'running');
   const [expanded, setExpanded] = useState(hasActive);
   const doneCount = group.bulkJob
-    ? group.bulkJob.completed - group.bulkJob.failed - group.bulkJob.skipped
+    ? Math.max(0, group.bulkJob.completed - group.bulkJob.failed - group.bulkJob.skipped)
     : group.tasks.filter(t => t.status === 'success').length;
   const failedCount = group.bulkJob?.failed ?? group.tasks.filter(t => t.status === 'failed').length;
   const action = group.tasks[0]?.action;
@@ -206,7 +206,7 @@ function BatchGroupCard({ group }: { group: TaskGroupBatch }) {
   const hasActive = group.tasks.some(t => t.status === 'pending' || t.status === 'running');
   const [expanded, setExpanded] = useState(hasActive);
   const doneCount = group.bulkJob
-    ? group.bulkJob.completed - group.bulkJob.failed - group.bulkJob.skipped
+    ? Math.max(0, group.bulkJob.completed - group.bulkJob.failed - group.bulkJob.skipped)
     : group.tasks.filter(t => t.status === 'success').length;
   const failedCount = group.bulkJob?.failed ?? group.tasks.filter(t => t.status === 'failed').length;
   const action = group.tasks[0]?.action;
@@ -263,9 +263,11 @@ export default function Tasks() {
 
   const load = async () => {
     try {
-      const [data, jobs] = await Promise.all([fetchTasks(), fetchBulkJobs()]);
-      setTasks(data);
-      setBulkJobs(jobs);
+      const [tasksResult, bulkJobsResult] = await Promise.allSettled([fetchTasks(), fetchBulkJobs()]);
+      if (tasksResult.status === 'fulfilled') setTasks(tasksResult.value);
+      else throw tasksResult.reason;
+      if (bulkJobsResult.status === 'fulfilled') setBulkJobs(bulkJobsResult.value);
+      else setBulkJobs([]);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load tasks');

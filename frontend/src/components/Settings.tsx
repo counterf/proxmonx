@@ -114,6 +114,7 @@ export default function Settings() {
   const ntfyTokenChanged = useRef(false);
   const apiKeyChanged = useRef(false);
   const githubTokenChanged = useRef(false);
+  const sshPasswordChanged = useRef(false);
   // Per-app configuration
   const [appConfigs, setAppConfigs] = useState<Record<string, AppConfigEntry>>({});
   const [savedAppConfigs, setSavedAppConfigs] = useState<Record<string, AppConfigEntry>>({});
@@ -307,8 +308,8 @@ export default function Settings() {
         ssh_enabled: form.ssh_enabled,
         ssh_username: form.ssh_username,
         ssh_key_path: form.ssh_key_path || null,
-        ssh_password: form.ssh_password || null,
-        github_token: githubTokenChanged.current ? (form.github_token || null) : null,
+        ssh_password: sshPasswordChanged.current ? form.ssh_password : null,
+        github_token: githubTokenChanged.current ? form.github_token : null,
         log_level: form.log_level,
         version_detect_method: form.version_detect_method,
         auth_mode: form.auth_mode,
@@ -318,12 +319,12 @@ export default function Settings() {
         proxmox_hosts: hostsPayload,
         notifications_enabled: form.notifications_enabled,
         ntfy_url: form.ntfy_url,
-        ntfy_token: ntfyTokenChanged.current ? (form.ntfy_token || null) : null,
+        ntfy_token: ntfyTokenChanged.current ? form.ntfy_token : null,
         ntfy_priority: form.ntfy_priority,
         notify_disk_threshold: form.notify_disk_threshold,
         notify_disk_cooldown_minutes: form.notify_disk_cooldown_minutes,
         notify_on_outdated: form.notify_on_outdated,
-        proxmon_api_key: apiKeyChanged.current ? (form.proxmon_api_key || null) : null,
+        proxmon_api_key: apiKeyChanged.current ? form.proxmon_api_key : null,
         trust_proxy_headers: form.trust_proxy_headers,
       };
       await saveSettings(payload);
@@ -338,6 +339,7 @@ export default function Settings() {
       ntfyTokenChanged.current = false;
       apiKeyChanged.current = false;
       githubTokenChanged.current = false;
+      sshPasswordChanged.current = false;
       changedApiKeys.current = new Set();
       setPendingTab(null);
       setToast('Settings saved. Discovery restarting...');
@@ -494,7 +496,7 @@ export default function Settings() {
               onSshEnabledChange={(v) => setField('ssh_enabled', v)}
               onSshUsernameChange={(v) => setField('ssh_username', v)}
               onSshKeyPathChange={(v) => setField('ssh_key_path', v)}
-              onSshPasswordChange={(v) => setField('ssh_password', v)}
+              onSshPasswordChange={(v) => { sshPasswordChanged.current = true; setField('ssh_password', v); }}
               onAuthMethodChange={setAuthMethod}
               disabled={saving}
             />
