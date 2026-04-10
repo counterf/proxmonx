@@ -278,3 +278,7 @@ export async function startBulkJob(
 export async function fetchBulkJob(jobId: string): Promise<BulkJob> {
   return fetchJson<BulkJob>(API_PATHS.BULK_JOB(jobId));
 }
+
+export async function fetchBulkJobs(): Promise<BulkJob[]> {
+  return fetchJson<BulkJob[]>(API_PATHS.BULK_JOBS);
+}

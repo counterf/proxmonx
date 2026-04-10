@@ -146,24 +146,6 @@ class TaskStore:
             ).fetchall()
         return [TaskRecord(**dict(r)) for r in rows]
 
-    def list_batch_ids(self, limit: int = 50) -> list[str]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT batch_id
-                FROM (
-                    SELECT batch_id, MAX(started_at) AS latest_started_at
-                    FROM task_history
-                    WHERE batch_id IS NOT NULL
-                    GROUP BY batch_id
-                )
-                ORDER BY latest_started_at DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        return [r["batch_id"] for r in rows]
-
     def reconcile_stale_running_updates(self) -> int:
         """Mark orphaned running update tasks as failed after a restart."""
         finished_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

@@ -36,6 +36,7 @@ def _build_bulk_job(batch_id: str, tasks: list[TaskRecord]) -> dict:
         t.guest_id: {
             "status": t.status,
             "task_id": t.id,
+            "guest_name": t.guest_name,
             "error": t.detail if t.status in ("failed", "skipped") else None,
         }
         for t in tasks

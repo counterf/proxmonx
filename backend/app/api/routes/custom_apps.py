@@ -189,6 +189,8 @@ async def delete_custom_app(
         if isinstance(gcfg, dict) and gcfg.get("forced_detector") == name:
             gcfg.pop("forced_detector", None)
 
+    data.get("app_config", {}).pop(name, None)
+
     config_store.save(data)
     _reload_custom_detectors(request, config_store, data=data)
     return {"status": "deleted"}

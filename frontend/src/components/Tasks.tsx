@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import type { TaskRecord } from '../types';
-import { fetchTasks, clearTasks } from '../api/client';
+import type { TaskRecord, BulkJob } from '../types';
+import { fetchTasks, fetchBulkJobs, clearTasks } from '../api/client';
 
 // --- Formatting helpers ---
 
@@ -116,7 +116,7 @@ function InfoCell({ task }: { task: TaskRecord }) {
 
 // --- Batch group components ---
 
-type TaskGroupBatch = { type: 'batch'; batchId: string; tasks: TaskRecord[] };
+type TaskGroupBatch = { type: 'batch'; batchId: string; tasks: TaskRecord[]; bulkJob?: BulkJob };
 
 function batchAggregateStatus(tasks: TaskRecord[]): string {
   if (tasks.some(t => t.status === 'running' || t.status === 'pending')) return 'running';
@@ -131,14 +131,16 @@ function batchAggregateStatus(tasks: TaskRecord[]): string {
 function BatchGroupRows({ group }: { group: TaskGroupBatch }) {
   const hasActive = group.tasks.some(t => t.status === 'pending' || t.status === 'running');
   const [expanded, setExpanded] = useState(hasActive);
-  const doneCount = group.tasks.filter(t => t.status === 'success').length;
-  const failedCount = group.tasks.filter(t => t.status === 'failed').length;
+  const doneCount = group.bulkJob
+    ? group.bulkJob.completed - group.bulkJob.failed - group.bulkJob.skipped
+    : group.tasks.filter(t => t.status === 'success').length;
+  const failedCount = group.bulkJob?.failed ?? group.tasks.filter(t => t.status === 'failed').length;
   const action = group.tasks[0]?.action;
 
-  const earliestStart = group.tasks.reduce((a, b) => a.started_at < b.started_at ? a : b).started_at;
-  const latestFinish = group.tasks.every(t => t.finished_at)
+  const earliestStart = group.bulkJob?.created_at ?? group.tasks.reduce((a, b) => a.started_at < b.started_at ? a : b).started_at;
+  const latestFinish = group.bulkJob?.finished_at ?? (group.tasks.every(t => t.finished_at)
     ? group.tasks.reduce((a, b) => a.finished_at! > b.finished_at! ? a : b).finished_at
-    : null;
+    : null);
 
   return (
     <>
@@ -203,10 +205,12 @@ function BatchGroupRows({ group }: { group: TaskGroupBatch }) {
 function BatchGroupCard({ group }: { group: TaskGroupBatch }) {
   const hasActive = group.tasks.some(t => t.status === 'pending' || t.status === 'running');
   const [expanded, setExpanded] = useState(hasActive);
-  const doneCount = group.tasks.filter(t => t.status === 'success').length;
-  const failedCount = group.tasks.filter(t => t.status === 'failed').length;
+  const doneCount = group.bulkJob
+    ? group.bulkJob.completed - group.bulkJob.failed - group.bulkJob.skipped
+    : group.tasks.filter(t => t.status === 'success').length;
+  const failedCount = group.bulkJob?.failed ?? group.tasks.filter(t => t.status === 'failed').length;
   const action = group.tasks[0]?.action;
-  const earliestStart = group.tasks.reduce((a, b) => a.started_at < b.started_at ? a : b).started_at;
+  const earliestStart = group.bulkJob?.created_at ?? group.tasks.reduce((a, b) => a.started_at < b.started_at ? a : b).started_at;
 
   return (
     <div className="border border-gray-800 rounded px-4 py-3 cursor-pointer" onClick={() => setExpanded(p => !p)}>
@@ -250,6 +254,7 @@ type TaskGroup =
 
 export default function Tasks() {
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
+  const [bulkJobs, setBulkJobs] = useState<BulkJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
@@ -258,8 +263,9 @@ export default function Tasks() {
 
   const load = async () => {
     try {
-      const data = await fetchTasks();
+      const [data, jobs] = await Promise.all([fetchTasks(), fetchBulkJobs()]);
       setTasks(data);
+      setBulkJobs(jobs);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load tasks');
@@ -302,6 +308,7 @@ export default function Tasks() {
   };
 
   const groups = useMemo((): TaskGroup[] => {
+    const bulkJobMap = new Map(bulkJobs.map(j => [j.id, j]));
     const batchMap = new Map<string, TaskGroupBatch>();
     const result: TaskGroup[] = [];
     for (const task of tasks) {
@@ -310,13 +317,13 @@ export default function Tasks() {
       } else if (batchMap.has(task.batch_id)) {
         batchMap.get(task.batch_id)!.tasks.push(task);
       } else {
-        const group: TaskGroupBatch = { type: 'batch', batchId: task.batch_id, tasks: [task] };
+        const group: TaskGroupBatch = { type: 'batch', batchId: task.batch_id, tasks: [task], bulkJob: bulkJobMap.get(task.batch_id) };
         batchMap.set(task.batch_id, group);
         result.push(group);
       }
     }
     return result;
-  }, [tasks]);
+  }, [tasks, bulkJobs]);
 
   return (
     <div className="space-y-4">

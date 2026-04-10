@@ -292,8 +292,8 @@ export default function Settings() {
         return {
           ...h,
           // If token_secret is still the masked sentinel, send null to keep backend value
-          token_secret: h.token_secret === '***' ? null : (h.token_secret || null),
-          ssh_password: h.ssh_password === '***' ? null : (h.ssh_password || null),
+          token_secret: h.token_secret === '***' ? null : h.token_secret,
+          ssh_password: h.ssh_password === '***' ? null : h.ssh_password,
           // Preserve ssh_key_path
           ssh_key_path: h.ssh_key_path || saved?.ssh_key_path || null,
         };

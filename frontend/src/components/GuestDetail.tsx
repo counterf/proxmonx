@@ -228,7 +228,7 @@ function InstanceSettings({ guestId, appName, detectorUsed }: { guestId: string;
                 type="password"
                 value={cfg.api_key ?? ''}
                 placeholder="Inherit from global"
-                onChange={(e) => setCfg({ ...cfg, api_key: e.target.value || null })}
+                onChange={(e) => setCfg({ ...cfg, api_key: e.target.value })}
                 className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
@@ -328,6 +328,7 @@ export default function GuestDetail() {
   const [rawExpanded, setRawExpanded] = useState(false);
 
   const loadGuest = useCallback((guestId: string) => {
+    setError(null);
     setLoading(true);
     fetchGuest(guestId)
       .then(setGuest)

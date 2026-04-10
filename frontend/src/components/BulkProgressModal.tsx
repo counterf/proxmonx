@@ -93,11 +93,11 @@ export default function BulkProgressModal({ action, guests, onClose }: Props) {
   }, [job]);
 
   const isDone = job?.status === 'completed' || job?.status === 'failed';
-  const doneCount = job ? job.completed : 0;
   const failedCount = job ? job.failed : 0;
   const skippedCount = job ? job.skipped : 0;
+  const completedCount = job ? job.completed : 0;
+  const successCount = completedCount - failedCount - skippedCount;
   const totalEligible = eligibleGuests.length;
-  const processed = doneCount + failedCount + skippedCount;
 
   const title = action === 'os_update' ? 'Bulk OS Update' : 'Bulk App Update';
 
@@ -174,10 +174,10 @@ export default function BulkProgressModal({ action, guests, onClose }: Props) {
         {/* Footer */}
         <div className="flex items-center justify-between px-4 py-3 border-t border-gray-700 shrink-0">
           <span className="text-xs text-gray-400">
-            {doneCount} done
+            {successCount} done
             {failedCount > 0 && <span className="text-red-400"> · {failedCount} failed</span>}
+            {skippedCount > 0 && <span className="text-gray-500"> · {skippedCount} skipped</span>}
             <span className="text-gray-600"> / {totalEligible}</span>
-            {!isDone && job && <span className="text-gray-600"> ({processed} processed)</span>}
           </span>
           <button
             onClick={onClose}

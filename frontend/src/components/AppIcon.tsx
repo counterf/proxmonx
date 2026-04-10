@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 const ICON_BASE = 'https://cdn.jsdelivr.net/gh/selfhst/icons/png';
 
@@ -37,6 +37,7 @@ export default function AppIcon({
 }: AppIconProps) {
   const [failed, setFailed] = useState(false);
   const slug = resolveIconSlug(appName, detectorKey);
+  useEffect(() => { setFailed(false); }, [slug]);
 
   if (!slug || failed) return null;
 

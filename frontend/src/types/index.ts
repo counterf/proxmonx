@@ -61,6 +61,7 @@ export interface TaskRecord {
 export interface BulkJobResult {
   status: 'pending' | 'running' | 'success' | 'failed' | 'skipped';
   task_id: string | null;
+  guest_name: string;
   error: string | null;
 }
 
