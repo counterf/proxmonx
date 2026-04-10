@@ -27,7 +27,10 @@ def parse_github_repo(value: str) -> str:
     if "github.com" in v or v.startswith("http"):
         if not v.startswith("http"):
             v = "https://" + v
-        path = urlparse(v).path.strip("/").removesuffix(".git")
+        parsed = urlparse(v)
+        if parsed.hostname not in {"github.com", "www.github.com"}:
+            raise ValueError(f"Expected a github.com URL, got: {value!r}")
+        path = parsed.path.strip("/").removesuffix(".git")
         parts = [p for p in path.split("/") if p]
         if len(parts) >= 2:
             return f"{parts[0]}/{parts[1]}"

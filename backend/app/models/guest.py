@@ -33,7 +33,6 @@ def _build_web_url(
     ip: str | None,
     app_name: str | None,
     status: str,
-    detector_used: str | None,
     effective_port: int | None,
     scheme: str = "http",
     version_host: str | None = None,
@@ -114,6 +113,5 @@ class GuestInfo(BaseModel):
     def web_url(self) -> str | None:
         return _build_web_url(
             self.ip, self.app_name, self.status,
-            self.detector_used, self.effective_port,
-            self.scheme, self.version_host,
+            self.effective_port, self.scheme, self.version_host,
         )

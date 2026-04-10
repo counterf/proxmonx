@@ -286,6 +286,11 @@ export default function Settings() {
           appConfigPayload[name] = entry;
         }
       }
+      for (const name of Object.keys(savedAppConfigs)) {
+        if (!(name in appConfigPayload)) {
+          appConfigPayload[name] = {};
+        }
+      }
 
       // Build proxmox_hosts payload -- mask secrets that haven't changed
       const hostsPayload: ProxmoxHost[] = proxmoxHosts.map((h) => {
@@ -537,7 +542,10 @@ export default function Settings() {
               defaults={detectors}
               disabled={saving}
             />
-            <CustomAppsSection />
+            <CustomAppsSection onCustomAppsChange={async () => {
+              const d = await fetchAppConfigDefaults();
+              setDetectors(d);
+            }} />
             {detectors.length > 0 && (
               <div className="p-4 rounded bg-surface border border-gray-800">
                 <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Plugins (Detectors)</h2>

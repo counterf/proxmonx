@@ -371,7 +371,22 @@ export default function GuestDetail() {
         </div>
         <div className="flex items-center gap-2">
           <StatusBadge status={guest.update_status} />
-          <GuestActions guest={guest} onActionComplete={() => { if (id) loadGuest(id); }} />
+          <GuestActions guest={guest} onActionComplete={() => {
+            if (!id) return;
+            const prev = guest.last_checked;
+            let elapsed = 0;
+            const iv = setInterval(async () => {
+              elapsed += 1000;
+              try {
+                const g = await fetchGuest(id);
+                if (g.last_checked !== prev) {
+                  clearInterval(iv);
+                  setGuest(g);
+                }
+              } catch { /* ignore */ }
+              if (elapsed >= 30000) clearInterval(iv);
+            }, 1000);
+          }} />
         </div>
       </div>
 

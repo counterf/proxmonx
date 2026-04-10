@@ -79,7 +79,7 @@ export default function DiscoverySection({
           label="Verify SSL"
           checked={verifySsl}
           onChange={onVerifySslChange}
-          hint="Validate TLS certificates when connecting to Proxmox and application APIs"
+          hint="Validate TLS certificates for GitHub release lookups. Per-host TLS is configured individually in the Proxmox Hosts section."
           disabled={disabled}
         />
 

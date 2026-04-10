@@ -53,7 +53,7 @@ function defToForm(def: CustomAppDef): FormData {
   };
 }
 
-export default function CustomAppsSection() {
+export default function CustomAppsSection({ onCustomAppsChange }: { onCustomAppsChange?: () => Promise<void> }) {
   const [expanded, setExpanded] = useState(false);
   const [apps, setApps] = useState<CustomAppDef[]>([]);
   const [loading, setLoading] = useState(true);
@@ -166,6 +166,7 @@ export default function CustomAppsSection() {
         const payload = buildPayload(editingName);
         await updateCustomApp(editingName, payload);
         await reload();
+        await onCustomAppsChange?.();
         setEditingName(null);
       } else {
         // Create
@@ -180,6 +181,7 @@ export default function CustomAppsSection() {
         const payload = buildPayload(name);
         await createCustomApp(payload);
         await reload();
+        await onCustomAppsChange?.();
         setShowForm(false);
         setForm({ ...EMPTY_FORM });
         setSuccessMessage(`${payload.display_name} added. Now assign it to a guest from their detail page.`);
@@ -200,6 +202,7 @@ export default function CustomAppsSection() {
     try {
       await deleteCustomApp(name);
       await reload();
+      await onCustomAppsChange?.();
       setDeletingName(null);
       if (editingName === name) {
         setEditingName(null);

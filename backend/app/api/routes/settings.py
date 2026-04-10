@@ -399,11 +399,10 @@ async def health(
 @router.get("/api/setup/status")
 async def setup_status(
     config_store=Depends(_get_config_store),
-) -> dict[str, bool | list[str]]:
-    """Return whether the app is configured and which fields are missing."""
+) -> dict[str, bool]:
+    """Return whether the app is configured."""
     return {
         "configured": config_store.is_configured(),
-        "missing_fields": config_store.get_missing_fields(),
     }
 
 
@@ -547,7 +546,6 @@ async def get_app_config_defaults() -> list[dict[str, str | int | bool | None]]:
             "display_name": d.display_name,
             "default_port": d.default_port,
             "accepts_api_key": d.accepts_api_key,
-            "default_scheme": "http",
             "github_repo": d.github_repo,
         }
         for d in ALL_DETECTORS

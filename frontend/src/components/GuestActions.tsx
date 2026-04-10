@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { Guest, TaskRecord } from '../types';
-import { guestAction, refreshGuest, osUpdateGuest, appUpdateGuest, backupGuest, fetchTask } from '../api/client';
+import { guestAction, refreshGuest, osUpdateGuest, appUpdateGuest, backupGuest, fetchTask, fetchFullSettings } from '../api/client';
+import type { ProxmoxHost } from '../types';
 
 async function pollTask(
   taskId: string,
@@ -38,6 +39,7 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
   const [snapshotName, setSnapshotName] = useState('');
   const [result, setResult] = useState<{ ok: boolean | null; msg: string } | null>(null);
   const [dropdownPos, setDropdownPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
+  const [backupEnabled, setBackupEnabled] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const portalRef = useRef<HTMLDivElement>(null);
@@ -58,6 +60,17 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
+  useEffect(() => {
+    fetchFullSettings()
+      .then((s) => {
+        const host = s.proxmox_hosts.find((h: ProxmoxHost) => h.id === guest.host_id);
+        setBackupEnabled(!!host?.backup_storage);
+      })
+      .catch(() => {});
+  }, [guest.host_id]);
+
+  const SUPPORTED_OS_TYPES = ['alpine','debian','ubuntu','devuan','fedora','centos','archlinux','opensuse'];
+  const canOsUpdate = guest.type === 'lxc' && guest.status === 'running' && SUPPORTED_OS_TYPES.includes(guest.os_type ?? '');
   const running = guest.status === 'running';
 
   const execute = async (action: ActionKey, snapName?: string) => {
@@ -302,7 +315,7 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
               <div className="border-t border-gray-700 my-1" />
               <ActionItem label="Snapshot" icon="📷" color="text-gray-300" onClick={() => handleAction('snapshot')} loading={pending === 'snapshot'} />
               <ActionItem label="Refresh info" icon="↻" color="text-gray-300" onClick={() => execute('refresh')} loading={pending === 'refresh'} />
-              {guest.type === 'lxc' && guest.status === 'running' && (
+              {canOsUpdate && (
                 <>
                   <div className="border-t border-gray-700 my-1" />
                   <ActionItem
@@ -323,14 +336,18 @@ export default function GuestActions({ guest, onActionComplete }: Props) {
                   )}
                 </>
               )}
-              <div className="border-t border-gray-700 my-1" />
-              <ActionItem
-                label="Backup"
-                icon="▣"
-                color="text-indigo-400"
-                onClick={() => handleAction('backup')}
-                loading={false}
-              />
+              {backupEnabled && (
+                <>
+                  <div className="border-t border-gray-700 my-1" />
+                  <ActionItem
+                    label="Backup"
+                    icon="▣"
+                    color="text-indigo-400"
+                    onClick={() => handleAction('backup')}
+                    loading={false}
+                  />
+                </>
+              )}
             </>
           )}
         </div>,

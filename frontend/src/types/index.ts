@@ -91,7 +91,6 @@ export interface HealthStatus {
 
 export interface SetupStatus {
   configured: boolean;
-  missing_fields: string[];
 }
 
 export interface AppConfigEntry {
@@ -111,7 +110,6 @@ export interface AppConfigDefault {
   display_name: string;
   default_port: number;
   accepts_api_key: boolean;
-  default_scheme: string;
   github_repo: string | null;
 }
 
