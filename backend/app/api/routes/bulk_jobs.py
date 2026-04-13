@@ -191,9 +191,12 @@ async def start_bulk_job(
     if not request_body.guest_ids:
         raise HTTPException(status_code=400, detail="guest_ids must not be empty")
 
+    # Deduplicate while preserving order to avoid orphaned pending tasks.
+    guest_ids = list(dict.fromkeys(request_body.guest_ids))
+
     job_id = str(uuid.uuid4())
     task_ids: dict[str, str] = {}
-    for guest_id in request_body.guest_ids:
+    for guest_id in guest_ids:
         task_id = str(uuid.uuid4())
         guest = scheduler.guests.get(guest_id)
         guest_name = guest.name if guest else guest_id
@@ -216,7 +219,7 @@ async def start_bulk_job(
         _run_bulk_job(
             job_id=job_id,
             action=request_body.action,
-            guest_ids=request_body.guest_ids,
+            guest_ids=guest_ids,
             task_ids=task_ids,
             scheduler=scheduler,
             task_store=task_store,

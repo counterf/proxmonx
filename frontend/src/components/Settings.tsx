@@ -28,7 +28,6 @@ interface FormData {
   poll_interval_seconds: number;
   pending_updates_interval_seconds: number;
   discover_vms: boolean;
-  verify_ssl: boolean;
   ssh_enabled: boolean;
   ssh_username: string;
   ssh_key_path: string;
@@ -58,7 +57,6 @@ function settingsToFormData(s: FullSettings): FormData {
     poll_interval_seconds: s.poll_interval_seconds,
     pending_updates_interval_seconds: s.pending_updates_interval_seconds ?? 3600,
     discover_vms: s.discover_vms,
-    verify_ssl: s.verify_ssl,
     ssh_enabled: s.ssh_enabled,
     ssh_username: s.ssh_username,
     ssh_key_path: s.ssh_key_path || '',
@@ -91,7 +89,6 @@ function initHostsFromSettings(s: FullSettings): ProxmoxHost[] {
     token_id: '',
     token_secret: '',
     node: '',
-    verify_ssl: false,
     ssh_username: 'root',
     ssh_password: null,
     ssh_key_path: null,
@@ -309,7 +306,6 @@ export default function Settings() {
         poll_interval_seconds: form.poll_interval_seconds,
         pending_updates_interval_seconds: form.pending_updates_interval_seconds,
         discover_vms: form.discover_vms,
-        verify_ssl: form.verify_ssl,
         ssh_enabled: form.ssh_enabled,
         ssh_username: form.ssh_username,
         ssh_key_path: form.ssh_key_path || null,
@@ -458,13 +454,11 @@ export default function Settings() {
               pollInterval={form.poll_interval_seconds}
               pendingUpdatesInterval={form.pending_updates_interval_seconds}
               discoverVms={form.discover_vms}
-              verifySsl={form.verify_ssl}
               versionDetectMethod={form.version_detect_method}
               errors={errors}
               onPollIntervalChange={(v) => setField('poll_interval_seconds', v)}
               onPendingUpdatesIntervalChange={(v) => setField('pending_updates_interval_seconds', v)}
               onDiscoverVmsChange={(v) => setField('discover_vms', v)}
-              onVerifySslChange={(v) => setField('verify_ssl', v)}
               onVersionDetectMethodChange={(v) => setField('version_detect_method', v)}
               disabled={saving}
             />

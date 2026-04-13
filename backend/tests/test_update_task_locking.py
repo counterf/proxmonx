@@ -59,7 +59,7 @@ def _make_guest_routes_app(tmp_path):
 
 
 class TestUpdateTaskLocking:
-    def test_reconcile_stale_running_updates_marks_only_update_tasks(self, tmp_path) -> None:
+    def test_reconcile_stale_running_tasks_marks_all_running_tasks(self, tmp_path) -> None:
         store = TaskStore(str(tmp_path / "test.db"))
         store.create(TaskRecord(
             id="os-1",
@@ -89,18 +89,20 @@ class TestUpdateTaskLocking:
             started_at="2026-01-01T00:00:00Z",
         ))
 
-        assert store.reconcile_stale_running_updates() == 2
+        assert store.reconcile_stale_running_tasks() == 3
 
         os_task = store.get("os-1")
         app_task = store.get("app-1")
         start_task = store.get("start-1")
         assert os_task is not None and os_task.status == "failed"
         assert app_task is not None and app_task.status == "failed"
+        assert start_task is not None and start_task.status == "failed"
         assert os_task.detail == "Interrupted by proxmon restart"
         assert app_task.detail == "Interrupted by proxmon restart"
+        assert start_task.detail == "Interrupted by proxmon restart"
         assert os_task.finished_at is not None
         assert app_task.finished_at is not None
-        assert start_task is not None and start_task.status == "running"
+        assert start_task.finished_at is not None
 
     def test_os_update_uses_db_running_task_as_lock(self, tmp_path, monkeypatch) -> None:
         import app.api.routes.guests as guests_routes

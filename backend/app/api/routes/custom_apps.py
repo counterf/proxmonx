@@ -86,13 +86,20 @@ def _reload_custom_detectors(
                 continue
     load_custom_detectors(defs)
 
-    # Seed app_config for custom apps with scheme != "http"
+    # Sync app_config scheme for custom apps
     app_config = data.get("app_config", {})
     changed = False
     for defn in defs:
         if defn.scheme != "http" and defn.name not in app_config:
             app_config[defn.name] = {"scheme": defn.scheme}
             changed = True
+        elif defn.scheme == "http" and defn.name in app_config:
+            entry = app_config[defn.name]
+            if isinstance(entry, dict) and entry.get("scheme"):
+                entry.pop("scheme")
+                if not entry:
+                    del app_config[defn.name]
+                changed = True
     if changed:
         data["app_config"] = app_config
         config_store.save(data)

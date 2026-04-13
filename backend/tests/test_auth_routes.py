@@ -317,7 +317,6 @@ class TestSetupFlowAuthExemptions:
                 "token_id": "root@pam!token",
                 "token_secret": "secret",
                 "node": "pve",
-                "verify_ssl": False,
             },
         )
         assert resp.status_code == 200
@@ -333,7 +332,6 @@ class TestSetupFlowAuthExemptions:
                 "token_id": "root@pam!token",
                 "token_secret": "secret",
                 "node": "pve",
-                "verify_ssl": False,
             },
         )
         assert resp.status_code == 200

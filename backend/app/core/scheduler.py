@@ -115,7 +115,7 @@ class Scheduler:
             return
         host_client = httpx.AsyncClient(
             timeout=10.0,
-            verify=host_config.verify_ssl,
+            verify=False,
             follow_redirects=True,
         )
         try:

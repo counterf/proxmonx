@@ -120,7 +120,6 @@ export interface ProxmoxHost {
   token_id: string;
   token_secret: string | null;
   node: string;
-  verify_ssl: boolean;
   ssh_username: string;
   ssh_password: string | null;
   ssh_key_path: string | null;
@@ -132,7 +131,6 @@ export interface FullSettings {
   poll_interval_seconds: number;
   pending_updates_interval_seconds: number;
   discover_vms: boolean;
-  verify_ssl: boolean;
   ssh_enabled: boolean;
   ssh_username: string;
   ssh_key_path: string | null;
@@ -160,7 +158,6 @@ export interface SettingsSaveRequest {
   poll_interval_seconds: number;
   pending_updates_interval_seconds?: number;
   discover_vms: boolean;
-  verify_ssl: boolean;
   ssh_enabled: boolean;
   ssh_username: string;
   ssh_key_path: string | null;
@@ -190,7 +187,6 @@ export interface ConnectionTestRequest {
   token_id: string;
   token_secret: string;
   node: string;
-  verify_ssl: boolean;
   host_id?: string;
 }
 

@@ -46,7 +46,6 @@ class ProxmoxHostSaveEntry(BaseModel):
     token_id: str
     token_secret: str | None = None  # None / "***" = keep current
     node: str
-    verify_ssl: bool = False
     ssh_username: str = "root"
     ssh_password: str | None = None
     ssh_key_path: str | None = None
@@ -95,7 +94,6 @@ class SettingsSaveRequest(BaseModel):
     poll_interval_seconds: int = Field(default=3600, ge=30, le=86400)
     pending_updates_interval_seconds: int = Field(default=3600, ge=3600, le=86400)
     discover_vms: bool = False
-    verify_ssl: bool = False
     ssh_enabled: bool = True
     ssh_username: str = "root"
     ssh_key_path: str | None = None
@@ -148,7 +146,6 @@ class ConnectionTestRequest(BaseModel):
     token_id: str
     token_secret: str
     node: str
-    verify_ssl: bool = False
     host_id: str | None = None
 
     @field_validator("host")
@@ -200,7 +197,6 @@ def _merge_proxmox_hosts(
             "token_id": entry.token_id,
             "token_secret": _keep_or_replace(entry.token_secret, prev.get("token_secret")),
             "node": entry.node,
-            "verify_ssl": entry.verify_ssl,
             "ssh_username": entry.ssh_username,
             "ssh_password": _keep_or_replace(entry.ssh_password, prev.get("ssh_password")),
             "ssh_key_path": entry.ssh_key_path or prev.get("ssh_key_path") or "",
@@ -314,6 +310,11 @@ def _apply_auth_settings(
     # Password hash: set from new_password when provided, otherwise preserve existing.
     existing_hash = existing.get("auth_password_hash", "")
     target_auth_mode = config_data.get("auth_mode", "disabled")
+    if target_auth_mode == "forms" and not config_data.get("auth_username", "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Cannot enable forms auth without setting a username",
+        )
     if target_auth_mode == "forms" and not existing_hash and not body.new_password:
         raise HTTPException(
             status_code=422,
@@ -475,7 +476,7 @@ async def test_connection(
         "Authorization": f"PVEAPIToken={body.token_id}={token_secret}",
     }
     try:
-        async with httpx.AsyncClient(verify=body.verify_ssl, timeout=10.0) as client:
+        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
             # Test with /version endpoint
             resp = await client.get(f"{base_url}/version", headers=headers)
             resp.raise_for_status()
@@ -569,7 +570,6 @@ async def save_settings(
         "poll_interval_seconds": body.poll_interval_seconds,
         "pending_updates_interval_seconds": body.pending_updates_interval_seconds,
         "discover_vms": body.discover_vms,
-        "verify_ssl": body.verify_ssl,
         "ssh_enabled": body.ssh_enabled,
         "ssh_username": body.ssh_username,
         "ssh_key_path": body.ssh_key_path,
@@ -660,7 +660,7 @@ async def test_notification(
     if not settings.ntfy_url:
         return {"success": False, "message": "ntfy URL is not configured"}
 
-    async with httpx.AsyncClient(timeout=10.0, verify=settings.verify_ssl) as client:
+    async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
         notifier = NtfyNotifier(
             url=settings.ntfy_url,
             token=settings.ntfy_token,

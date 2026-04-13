@@ -116,10 +116,9 @@ class DiscoveryEngine:
         logger.info("Starting discovery for host %s (%s)", host_config.label, host_config.host)
         start = datetime.now(timezone.utc)
 
-        # Per-host HTTP client respects the host's own verify_ssl setting
         host_client = httpx.AsyncClient(
             timeout=10.0,
-            verify=host_config.verify_ssl,
+            verify=False,
             follow_redirects=True,
         )
         updated: dict[str, GuestInfo] = {}
@@ -556,13 +555,9 @@ class DiscoveryEngine:
         # Track TrueNAS latest version from the same probe (avoids race on singleton)
         _truenas_latest: str | None = None
         try:
-            extra_kwargs: dict = {}
-            if detector.name == "truenas":
-                extra_kwargs["verify_ssl"] = host_config.verify_ssl if host_config else False
             result = await detector.get_installed_version(
                 probe_host, port=cfg.port, api_key=cfg.api_key, scheme=cfg.scheme,
                 http_client=http_client or self._http_client,
-                **extra_kwargs,
             )
             # TrueNAS returns (installed, latest) tuple; others return str|None
             if isinstance(result, tuple):

@@ -68,8 +68,17 @@ async def _require_api_key(
         if auth.lower().startswith("bearer "):
             token = auth[7:].strip()
 
-    if not token or not hmac.compare_digest(token, expected):
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    if token and hmac.compare_digest(token, expected):
+        return
+
+    # Accept a valid browser session cookie as equivalent to an API key.
+    session_store = getattr(request.app.state, "session_store", None)
+    if session_store is not None:
+        session_token = request.cookies.get("proxmon_session")
+        if session_token and session_store.is_valid(session_token):
+            return
+
+    raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
 # --- Secret masking ---

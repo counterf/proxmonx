@@ -45,7 +45,7 @@ def build_runtime(settings: Settings) -> tuple[httpx.AsyncClient, Scheduler]:
     Returns (http_client, scheduler) so the caller can manage lifecycle.
     Used by both lifespan() and save_settings() to avoid duplicating wiring.
     """
-    http_client = httpx.AsyncClient(timeout=10.0, verify=settings.verify_ssl, follow_redirects=True)
+    http_client = httpx.AsyncClient(timeout=10.0, verify=False, follow_redirects=True)
     github = GitHubClient(settings)
     ssh = SSHClient(settings)
     engine = DiscoveryEngine(github, ssh, http_client=http_client, settings=settings)
@@ -76,11 +76,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Task history store (same DB file)
     task_store = TaskStore(db_path)
-    stale_update_count = task_store.reconcile_stale_running_updates()
-    if stale_update_count:
+    stale_count = task_store.reconcile_stale_running_tasks()
+    if stale_count:
         logging.getLogger(__name__).warning(
-            "Marked %s stale update task(s) as failed after restart",
-            stale_update_count,
+            "Marked %s stale running task(s) as failed after restart",
+            stale_count,
         )
     app.dependency_overrides[_get_task_store] = lambda: task_store
 
@@ -107,9 +107,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
         logger.info("proxmon stopped")
         return
-
-    if not settings.verify_ssl:
-        logger.warning("SSL verification is disabled (VERIFY_SSL=false)")
 
     if not settings.ssh_known_hosts_path:
         logger.warning(

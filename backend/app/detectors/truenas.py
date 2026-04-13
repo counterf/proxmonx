@@ -1,7 +1,7 @@
 """TrueNAS SCALE detector — JSON-RPC 2.0 over WebSocket.
 
 Connection flow (per probe):
-  1. Open wss://{host}:{port}/api/current  (ssl verify per config)
+  1. Open wss://{host}:{port}/api/current  (ssl verify disabled)
   2. auth.login_with_api_key → True / False
   3. system.info              → .version  (installed)
   4. update.status            → .status.new_version.version  (latest, or None)
@@ -37,7 +37,6 @@ class TrueNASDetector(BaseDetector):
         api_key: str | None = None,
         scheme: str = "https",
         http_client=None,
-        verify_ssl: bool = False,
     ) -> tuple[str, str | None]:
         port = port or self.default_port
         # wss:// for https (default), ws:// for http
@@ -52,9 +51,8 @@ class TrueNASDetector(BaseDetector):
         ssl_ctx: ssl.SSLContext | bool
         if ws_scheme == "wss":
             ssl_ctx = ssl.create_default_context()
-            if not verify_ssl:
-                ssl_ctx.check_hostname = False
-                ssl_ctx.verify_mode = ssl.CERT_NONE
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
         else:
             ssl_ctx = False  # type: ignore[assignment]
 

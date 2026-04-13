@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.config import AppConfig, CustomAppDef, ProxmoxHostConfig, Settings
-from app.core.config_store import ConfigStore
+from app.core.config_store import ConfigStore, _MIGRATABLE_COLUMNS, _CREATE_TABLE
 
 
 @pytest.fixture()
@@ -209,6 +209,86 @@ class TestGetMissingFieldsMultiHost:
             ],
         })
         assert store.get_missing_fields() == []
+
+
+class TestColumnMigration:
+    """Verify that _init_db adds missing columns to an existing settings table."""
+
+    def test_adds_missing_columns(self, db_path: Path) -> None:
+        """A table created with only a few columns should gain the rest on init."""
+        import sqlite3
+
+        # Create a minimal table missing several columns.
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "CREATE TABLE settings ("
+            "  id INTEGER PRIMARY KEY CHECK (id = 1),"
+            "  poll_interval_seconds INTEGER DEFAULT 3600,"
+            "  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+            ")"
+        )
+        conn.commit()
+        conn.close()
+
+        # ConfigStore.__init__ should migrate the missing columns.
+        store = ConfigStore(str(db_path))
+
+        conn = sqlite3.connect(str(db_path))
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(settings)").fetchall()}
+        conn.close()
+
+        # Spot-check several columns that were missing.
+        for expected in ("proxmon_api_key", "trust_proxy_headers", "discover_vms",
+                         "github_token", "proxmox_hosts", "custom_app_defs"):
+            assert expected in cols, f"Column '{expected}' was not added by migration"
+
+    def test_save_load_after_migration(self, db_path: Path) -> None:
+        """After migration, save and load should work normally."""
+        import sqlite3
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "CREATE TABLE settings ("
+            "  id INTEGER PRIMARY KEY CHECK (id = 1),"
+            "  poll_interval_seconds INTEGER DEFAULT 3600,"
+            "  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+            ")"
+        )
+        conn.commit()
+        conn.close()
+
+        store = ConfigStore(str(db_path))
+        store.save({"poll_interval_seconds": 120, "discover_vms": True, "proxmon_api_key": "abc"})
+        data = store.load()
+        assert data["poll_interval_seconds"] == 120
+        assert data["discover_vms"] is True
+        assert data["proxmon_api_key"] == "abc"
+
+    def test_no_op_on_fresh_db(self, db_path: Path) -> None:
+        """On a fresh database, migration should be a no-op (no errors)."""
+        store = ConfigStore(str(db_path))
+        store.save({"log_level": "debug"})
+        assert store.load()["log_level"] == "debug"
+
+
+class TestMigratableColumnsDrift:
+    """Guard against _MIGRATABLE_COLUMNS drifting from _CREATE_TABLE."""
+
+    def test_covers_all_ddl_columns(self, db_path: Path) -> None:
+        """Every column in a fresh table (except id, updated_at) must appear in _MIGRATABLE_COLUMNS."""
+        import sqlite3
+        # Use SQLite itself as the authoritative DDL parser.
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(_CREATE_TABLE)
+        conn.commit()
+        actual_cols = {row[1] for row in conn.execute("PRAGMA table_info(settings)").fetchall()}
+        conn.close()
+        actual_cols -= {"id", "updated_at"}
+        migratable_names = {col for col, _ in _MIGRATABLE_COLUMNS}
+        assert actual_cols == migratable_names, (
+            f"Drift: in DDL only={actual_cols - migratable_names}, "
+            f"in migration only={migratable_names - actual_cols}"
+        )
 
 
 class TestLoadAuth:

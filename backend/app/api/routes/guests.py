@@ -43,6 +43,8 @@ async def _poll_upid(
     upid: str,
     success_detail: str | None = None,
     http_client: httpx.AsyncClient | None = None,
+    guest_id: str | None = None,
+    scheduler=None,
 ) -> None:
     """Background task: poll Proxmox for UPID completion and update the task record."""
     for _ in range(60):  # poll every 10s up to 10 min
@@ -62,6 +64,8 @@ async def _poll_upid(
                 detail=success_detail if succeeded else (exitstatus or upid),
                 finished_at=_now_iso(),
             )
+            if succeeded and guest_id and scheduler:
+                scheduler.trigger_guest_refresh(guest_id)
             return
     # Timed out without completion — mark as failed
     task_store.update(
@@ -70,6 +74,8 @@ async def _poll_upid(
         detail=f"{upid} (poll timed out after 10 min)",
         finished_at=_now_iso(),
     )
+    if guest_id and scheduler:
+        scheduler.trigger_guest_refresh(guest_id)
 
 
 # --- Request/Response models ---
@@ -248,7 +254,7 @@ async def perform_guest_action(
         task_store.update(task_id, status="running", detail=upid)
         success_detail = f"Snapshot '{snapshot_name}' created" if snapshot_name else None
         http_client = getattr(request.app.state, "http_client", None)
-        asyncio.create_task(_poll_upid(task_store, host_config, task_id, upid, success_detail, http_client=http_client))
+        asyncio.create_task(_poll_upid(task_store, host_config, task_id, upid, success_detail, http_client=http_client, guest_id=guest_id, scheduler=scheduler))
         return {"status": "ok", "task": upid}
     except httpx.HTTPStatusError as exc:
         # Extract the Proxmox error message
@@ -458,7 +464,7 @@ async def backup_guest(
         logger.info("Backup queued for guest %s -> %s", guest_id, upid)
         task_store.update(task_id, status="running", detail=upid)
         http_client = getattr(request.app.state, "http_client", None)
-        asyncio.create_task(_poll_upid(task_store, host_config, task_id, upid, f"Backed up to {host_config.backup_storage}", http_client=http_client))
+        asyncio.create_task(_poll_upid(task_store, host_config, task_id, upid, f"Backed up to {host_config.backup_storage}", http_client=http_client, guest_id=guest_id, scheduler=scheduler))
         return {"status": "ok", "task": upid}
     except httpx.HTTPStatusError as exc:
         detail: str = exc.response.reason_phrase or f"Proxmox API error: {exc.response.status_code}"

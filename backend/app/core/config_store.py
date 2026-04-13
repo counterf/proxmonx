@@ -33,7 +33,7 @@ _SCALAR_INT_FIELDS: frozenset[str] = frozenset({
     "pending_updates_interval_seconds",
 })
 _SCALAR_BOOL_FIELDS: frozenset[str] = frozenset({
-    "discover_vms", "verify_ssl", "ssh_enabled", "notifications_enabled",
+    "discover_vms", "ssh_enabled", "notifications_enabled",
     "notify_on_outdated", "trust_proxy_headers",
 })
 _JSON_FIELDS: frozenset[str] = frozenset({
@@ -46,7 +46,6 @@ CREATE TABLE IF NOT EXISTS settings (
     poll_interval_seconds        INTEGER  DEFAULT 3600,
     pending_updates_interval_seconds INTEGER DEFAULT 3600,
     discover_vms                 INTEGER  DEFAULT 0,
-    verify_ssl                   INTEGER  DEFAULT 0,
     ssh_enabled                  INTEGER  DEFAULT 1,
     ssh_username                 TEXT     DEFAULT 'root',
     ssh_key_path                 TEXT,
@@ -75,6 +74,42 @@ CREATE TABLE IF NOT EXISTS settings (
                                  DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 )
 """
+
+# Columns that can be added via ALTER TABLE ADD COLUMN on upgrade.
+# Derived automatically from _CREATE_TABLE so there is a single source of truth.
+_SKIP_COLUMNS = frozenset({"id", "updated_at"})
+# DEFAULT is included to skip the continuation line of the multi-line updated_at definition.
+_CONSTRAINT_PREFIXES = ("PRIMARY", "CHECK", "UNIQUE", "CONSTRAINT", "CREATE", ")", "DEFAULT")
+
+
+def _parse_migratable_columns() -> list[tuple[str, str]]:
+    """Extract ``(column_name, type_and_default)`` from ``_CREATE_TABLE``.
+
+    Skips ``id`` (PRIMARY KEY with CHECK) and ``updated_at`` (NOT NULL +
+    expression default) because SQLite's ALTER TABLE ADD COLUMN does not
+    support those constraints.
+    """
+    result: list[tuple[str, str]] = []
+    for raw in _CREATE_TABLE.splitlines():
+        line = raw.strip().rstrip(",")
+        if not line:
+            continue
+        parts = line.split()
+        if not parts:
+            continue
+        col_name = parts[0]
+        if col_name.upper().startswith(_CONSTRAINT_PREFIXES):
+            continue
+        if col_name in _SKIP_COLUMNS:
+            continue
+        # Everything after the column name is the type + default clause
+        typedef = " ".join(parts[1:])
+        if typedef:
+            result.append((col_name, typedef))
+    return result
+
+
+_MIGRATABLE_COLUMNS: list[tuple[str, str]] = _parse_migratable_columns()
 
 
 def _dict_to_params(data: dict) -> dict:
@@ -127,6 +162,22 @@ class ConfigStore:
     def _init_db(self) -> None:
         with self._connect() as conn:
             conn.execute(_CREATE_TABLE)
+            self._migrate_columns(conn)
+
+    @staticmethod
+    def _migrate_columns(conn: sqlite3.Connection) -> None:
+        """Add any columns present in the schema but missing from the DB.
+
+        Runs on every startup.  Only issues ALTER TABLE for columns not yet in
+        ``PRAGMA table_info``.  ``id`` and ``updated_at`` are excluded because
+        they are always present in the original CREATE TABLE and have constraints
+        incompatible with ALTER TABLE ADD COLUMN.
+        """
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(settings)").fetchall()}
+        for col, typedef in _MIGRATABLE_COLUMNS:
+            if col not in existing:
+                logger.info("Migrating settings table: adding column '%s'", col)
+                conn.execute(f"ALTER TABLE settings ADD COLUMN {col} {typedef}")
 
     def load(self) -> dict:
         """Read settings from SQLite, return as dict.

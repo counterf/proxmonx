@@ -146,8 +146,8 @@ class TaskStore:
             ).fetchall()
         return [TaskRecord(**dict(r)) for r in rows]
 
-    def reconcile_stale_running_updates(self) -> int:
-        """Mark orphaned running update tasks as failed after a restart."""
+    def reconcile_stale_running_tasks(self) -> int:
+        """Mark all orphaned running tasks as failed after a restart."""
         finished_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         detail = "Interrupted by proxmon restart"
         with self._connect() as conn:
@@ -155,7 +155,7 @@ class TaskStore:
                 """
                 UPDATE task_history
                 SET status = 'failed', detail = ?, finished_at = ?
-                WHERE status = 'running' AND action IN ('os_update', 'app_update')
+                WHERE status = 'running'
                 """,
                 (detail, finished_at),
             )

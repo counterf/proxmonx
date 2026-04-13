@@ -20,7 +20,6 @@ function emptyHost(): ProxmoxHost {
     token_id: '',
     token_secret: '',
     node: '',
-    verify_ssl: false,
     ssh_username: 'root',
     ssh_password: null,
     ssh_key_path: null,
@@ -91,7 +90,6 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
         token_id: host.token_id,
         token_secret: host.token_secret || '',
         node: host.node,
-        verify_ssl: host.verify_ssl,
         host_id: host.id,
       });
       setTestResult((prev) => ({ ...prev, [host.id]: result }));
@@ -295,20 +293,6 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
                   </div>
 
                   <div className="space-y-2">
-                    <div className="flex items-start gap-2">
-                      <input
-                        id={`host-verify-ssl-${host.id}`}
-                        type="checkbox"
-                        checked={host.verify_ssl}
-                        onChange={(e) => updateHost(host.id, { verify_ssl: e.target.checked })}
-                        disabled={disabled}
-                        className="accent-blue-500 mt-0.5"
-                      />
-                      <div>
-                        <label htmlFor={`host-verify-ssl-${host.id}`} className="text-xs text-gray-400">Verify SSL</label>
-                        <p className="text-xs text-gray-600">Validate this host's TLS certificate (disable for self-signed certs)</p>
-                      </div>
-                    </div>
                     <div className="flex items-start gap-2">
                       <input
                         id={`host-pct-${host.id}`}

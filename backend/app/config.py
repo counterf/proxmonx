@@ -71,7 +71,6 @@ class ProxmoxHostConfig(BaseModel):
     token_id: str = ""
     token_secret: str = ""
     node: str = ""
-    verify_ssl: bool = False
     ssh_username: str = "root"
     ssh_password: str | None = None
     ssh_key_path: str | None = None
@@ -89,7 +88,6 @@ class Settings(BaseSettings):
     poll_interval_seconds: int = 3600
     pending_updates_interval_seconds: int = 3600  # minimum TTL between apt-get update runs
     discover_vms: bool = False
-    verify_ssl: bool = False
 
     # SSH
     ssh_username: str = "root"

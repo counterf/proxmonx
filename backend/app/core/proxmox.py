@@ -24,7 +24,6 @@ class ProxmoxClient:
         self._headers = {
             "Authorization": f"PVEAPIToken={host_config.token_id}={host_config.token_secret}",
         }
-        self._verify_ssl = host_config.verify_ssl
         self._discover_vms = discover_vms
         self._http_client = http_client
 
@@ -35,7 +34,7 @@ class ProxmoxClient:
             response = await self._http_client.get(url, headers=self._headers)
             response.raise_for_status()
             return response.json()
-        async with httpx.AsyncClient(verify=self._verify_ssl, timeout=10.0) as client:
+        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
             response = await client.get(url, headers=self._headers)
             response.raise_for_status()
             data: dict[str, list[dict[str, str | int | float | bool | None]] | dict[str, str | int | float | bool | None]] = response.json()
@@ -48,7 +47,7 @@ class ProxmoxClient:
             response = await self._http_client.post(url, headers=self._headers, json=data or {})
             response.raise_for_status()
             return response.json()
-        async with httpx.AsyncClient(verify=self._verify_ssl, timeout=15.0) as client:
+        async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
             response = await client.post(url, headers=self._headers, json=data or {})
             response.raise_for_status()
             return response.json()
