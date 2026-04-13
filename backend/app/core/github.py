@@ -79,7 +79,7 @@ class GitHubClient:
                     return version
 
         try:
-            version = await self._fetch_latest(repo)
+            version, _source, _reason = await self._fetch_with_detail(repo)
             if version:
                 self._cache[repo] = (version, time.time())
             return version
@@ -156,7 +156,7 @@ class GitHubClient:
                 response.raise_for_status()
                 return None, None, "unknown"
 
-            # 404 on latest — try releases list then tags (same as _fetch_latest)
+            # 404 on latest — try releases list then tags
             resp = await c.get(
                 f"https://api.github.com/repos/{repo}/releases?per_page=1",
                 headers=headers,
@@ -170,6 +170,7 @@ class GitHubClient:
                     if tag:
                         return self._normalize_version(tag), "releases_list", None
             elif resp.status_code not in (404,):
+                # Fail on unexpected HTTP errors (caller catches and returns None)
                 resp.raise_for_status()
                 return None, None, "unknown"
 
@@ -190,69 +191,6 @@ class GitHubClient:
                 return None, None, "no_releases_or_tags"
             resp.raise_for_status()
             return None, None, "unknown"
-
-    async def _fetch_latest(self, repo: str) -> str | None:
-        """Make the actual API call to GitHub."""
-        url = f"https://api.github.com/repos/{repo}/releases/latest"
-        headers: dict[str, str] = {"Accept": "application/vnd.github.v3+json"}
-        if self._token:
-            headers["Authorization"] = f"Bearer {self._token}"
-
-        ctx = contextlib.nullcontext(self._http_client) if self._http_client else httpx.AsyncClient(timeout=10.0)
-        async with ctx as c:
-            response = await c.get(url, headers=headers)
-
-            if response.status_code == 404:
-                # Some repos only publish pre-releases or use tags; fall back
-                return await self._fetch_latest_from_list(repo, headers)
-
-            if response.status_code in (403, 429):
-                remaining = response.headers.get("x-ratelimit-remaining", "?")
-                logger.warning(
-                    "GitHub rate limit hit for %s (remaining: %s)", repo, remaining
-                )
-                return None
-
-            response.raise_for_status()
-            data: dict[str, str] = response.json()
-            tag = data.get("tag_name", "")
-            return self._normalize_version(tag)
-
-    async def _fetch_latest_from_list(
-        self, repo: str, headers: dict[str, str]
-    ) -> str | None:
-        """Fallback: releases list → tags (handles pre-release-only / tag-only repos)."""
-        ctx = contextlib.nullcontext(self._http_client) if self._http_client else httpx.AsyncClient(timeout=10.0)
-        async with ctx as c:
-            resp = await c.get(
-                f"https://api.github.com/repos/{repo}/releases?per_page=1", headers=headers
-            )
-            if resp.status_code in (403, 429):
-                remaining = resp.headers.get("x-ratelimit-remaining", "?")
-                logger.warning("GitHub rate limit hit for %s (remaining: %s)", repo, remaining)
-                return None
-            if resp.status_code == 200:
-                releases: list[dict[str, str]] = resp.json()
-                if releases:
-                    tag = releases[0].get("tag_name", "")
-                    return self._normalize_version(tag) if tag else None
-
-            # Final fallback: tags API (e.g. qbittorrent uses release-x.y.z tags)
-            resp = await c.get(
-                f"https://api.github.com/repos/{repo}/tags?per_page=1", headers=headers
-            )
-            if resp.status_code in (403, 429):
-                remaining = resp.headers.get("x-ratelimit-remaining", "?")
-                logger.warning("GitHub rate limit hit for %s (remaining: %s)", repo, remaining)
-                return None
-            if resp.status_code == 200:
-                tags: list[dict[str, str]] = resp.json()
-                if tags:
-                    tag = tags[0].get("name", "")
-                    return self._normalize_version(tag) if tag else None
-
-        logger.debug("No release or tag found for %s", repo)
-        return None
 
     @staticmethod
     def _normalize_version(tag: str) -> str:

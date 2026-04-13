@@ -52,6 +52,15 @@ class AlertManager:
             await self._check_disk(gid, guest)
             await self._check_outdated(gid, guest, previous.get(gid))
 
+        self._evict_expired_cooldowns()
+
+    def _evict_expired_cooldowns(self) -> None:
+        """Remove cooldown entries older than 2x the cooldown window."""
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=self._cooldown_minutes * 2)
+        expired = [k for k, ts in self._cooldowns.items() if ts < cutoff]
+        for k in expired:
+            del self._cooldowns[k]
+
     async def _check_disk(self, gid: str, guest: GuestInfo) -> None:
         if guest.disk_used is None or guest.disk_total is None or guest.disk_total == 0:
             return

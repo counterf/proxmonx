@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useGuests } from '../hooks/useGuests';
+import { fetchFullSettings } from '../api/client';
 import type { UpdateStatus, GuestType, Guest } from '../types';
 import FilterBar from './FilterBar';
 import { GuestTableRow, GuestCard } from './GuestRow';
@@ -126,6 +127,18 @@ export default function Dashboard({ configured }: { configured: boolean }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [pendingBulkAction, setPendingBulkAction] = useState<'os_update' | 'app_update' | null>(null);
   const [showBulkConfirm, setShowBulkConfirm] = useState<'os_update' | 'app_update' | null>(null);
+  const [backupEnabledHosts, setBackupEnabledHosts] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    fetchFullSettings()
+      .then((s) => {
+        const hosts = new Set(
+          s.proxmox_hosts.filter((h) => !!h.backup_storage).map((h) => h.id),
+        );
+        setBackupEnabledHosts(hosts);
+      })
+      .catch(() => { /* backup button won't appear — acceptable degradation */ });
+  }, []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -481,6 +494,7 @@ export default function Dashboard({ configured }: { configured: boolean }) {
                     bulkMode={bulkMode}
                     selected={selectedIds.has(guest.id)}
                     onToggleSelect={toggleSelect}
+                    backupEnabled={backupEnabledHosts.has(guest.host_id)}
                   />
                 ))}
               </tbody>
@@ -496,6 +510,7 @@ export default function Dashboard({ configured }: { configured: boolean }) {
                 bulkMode={bulkMode}
                 selected={selectedIds.has(guest.id)}
                 onToggleSelect={toggleSelect}
+                backupEnabled={backupEnabledHosts.has(guest.host_id)}
               />
             ))}
           </div>

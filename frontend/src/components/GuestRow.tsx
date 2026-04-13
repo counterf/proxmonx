@@ -11,6 +11,7 @@ interface GuestRowProps {
   bulkMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: string) => void;
+  backupEnabled?: boolean;
 }
 
 function formatRelativeTime(dateStr: string | null): string {
@@ -163,7 +164,7 @@ function AppNameCell({ guest }: { guest: Guest }) {
 }
 
 /** Table row for desktop (>= md) */
-export function GuestTableRow({ guest, visibleColumns, bulkMode, selected, onToggleSelect }: GuestRowProps) {
+export function GuestTableRow({ guest, visibleColumns, bulkMode, selected, onToggleSelect, backupEnabled }: GuestRowProps) {
   const navigate = useNavigate();
   const vis = visibleColumns ?? new Set<ColumnKey>();
 
@@ -280,7 +281,7 @@ export function GuestTableRow({ guest, visibleColumns, bulkMode, selected, onTog
             >
               View
             </button>
-            <GuestActions guest={guest} />
+            <GuestActions guest={guest} backupEnabled={backupEnabled} />
           </div>
         ) : null}
       </td>
@@ -289,7 +290,7 @@ export function GuestTableRow({ guest, visibleColumns, bulkMode, selected, onTog
 }
 
 /** Card layout for mobile (< md) */
-export function GuestCard({ guest, bulkMode, selected, onToggleSelect }: GuestRowProps) {
+export function GuestCard({ guest, bulkMode, selected, onToggleSelect, backupEnabled }: GuestRowProps) {
   const navigate = useNavigate();
 
   const typeBadgeClass = guest.type === 'lxc'
@@ -339,7 +340,7 @@ export function GuestCard({ guest, bulkMode, selected, onToggleSelect }: GuestRo
               onClick={e => e.stopPropagation()}
             />
           ) : (
-            <GuestActions guest={guest} />
+            <GuestActions guest={guest} backupEnabled={backupEnabled} />
           )}
         </div>
       </div>

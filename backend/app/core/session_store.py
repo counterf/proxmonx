@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -20,33 +21,26 @@ class SessionStore:
         return sqlite3.connect(str(self._path))
 
     def _init_table(self) -> None:
-        conn = self._connect()
-        try:
+        with contextlib.closing(self._connect()) as conn:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS sessions "
                 "(token TEXT PRIMARY KEY, expires_at TEXT NOT NULL)"
             )
             conn.commit()
-        finally:
-            conn.close()
 
     def create(self) -> str:
         """Create a new session token and return it."""
         self.cleanup_expired()
         token = secrets.token_urlsafe(32)
         expires = (datetime.now(timezone.utc) + timedelta(seconds=self._ttl)).isoformat()
-        conn = self._connect()
-        try:
+        with contextlib.closing(self._connect()) as conn:
             conn.execute("INSERT INTO sessions (token, expires_at) VALUES (?, ?)", (token, expires))
             conn.commit()
-        finally:
-            conn.close()
         return token
 
     def is_valid(self, token: str) -> bool:
         """Check whether a token exists and has not expired."""
-        conn = self._connect()
-        try:
+        with contextlib.closing(self._connect()) as conn:
             row = conn.execute(
                 "SELECT expires_at FROM sessions WHERE token = ?", (token,)
             ).fetchone()
@@ -58,36 +52,25 @@ class SessionStore:
                 conn.commit()
                 return False
             return True
-        finally:
-            conn.close()
 
     def revoke(self, token: str) -> None:
         """Delete a session token."""
-        conn = self._connect()
-        try:
+        with contextlib.closing(self._connect()) as conn:
             conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
             conn.commit()
-        finally:
-            conn.close()
 
     def revoke_all(self, *, except_token: str | None = None) -> None:
         """Delete all session tokens, optionally keeping one token."""
-        conn = self._connect()
-        try:
+        with contextlib.closing(self._connect()) as conn:
             if except_token:
                 conn.execute("DELETE FROM sessions WHERE token != ?", (except_token,))
             else:
                 conn.execute("DELETE FROM sessions")
             conn.commit()
-        finally:
-            conn.close()
 
     def cleanup_expired(self) -> None:
         """Remove all expired sessions."""
         now = datetime.now(timezone.utc).isoformat()
-        conn = self._connect()
-        try:
+        with contextlib.closing(self._connect()) as conn:
             conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
             conn.commit()
-        finally:
-            conn.close()

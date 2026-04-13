@@ -17,7 +17,7 @@ sed -i '' "s/__version__ = \".*\"/__version__ = \"$VERSION\"/" "$REPO_ROOT/backe
 sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/"        "$REPO_ROOT/backend/pyproject.toml"
 npm --prefix "$REPO_ROOT/frontend" version "$VERSION" --no-git-tag-version --silent
 
-git -C "$REPO_ROOT" add backend/app/__init__.py backend/pyproject.toml frontend/package.json
+git -C "$REPO_ROOT" add backend/app/__init__.py backend/pyproject.toml frontend/package.json frontend/package-lock.json
 git -C "$REPO_ROOT" commit -m "chore: bump version to $VERSION"
 git -C "$REPO_ROOT" tag "v$VERSION"
 

@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import type { Guest as GuestDetailType, AppConfigEntry, AppConfigDefault, CustomAppDef, GitHubTestResult } from '../types';
-import { fetchGuest, fetchGuestConfig, saveGuestConfig, deleteGuestConfig, refreshGuest, fetchAppConfigDefaults, fetchCustomApps, testGithubRepo } from '../api/client';
+import { fetchGuest, fetchGuestConfig, saveGuestConfig, deleteGuestConfig, refreshGuest, fetchAppConfigDefaults, fetchCustomApps, testGithubRepo, fetchFullSettings } from '../api/client';
 import StatusBadge from './StatusBadge';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorBanner from './ErrorBanner';
 import AppIcon from './AppIcon';
 import GuestActions from './GuestActions';
+import { EyeIcon, EyeSlashIcon } from './icons/EyeIcons';
 
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -33,6 +34,8 @@ function InstanceSettings({ guestId, appName, detectorUsed }: { guestId: string;
   const [customApps, setCustomApps] = useState<CustomAppDef[]>([]);
   const [testResult, setTestResult] = useState<GitHubTestResult | null>(null);
   const [testing, setTesting] = useState(false);
+  const [sshExpanded, setSshExpanded] = useState(false);
+  const [showSshPassword, setShowSshPassword] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -148,7 +151,7 @@ function InstanceSettings({ guestId, appName, detectorUsed }: { guestId: string;
       </button>
       {!expanded && (
         <p className="text-xs text-gray-600 mt-1">
-          Override port, API key, scheme, version hostname, or GitHub repo for this {appName} instance.
+          Override port, API key, scheme, version hostname, GitHub repo, or SSH settings for this {appName} instance.
         </p>
       )}
       {expanded && (
@@ -291,6 +294,78 @@ function InstanceSettings({ guestId, appName, detectorUsed }: { guestId: string;
               </p>
             )}
           </div>
+          {/* SSH overrides */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setSshExpanded(!sshExpanded)}
+              className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1"
+              aria-expanded={sshExpanded}
+              aria-controls="gc-ssh-panel"
+            >
+              <span>{sshExpanded ? '\u25BC' : '\u25B6'}</span>
+              <span>SSH</span>
+            </button>
+            {sshExpanded && (
+              <div id="gc-ssh-panel" className="mt-2 space-y-2 pl-2 border-l border-gray-700">
+                <div>
+                  <label htmlFor="gc-ssh-cmd" className="text-xs text-gray-500">Version Command</label>
+                  <textarea
+                    id="gc-ssh-cmd"
+                    rows={2}
+                    value={cfg.ssh_version_cmd ?? ''}
+                    placeholder="e.g. myapp --version | head -1"
+                    onChange={(e) => setCfg({ ...cfg, ssh_version_cmd: e.target.value || null })}
+                    className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="gc-ssh-user" className="text-xs text-gray-500">SSH Username</label>
+                  <input
+                    id="gc-ssh-user"
+                    type="text"
+                    value={cfg.ssh_username ?? ''}
+                    placeholder="root (uses global default)"
+                    onChange={(e) => setCfg({ ...cfg, ssh_username: e.target.value || null })}
+                    className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="gc-ssh-key" className="text-xs text-gray-500">SSH Key Path</label>
+                  <input
+                    id="gc-ssh-key"
+                    type="text"
+                    value={cfg.ssh_key_path ?? ''}
+                    placeholder="/path/to/key (uses global default)"
+                    onChange={(e) => setCfg({ ...cfg, ssh_key_path: e.target.value || null })}
+                    className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="gc-ssh-pass" className="text-xs text-gray-500">SSH Password</label>
+                  <div className="relative">
+                    <input
+                      id="gc-ssh-pass"
+                      type={showSshPassword ? 'text' : 'password'}
+                      value={cfg.ssh_password ?? ''}
+                      placeholder="masked"
+                      onChange={(e) => setCfg({ ...cfg, ssh_password: e.target.value || null })}
+                      className="w-full px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSshPassword(!showSshPassword)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+                      aria-label={showSshPassword ? 'Hide SSH password' : 'Show SSH password'}
+                    >
+                      {showSshPassword ? <EyeSlashIcon /> : <EyeIcon />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center gap-2 pt-1">
             <button
               onClick={handleSave}
@@ -326,6 +401,7 @@ export default function GuestDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rawExpanded, setRawExpanded] = useState(false);
+  const [backupEnabled, setBackupEnabled] = useState(false);
 
   const loadGuest = useCallback((guestId: string) => {
     setError(null);
@@ -340,6 +416,16 @@ export default function GuestDetail() {
     if (!id) return;
     loadGuest(id);
   }, [id, loadGuest]);
+
+  useEffect(() => {
+    if (!guest) return;
+    fetchFullSettings()
+      .then((s) => {
+        const host = s.proxmox_hosts.find((h) => h.id === guest.host_id);
+        setBackupEnabled(!!host?.backup_storage);
+      })
+      .catch(() => {});
+  }, [guest?.host_id ?? null]);
 
   if (loading) return <LoadingSpinner text="Loading guest details..." />;
   if (error) return <ErrorBanner key={error} message={error} />;
@@ -371,7 +457,7 @@ export default function GuestDetail() {
         </div>
         <div className="flex items-center gap-2">
           <StatusBadge status={guest.update_status} />
-          <GuestActions guest={guest} onActionComplete={() => {
+          <GuestActions guest={guest} backupEnabled={backupEnabled} onActionComplete={() => {
             if (!id) return;
             const prev = guest.last_checked;
             let elapsed = 0;

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import NamedTuple
 from urllib.parse import urlparse
 
 import httpx
@@ -23,6 +24,25 @@ MAX_CONCURRENT_PROBES = 10
 
 # Maximum number of version history entries to retain per guest
 MAX_VERSION_HISTORY = 10
+
+
+class ResolvedConfig(NamedTuple):
+    """Effective config for a guest after layered resolution.
+
+    NOTE: NamedTuple is used instead of @dataclass(frozen=True, slots=True)
+    because existing tests use positional destructuring (e.g. port, api_key, *_ = ...).
+    Do not convert without updating those tests first.
+    """
+
+    port: int | None
+    api_key: str | None
+    scheme: str
+    github_repo: str | None
+    ssh_version_cmd: str | None
+    ssh_username: str | None
+    ssh_key_path: str | None
+    ssh_password: str | None
+    version_host: str | None
 
 
 class DiscoveryEngine:
@@ -355,15 +375,8 @@ class DiscoveryEngine:
 
     def _resolve_config(
         self, detector_name: str, guest_id: str,
-    ) -> tuple[
-        int | None, str | None, str,
-        str | None, str | None, str | None, str | None, str | None, str | None,
-    ]:
-        """Resolve effective config: guest_config -> app_config -> defaults.
-
-        Returns (port, api_key, scheme, github_repo, ssh_version_cmd,
-                 ssh_username, ssh_key_path, ssh_password, version_host).
-        """
+    ) -> ResolvedConfig:
+        """Resolve effective config: guest_config -> app_config -> defaults."""
         port: int | None = None
         api_key: str | None = None
         scheme: str = "http"
@@ -416,7 +429,7 @@ class DiscoveryEngine:
             detector_name, guest_id,
             port or "default", "set" if api_key else "none", scheme, version_host or "none",
         )
-        return port, api_key, scheme, github_repo, ssh_cmd, ssh_user, ssh_key, ssh_pass, version_host
+        return ResolvedConfig(port, api_key, scheme, github_repo, ssh_cmd, ssh_user, ssh_key, ssh_pass, version_host)
 
     async def _check_pending_updates(
         self,
@@ -515,14 +528,12 @@ class DiscoveryEngine:
             return
 
         # Resolve config: guest-level -> app-level -> detector defaults
-        port_override, api_key, scheme, github_repo_override, \
-            ssh_version_cmd, ssh_username, ssh_key_path, ssh_password, version_host = \
-            self._resolve_config(detector.name, guest.id)
+        cfg = self._resolve_config(detector.name, guest.id)
 
         # Store the effective port and scheme so GuestInfo._web_url() (in guest.py)
         # can build the correct URL.
-        guest.effective_port = port_override or detector.default_port
-        guest.scheme = scheme
+        guest.effective_port = cfg.port or detector.default_port
+        guest.scheme = cfg.scheme
 
         # Determine version detection strategy
         detect_method = "pct_first"
@@ -536,11 +547,11 @@ class DiscoveryEngine:
         # HTTP probe always runs first regardless of method (it's the primary source)
         from app.detectors.http_json import ProbeError
 
-        probe_host = version_host or guest.ip
-        guest.version_host = version_host or None
-        effective_port = port_override or detector.default_port
+        probe_host = cfg.version_host or guest.ip
+        guest.version_host = cfg.version_host or None
+        effective_port = cfg.port or detector.default_port
         probe_path = getattr(detector, '_path', '')
-        guest.probe_url = f"{scheme}://{probe_host}:{effective_port}{probe_path}"
+        guest.probe_url = f"{cfg.scheme}://{probe_host}:{effective_port}{probe_path}"
         guest.probe_error = None
         # Track TrueNAS latest version from the same probe (avoids race on singleton)
         _truenas_latest: str | None = None
@@ -549,7 +560,7 @@ class DiscoveryEngine:
             if detector.name == "truenas":
                 extra_kwargs["verify_ssl"] = host_config.verify_ssl if host_config else False
             result = await detector.get_installed_version(
-                probe_host, port=port_override, api_key=api_key, scheme=scheme,
+                probe_host, port=cfg.port, api_key=cfg.api_key, scheme=cfg.scheme,
                 http_client=http_client or self._http_client,
                 **extra_kwargs,
             )
@@ -572,25 +583,25 @@ class DiscoveryEngine:
             )
 
         # CLI fallback: only attempt if API probe did not obtain a version
-        if not guest.installed_version and ssh_version_cmd:
+        if not guest.installed_version and cfg.ssh_version_cmd:
             if detect_method == "pct_first":
                 await self._try_pct_then_ssh(
-                    guest, host_config, ssh_version_cmd,
-                    ssh_username, ssh_key_path, ssh_password,
+                    guest, host_config, cfg.ssh_version_cmd,
+                    cfg.ssh_username, cfg.ssh_key_path, cfg.ssh_password,
                 )
             elif detect_method == "ssh_first":
                 await self._try_ssh_then_pct(
-                    guest, host_config, ssh_version_cmd,
-                    ssh_username, ssh_key_path, ssh_password,
+                    guest, host_config, cfg.ssh_version_cmd,
+                    cfg.ssh_username, cfg.ssh_key_path, cfg.ssh_password,
                 )
             elif detect_method == "pct_only":
                 await self._try_pct_exec(
-                    guest, host_config, ssh_version_cmd,
+                    guest, host_config, cfg.ssh_version_cmd,
                 )
             elif detect_method == "ssh_only":
                 await self._try_ssh(
-                    guest, ssh_version_cmd,
-                    ssh_username, ssh_key_path, ssh_password,
+                    guest, cfg.ssh_version_cmd,
+                    cfg.ssh_username, cfg.ssh_key_path, cfg.ssh_password,
                 )
 
         # Get latest version: use TrueNAS probe result if available, then custom, then GitHub
@@ -603,7 +614,7 @@ class DiscoveryEngine:
                 "Latest version for %s from custom source: %s", detector.name, custom_latest
             )
         else:
-            effective_repo = github_repo_override or detector.github_repo
+            effective_repo = cfg.github_repo or detector.github_repo
             if effective_repo:
                 guest.github_repo_queried = effective_repo
                 guest.latest_version_source = "github"

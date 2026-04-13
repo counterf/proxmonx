@@ -63,7 +63,12 @@ export function useGuests(): UseGuestsResult {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const { snapshot_at } = await triggerRefresh();
+      const { status, snapshot_at } = await triggerRefresh();
+      if (status === 'busy') {
+        // Discovery already running — just reload current data
+        await load();
+        return;
+      }
       setIsDiscovering(true);
       const deadline = Date.now() + 30_000;
       while (Date.now() < deadline) {
