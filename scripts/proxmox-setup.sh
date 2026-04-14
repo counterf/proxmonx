@@ -5,11 +5,11 @@
 # Run on a Proxmox host as root. Creates:
 #   - PVE role, user, API token with least-privilege permissions
 #   - System user with sudoers for pct exec (SSH access)
+#   - Ed25519 SSH key pair (private key displayed for pasting into Proxmon)
 #
 # Usage:
-#   ./proxmox-setup.sh                          # interactive
-#   ./proxmox-setup.sh --pubkey "ssh-ed25519 AAAA..."
-#   ./proxmox-setup.sh --password
+#   ./proxmox-setup.sh              # generate key pair (recommended)
+#   ./proxmox-setup.sh --password   # use password instead of key
 #
 set -euo pipefail
 
@@ -27,6 +27,7 @@ SKIPPED=()
 TOKEN_SECRET=""
 SSH_AUTH_METHOD=""
 SSH_PASSWORD=""
+SSH_PRIVATE_KEY=""
 
 log_created() { CHANGES+=("[CREATED] $1"); }
 log_updated() { CHANGES+=("[UPDATED] $1"); }
@@ -43,27 +44,19 @@ command -v pct  >/dev/null 2>&1 || error "'pct' not found — is this a Proxmox 
 
 # --- Parse arguments ---
 
-MODE=""       # pubkey | password | (empty = interactive)
-PUBKEY=""
+MODE="keygen"   # keygen (default) | password
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --pubkey)
-            MODE="pubkey"
-            PUBKEY="${2:-}"
-            [[ -n "$PUBKEY" ]] || error "--pubkey requires a key argument"
-            shift 2
-            ;;
         --password)
             MODE="password"
             shift
             ;;
         -h|--help)
-            echo "Usage: $0 [--pubkey \"ssh-ed25519 ...\"] [--password]"
+            echo "Usage: $0 [--password]"
             echo ""
-            echo "  --pubkey KEY   Install the given SSH public key for the proxmon user"
-            echo "  --password     Generate a random password for the proxmon user"
-            echo "  (no flag)      Interactive prompt to choose method"
+            echo "  (default)    Generate an Ed25519 SSH key pair (recommended)"
+            echo "  --password   Generate a random password instead"
             exit 0
             ;;
         *)
@@ -151,40 +144,24 @@ else
     info "Created sudoers rule: $SUDOERS_LINE"
 fi
 
-# 3. SSH auth — interactive prompt if no flag given
-if [[ -z "$MODE" ]]; then
-    echo ""
-    echo "  SSH authentication method:"
-    echo "    1) Paste a public key"
-    echo "    2) Generate a random password"
-    echo ""
-    read -rp "  Choose [1/2]: " choice
-    case "$choice" in
-        1)
-            MODE="pubkey"
-            read -rp "  Paste public key: " PUBKEY
-            [[ -n "$PUBKEY" ]] || error "No key provided"
-            ;;
-        2)
-            MODE="password"
-            ;;
-        *)
-            error "Invalid choice: $choice"
-            ;;
-    esac
-fi
-
+# 3. SSH auth
 SSH_DIR="$(eval echo ~"$SSH_USER")/.ssh"
 
-if [[ "$MODE" == "pubkey" ]]; then
+if [[ "$MODE" == "keygen" ]]; then
+    TMPKEY=$(mktemp)
+    ssh-keygen -t ed25519 -f "$TMPKEY" -N "" -C "proxmon@$(hostname)" -q
+    SSH_PRIVATE_KEY=$(cat "$TMPKEY")
+    PUBKEY=$(cat "${TMPKEY}.pub")
+    rm -f "$TMPKEY" "${TMPKEY}.pub"
+
     mkdir -p "$SSH_DIR"
     echo "$PUBKEY" > "$SSH_DIR/authorized_keys"
     chown -R "$SSH_USER:$SSH_USER" "$SSH_DIR"
     chmod 700 "$SSH_DIR"
     chmod 600 "$SSH_DIR/authorized_keys"
-    log_created "$SSH_DIR/authorized_keys"
-    info "Installed public key"
-    SSH_AUTH_METHOD="key-based"
+    log_created "$SSH_DIR/authorized_keys (generated key pair)"
+    info "Generated Ed25519 key pair and installed public key"
+    SSH_AUTH_METHOD="key-based (generated)"
 
 elif [[ "$MODE" == "password" ]]; then
     SSH_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=' | head -c 20)
@@ -212,8 +189,9 @@ done
 
 echo ""
 echo "=============================="
-echo "  Credentials"
+echo "  Proxmon Settings"
 echo "=============================="
+echo ""
 echo "  API Token ID:      $PVE_TOKEN_ID"
 echo "  API Token Secret:  $TOKEN_SECRET"
 echo ""
@@ -221,6 +199,13 @@ echo "  SSH Username:      $SSH_USER"
 echo "  SSH Auth Method:   $SSH_AUTH_METHOD"
 if [[ -n "$SSH_PASSWORD" ]]; then
     echo "  SSH Password:      $SSH_PASSWORD"
+fi
+if [[ -n "$SSH_PRIVATE_KEY" ]]; then
+    echo ""
+    echo "  SSH Private Key (paste this into Proxmon Settings → SSH):"
+    echo "  ─────────────────────────────────────────────────────────"
+    echo "$SSH_PRIVATE_KEY"
+    echo "  ─────────────────────────────────────────────────────────"
 fi
 echo ""
 echo "  Use these values in your Proxmon settings."
