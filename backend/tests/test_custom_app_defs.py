@@ -264,6 +264,8 @@ class TestCustomAppRoutes:
         data = store.load()
         gc = data.get("guest_config", {})
         assert "forced_detector" not in gc.get("pve1:100", {})
+        # Non-secret fields (port) should be preserved through the merge
+        assert gc.get("pve1:100", {}).get("port") == 5000
         # Other guest's forced_detector should be preserved
         assert gc.get("pve1:101", {}).get("forced_detector") == "sonarr"
 

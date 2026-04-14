@@ -99,7 +99,7 @@ class SettingsSaveRequest(BaseModel):
     ssh_key_path: str | None = None
     ssh_password: str | None = None
     github_token: str | None = None
-    log_level: str = "info"
+    log_level: Literal["debug", "info", "warning", "error", "critical"] = "info"
     version_detect_method: Literal["pct_first", "ssh_first", "ssh_only", "pct_only"] = "pct_first"
     app_config: dict[str, AppConfigEntry] | None = None
     proxmox_hosts: list[ProxmoxHostSaveEntry] | None = None
@@ -127,6 +127,12 @@ class SettingsSaveRequest(BaseModel):
             if key not in DETECTOR_MAP:
                 raise ValueError(f"Unknown app: {key}")
         return v
+
+
+class NotificationTestRequest(BaseModel):
+    ntfy_url: str | None = None
+    ntfy_token: str | None = None
+    ntfy_priority: int | None = None
 
 
 class GitHubTestRequest(BaseModel):
@@ -531,7 +537,8 @@ async def save_settings(
     if scheduler is not None:
         new_scheduler._guests = scheduler._guests
     try:
-        new_scheduler.start()
+        if config_store.is_configured():
+            new_scheduler.start()
         request.app.state.http_client = new_client
         request.app.state.scheduler = new_scheduler
         request.app.dependency_overrides[_get_scheduler] = lambda: new_scheduler
@@ -549,17 +556,27 @@ async def save_settings(
 
 @router.post("/api/notifications/test", dependencies=[Depends(_require_api_key)])
 async def test_notification(
+    body: NotificationTestRequest | None = None,
     settings=Depends(_get_settings),
 ) -> dict[str, bool | str]:
     """Send a test notification to verify ntfy connectivity."""
-    if not settings.ntfy_url:
+    # Resolve effective values: body overrides persisted settings
+    url = (body.ntfy_url if body and body.ntfy_url is not None else None) or settings.ntfy_url
+    token_from_body = body.ntfy_token if body else None
+    if token_from_body is None or token_from_body == "***":
+        token = settings.ntfy_token
+    else:
+        token = token_from_body
+    priority = (body.ntfy_priority if body and body.ntfy_priority is not None else None) or settings.ntfy_priority
+
+    if not url:
         return {"success": False, "message": "ntfy URL is not configured"}
 
     async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
         notifier = NtfyNotifier(
-            url=settings.ntfy_url,
-            token=settings.ntfy_token,
-            priority=settings.ntfy_priority,
+            url=url,
+            token=token,
+            priority=priority,
             http_client=client,
         )
         sent = await notifier.send(

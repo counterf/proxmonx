@@ -176,9 +176,19 @@ export async function deleteGuestConfig(
   });
 }
 
-export async function sendTestNotification(): Promise<{ success: boolean; message: string }> {
+export async function sendTestNotification(params: {
+  ntfyUrl: string;
+  ntfyToken: string;
+  ntfyPriority: number;
+}): Promise<{ success: boolean; message: string }> {
   return fetchJson<{ success: boolean; message: string }>(API_PATHS.NOTIFICATIONS_TEST, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ntfy_url: params.ntfyUrl,
+      ntfy_token: params.ntfyToken,
+      ntfy_priority: params.ntfyPriority,
+    }),
   });
 }
 

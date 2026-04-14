@@ -217,7 +217,12 @@ class DiscoveryEngine:
                 await self._detect_app(guest, host_config=host_config)
 
                 # Get installed version
-                if guest.detector_used and guest.ip:
+                has_version_host = False
+                if self._settings and self._settings.guest_config:
+                    gcfg = self._settings.guest_config.get(guest.id)
+                    if gcfg and gcfg.version_host:
+                        has_version_host = True
+                if guest.detector_used and (guest.ip or has_version_host):
                     await self._check_version(guest, host_config=host_config, http_client=host_http_client)
 
                 # Check pending OS package updates and reboot status (LXC only)
@@ -520,11 +525,14 @@ class DiscoveryEngine:
         from app.detectors.registry import DETECTOR_MAP
 
         detector: BaseDetector | None = DETECTOR_MAP.get(guest.detector_used or "")
-        if not detector or not guest.ip:
+        if not detector:
             return
 
         # Resolve config: guest-level -> app-level -> detector defaults
         cfg = self._resolve_config(detector.name, guest.id)
+
+        if not guest.ip and not cfg.version_host:
+            return
 
         # Store the effective port and scheme so GuestInfo._web_url() (in guest.py)
         # can build the correct URL.

@@ -30,6 +30,7 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
   const [testing, setTesting] = useState(false);
   const [sshExpanded, setSshExpanded] = useState(false);
   const [showSshPassword, setShowSshPassword] = useState(false);
+  const [versionUrl, setVersionUrl] = useState('');
 
   useEffect(() => {
     Promise.all([
@@ -41,6 +42,18 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
         setCfg(data);
         setAppDefaults(defaults);
         setCustomApps(customs);
+        // Combine scheme + version_host into a single display URL
+        const host = data.version_host;
+        const scheme = data.scheme;
+        if (host && scheme) {
+          setVersionUrl(`${scheme}://${host}`);
+        } else if (host) {
+          setVersionUrl(host);
+        } else if (scheme && scheme !== 'http') {
+          setVersionUrl(`${scheme}://`);
+        } else {
+          setVersionUrl('');
+        }
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
@@ -74,6 +87,23 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
     }
   };
 
+  const handleVersionUrlChange = (input: string) => {
+    setVersionUrl(input);
+    const trimmed = input.trim();
+    const lower = trimmed.toLowerCase();
+    if (!trimmed) {
+      setCfg({ ...cfg, scheme: null, version_host: null });
+    } else if (lower.startsWith('https://')) {
+      const host = trimmed.slice(8).replace(/\/+$/, '');
+      setCfg({ ...cfg, scheme: 'https', version_host: host || null });
+    } else if (lower.startsWith('http://')) {
+      const host = trimmed.slice(7).replace(/\/+$/, '');
+      setCfg({ ...cfg, scheme: null, version_host: host || null });
+    } else {
+      setCfg({ ...cfg, scheme: null, version_host: trimmed });
+    }
+  };
+
   const handleReset = async () => {
     setSaving(true);
     setMessage(null);
@@ -81,6 +111,7 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
     try {
       await deleteGuestConfig(guestId);
       setCfg({});
+      setVersionUrl('');
       setMessage('Reset to defaults. Refreshing...');
       await refreshGuest(guestId);
       setMessage('Reset to defaults.');
@@ -151,7 +182,7 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
       </button>
       {!expanded && (
         <p className="text-xs text-gray-600 mt-1">
-          Override port, API key, scheme, version hostname, GitHub repo, or SSH settings for this {appName} instance.
+          Override port, API key, version URL, GitHub repo, or SSH settings for this {appName} instance.
         </p>
       )}
       {expanded && (
@@ -200,7 +231,7 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label htmlFor="gc-port" className="text-xs text-gray-500">Port override</label>
               <input
@@ -211,18 +242,6 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
                 onChange={(e) => setCfg({ ...cfg, port: e.target.value ? parseInt(e.target.value, 10) : null })}
                 className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
-            </div>
-            <div>
-              <label htmlFor="gc-scheme" className="text-xs text-gray-500">Scheme</label>
-              <select
-                id="gc-scheme"
-                value={cfg.scheme ?? 'http'}
-                onChange={(e) => setCfg({ ...cfg, scheme: e.target.value === 'http' ? null : e.target.value })}
-                className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="http">http</option>
-                <option value="https">https</option>
-              </select>
             </div>
             <div>
               <label htmlFor="gc-apikey" className="text-xs text-gray-500">API Key</label>
@@ -237,19 +256,19 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
             </div>
           </div>
 
-          {/* Version hostname override */}
+          {/* Version URL override */}
           <div>
-            <label htmlFor="gc-version-host" className="text-xs text-gray-500">Version check hostname / IP</label>
+            <label htmlFor="gc-version-host" className="text-xs text-gray-500">Version check URL / IP</label>
             <input
               id="gc-version-host"
               type="text"
-              value={cfg.version_host ?? ''}
-              placeholder="Auto-detected from Proxmox"
-              onChange={(e) => setCfg({ ...cfg, version_host: e.target.value || null })}
+              value={versionUrl}
+              placeholder="e.g. https://192.168.1.50 or 192.168.1.50"
+              onChange={(e) => handleVersionUrlChange(e.target.value)}
               className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <p className="text-xs text-gray-600 mt-0.5">
-              Override the IP proxmon probes for this guest's version endpoint. Useful when the auto-detected IP is not reachable.
+              Override the IP/host proxmon probes for version checks. Prefix with https:// for HTTPS. Defaults to HTTP when omitted.
             </p>
           </div>
 

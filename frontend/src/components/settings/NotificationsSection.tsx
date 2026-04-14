@@ -49,7 +49,7 @@ export default function NotificationsSection({
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await sendTestNotification();
+      const res = await sendTestNotification({ ntfyUrl, ntfyToken, ntfyPriority });
       setTestResult(res.success ? res.message : `Failed: ${res.message}`);
     } catch (err) {
       setTestResult(err instanceof Error ? err.message : 'Test failed');
@@ -163,7 +163,7 @@ export default function NotificationsSection({
                 </p>
               )}
               {!ntfyUrl && (
-                <p className="text-xs text-gray-500 mt-2">Save settings with a valid ntfy URL first to test notifications</p>
+                <p className="text-xs text-gray-500 mt-2">Enter a valid ntfy URL to test notifications</p>
               )}
             </div>
           </>

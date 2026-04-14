@@ -39,7 +39,6 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
   const [storages, setStorages] = useState<Record<string, BackupStorage[] | null>>({});
   const [storagesLoading, setStoragesLoading] = useState<Record<string, boolean>>({});
   const [storagesError, setStoragesError] = useState<Record<string, string | null>>({});
-
   useEffect(() => {
     if (!expandedId) return;
     if (storages[expandedId] !== undefined) return; // already loaded

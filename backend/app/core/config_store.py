@@ -495,6 +495,10 @@ class ConfigStore:
                     val = data.get(secret)
                     if val is None or val == "***":
                         data[secret] = existing.get(secret)
+                # Preserve non-secret fields absent from data (not explicitly set)
+                for key in existing:
+                    if key != "app_name" and key not in data:
+                        data[key] = existing[key]
 
         conn.execute(
             "INSERT OR REPLACE INTO app_config "
@@ -567,6 +571,10 @@ class ConfigStore:
                     val = data.get(secret)
                     if val is None or val == "***":
                         data[secret] = existing.get(secret)
+                # Preserve non-secret fields absent from data (not explicitly set)
+                for key in existing:
+                    if key != "guest_id" and key not in data:
+                        data[key] = existing[key]
 
         conn.execute(
             "INSERT OR REPLACE INTO guest_config "

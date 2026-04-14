@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings
@@ -108,6 +111,10 @@ class Settings(BaseSettings):
     def coerce_detect_method(cls, v: str) -> str:
         allowed = {"pct_first", "ssh_first", "ssh_only", "pct_only"}
         if v not in allowed:
+            logger.warning(
+                "Invalid version_detect_method '%s' in config, falling back to pct_first",
+                v,
+            )
             return "pct_first"
         return v
 

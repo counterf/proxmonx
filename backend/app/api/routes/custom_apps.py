@@ -160,7 +160,7 @@ async def delete_custom_app(
     guest_configs = config_store.list_guest_configs()
     for gid, gcfg in guest_configs.items():
         if isinstance(gcfg, dict) and gcfg.get("forced_detector") == name:
-            gcfg.pop("forced_detector", None)
+            gcfg["forced_detector"] = None
             config_store.upsert_guest_config(gid, gcfg)
 
     # Remove app_config entry for the deleted custom app
