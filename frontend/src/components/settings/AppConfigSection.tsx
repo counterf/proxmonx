@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { AppConfigEntry, AppConfigDefault } from '../../types';
 import { EyeIcon, EyeSlashIcon } from '../icons/EyeIcons';
+import SshFieldGroup from '../shared/SshFieldGroup';
 
 interface AppConfigSectionProps {
   appConfigs: Record<string, AppConfigEntry>;
@@ -82,84 +83,22 @@ export default function AppConfigSection({
           <span>SSH</span>
         </button>
         {isExpanded && (
-          <div
-            id={`${prefix}-ssh-panel-${app.name}`}
-            className="mt-2 space-y-2 pl-2 border-l border-gray-700"
-          >
-            <div>
-              <label htmlFor={`${prefix}-ssh-cmd-${app.name}`} className="text-xs text-gray-500">
-                Version Command
-              </label>
-              <textarea
-                id={`${prefix}-ssh-cmd-${app.name}`}
-                rows={2}
-                value={cfg.ssh_version_cmd ?? ''}
-                placeholder="e.g. myapp --version | head -1"
-                onChange={(e) => updateApp(app.name, 'ssh_version_cmd', e.target.value)}
-                disabled={disabled}
-                aria-label={`SSH version command for ${app.display_name}`}
-                className="w-full px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-              />
-            </div>
-            <div>
-              <label htmlFor={`${prefix}-ssh-user-${app.name}`} className="text-xs text-gray-500">
-                SSH Username
-              </label>
-              <input
-                id={`${prefix}-ssh-user-${app.name}`}
-                type="text"
-                value={cfg.ssh_username ?? ''}
-                placeholder="root (uses global default)"
-                onChange={(e) => updateApp(app.name, 'ssh_username', e.target.value)}
-                disabled={disabled}
-                aria-label={`SSH username for ${app.display_name}`}
-                className="w-full px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label htmlFor={`${prefix}-ssh-key-${app.name}`} className="text-xs text-gray-500">
-                SSH Key Path
-              </label>
-              <input
-                id={`${prefix}-ssh-key-${app.name}`}
-                type="text"
-                value={cfg.ssh_key_path ?? ''}
-                placeholder="/path/to/key (uses global default)"
-                onChange={(e) => updateApp(app.name, 'ssh_key_path', e.target.value)}
-                disabled={disabled}
-                aria-label={`SSH key path for ${app.display_name}`}
-                className="w-full px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label htmlFor={`${prefix}-ssh-pass-${app.name}`} className="text-xs text-gray-500">
-                SSH Password
-              </label>
-              <div className="relative">
-                <input
-                  id={`${prefix}-ssh-pass-${app.name}`}
-                  type={showSshPassword[app.name] ? 'text' : 'password'}
-                  value={cfg.ssh_password ?? ''}
-                  placeholder="leave blank to keep"
-                  onChange={(e) => updateApp(app.name, 'ssh_password', e.target.value)}
-                  disabled={disabled}
-                  aria-label={`SSH password for ${app.display_name}`}
-                  className="w-full px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => toggleSshPasswordVisibility(app.name)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
-                  aria-label={
-                    showSshPassword[app.name]
-                      ? `Hide SSH password for ${app.display_name}`
-                      : `Show SSH password for ${app.display_name}`
-                  }
-                >
-                  {showSshPassword[app.name] ? <EyeSlashIcon /> : <EyeIcon />}
-                </button>
-              </div>
-            </div>
+          <div id={`${prefix}-ssh-panel-${app.name}`}>
+            <SshFieldGroup
+              idPrefix={`${prefix}-${app.name}`}
+              versionCmd={cfg.ssh_version_cmd ?? ''}
+              username={cfg.ssh_username ?? ''}
+              keyPath={cfg.ssh_key_path ?? ''}
+              password={cfg.ssh_password ?? ''}
+              showPassword={showSshPassword[app.name] ?? false}
+              onVersionCmdChange={(v) => updateApp(app.name, 'ssh_version_cmd', v)}
+              onUsernameChange={(v) => updateApp(app.name, 'ssh_username', v)}
+              onKeyPathChange={(v) => updateApp(app.name, 'ssh_key_path', v)}
+              onPasswordChange={(v) => updateApp(app.name, 'ssh_password', v)}
+              onToggleShowPassword={() => toggleSshPasswordVisibility(app.name)}
+              ariaContext={`for ${app.display_name}`}
+              disabled={disabled}
+            />
           </div>
         )}
       </div>

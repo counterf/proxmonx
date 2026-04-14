@@ -8,6 +8,7 @@ import ErrorBanner from './ErrorBanner';
 import AppIcon from './AppIcon';
 import GuestActions from './GuestActions';
 import InstanceSettings from './InstanceSettings';
+import { getTypeBadgeClass, VERSION_SOURCE_STYLES } from '../utils/guestStyles';
 
 
 export default function GuestDetail() {
@@ -19,6 +20,11 @@ export default function GuestDetail() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  // B2: Clear any in-flight poll when the guest id changes (guest-to-guest navigation)
+  useEffect(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  }, [id]);
 
   const loadGuest = useCallback((guestId: string) => {
     setError(null);
@@ -34,6 +40,7 @@ export default function GuestDetail() {
     loadGuest(id);
   }, [id, loadGuest]);
 
+  // B3: Depend on `id` so backup-enabled re-evaluates when navigating between guests
   useEffect(() => {
     if (!guest) return;
     fetchFullSettings()
@@ -42,7 +49,7 @@ export default function GuestDetail() {
         setBackupEnabled(!!host?.backup_storage);
       })
       .catch(() => {});
-  }, [guest?.host_id ?? null]);
+  }, [id, guest?.host_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <LoadingSpinner text="Loading guest details..." />;
   if (error) return <ErrorBanner key={error} message={error} />;
@@ -53,9 +60,7 @@ export default function GuestDetail() {
     ? `https://github.com/${githubRepo}/releases`
     : null;
 
-  const typeBadgeClass = guest.type === 'lxc'
-    ? 'border-blue-500 text-blue-400'
-    : 'border-purple-500 text-purple-400';
+  const typeBadgeClass = getTypeBadgeClass(guest.type);
 
   return (
     <div className="space-y-4">
@@ -162,15 +167,10 @@ export default function GuestDetail() {
         const repoQueried = guest.app_name ? (guest.github_repo_queried || githubRepo || null) : null;
         const lookupStatus = guest.app_name ? guest.github_lookup_status : null;
 
-        const methodConfig: Record<string, { label: string; bg: string; text: string }> = {
-          http: { label: 'HTTP API', bg: 'bg-blue-900/40', text: 'text-blue-300' },
-          ssh: { label: 'SSH command', bg: 'bg-yellow-900/40', text: 'text-yellow-300' },
-          pct_exec: { label: 'Container exec (pct)', bg: 'bg-purple-900/40', text: 'text-purple-300' },
-        };
         const fallback = guest.installed_version
           ? { label: 'Unknown', bg: 'bg-gray-800', text: 'text-gray-500' }
           : { label: 'Not detected', bg: 'bg-gray-800', text: 'text-gray-500' };
-        const badge = method ? (methodConfig[method] || fallback) : fallback;
+        const badge = method ? (VERSION_SOURCE_STYLES[method] || fallback) : fallback;
 
         return (
           <div className="p-4 rounded bg-surface border border-gray-800">

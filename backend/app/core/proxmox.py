@@ -60,14 +60,12 @@ class ProxmoxClient:
         snapshot_name: str | None = None,
     ) -> str:
         """Execute a lifecycle action on a guest. Returns the UPID task string."""
-        from datetime import datetime
         resource = "lxc" if guest_type == "lxc" else "qemu"
         base = f"/nodes/{self._node}/{resource}/{vmid}"
 
         if action == "snapshot":
-            name = snapshot_name or f"proxmon-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
             result = await self._post(f"{base}/snapshot", {
-                "snapname": name,
+                "snapname": snapshot_name,
                 "description": "Created by proxmon",
             })
         else:

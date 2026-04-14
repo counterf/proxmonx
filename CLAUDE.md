@@ -14,11 +14,11 @@ Proxmox monitoring dashboard. Discovers LXC/VM guests across multiple Proxmox ho
 
 ### Core
 - `backend/app/config.py` -- Settings (pydantic-settings); AppConfig (per-app/guest overrides); CustomAppDef; ProxmoxHostConfig
-- `backend/app/core/config_store.py` -- SQLite config persistence; normalized tables (`settings`, `proxmox_hosts`, `app_config`, `guest_config`, `custom_app_defs`); per-entity CRUD with built-in secret masking (`preserve_secrets`); `save_full()` for atomic multi-table writes; `update_scalar(key, value)` for targeted single-field settings updates; `load()` assembles full dict from all tables
+- `backend/app/core/config_store.py` -- SQLite config persistence; normalized tables (`settings`, `proxmox_hosts`, `app_config`, `guest_config`, `custom_app_defs`); per-entity CRUD with built-in secret masking (`preserve_secrets`); `save_full()` for atomic multi-table writes; `update_scalar(key, value)` for targeted single-field settings updates; `load()` assembles full dict from all tables; `load_auth()` and `is_configured()` are cached in-memory with dirty-flag invalidation on all write methods
 - `backend/app/core/discovery.py` -- main orchestration: guest discovery → app detection → version check → community-script check; handles `forced_detector` and `version_host` overrides
 - `backend/app/core/scheduler.py` -- asyncio background polling; `trigger_guest_refresh(guest_id)` (fire-and-forget); `refresh_single_guest_awaitable(guest_id)` (awaitable, returns bool, used by post-update retry loop); `trigger_refresh()` (full cycle)
 - `backend/app/core/proxmox.py` -- ProxmoxClient: `list_guests()`, `guest_action()`, `get_task_status()`, `create_backup()`, `list_backup_storages()`, `get_guest_network()`
-- `backend/app/core/ssh.py` -- SSHClient; `OS_UPDATE_COMMANDS` dict maps Proxmox ostype → package manager command; `run_os_update()`, `run_app_update()`, `run_pending_updates_list()`, `run_reboot_required_check()`, `run_community_script_check()`; `_strip_ansi()` strips ANSI escape codes from command output; `_extract_ssh_host()` strips scheme/port from Proxmox host URL before SSH
+- `backend/app/core/ssh.py` -- SSHClient; `from_host_config(host_config)` classmethod builds an SSHClient from a `ProxmoxHostConfig`; `OS_UPDATE_COMMANDS` dict maps Proxmox ostype → package manager command; `run_os_update()`, `run_app_update()`, `run_pending_updates_list()`, `run_reboot_required_check()`, `run_community_script_check()`; `_strip_ansi()` strips ANSI escape codes from command output; `_extract_ssh_host()` strips scheme/port from Proxmox host URL before SSH
 - `backend/app/core/github.py` -- GitHub releases API client with 1h TTL cache; `parse_github_repo()` normalizes URLs; `test_repo()` for UI validation
 - `backend/app/core/task_store.py` -- TaskRecord (id, guest_id, guest_name, host_id, action, status, started_at, finished_at, output, detail, batch_id); retains last 500 records; auto-reconciles stale running tasks on restart
 - `backend/app/core/session_store.py` -- SQLite-backed session management (24h TTL)
@@ -27,13 +27,13 @@ Proxmox monitoring dashboard. Discovers LXC/VM guests across multiple Proxmox ho
 
 ### API routes
 - `backend/app/api/routes/guests.py` -- guest endpoints; snapshot name resolved here before calling `guest_action()` (auto-generates `proxmon-YYYYMMDD-HHMMSS` if not provided); `_poll_upid()` background task polls Proxmox UPID for completion; `POST /api/guests/{id}/os-update` and `/app-update` fire background tasks via `run_os_update_bg` / `run_app_update_bg`
-- `backend/app/api/routes/settings.py` -- settings endpoints; `_keep_or_replace()` handles scalar secrets (github_token, ssh_password, ntfy_token, proxmon_api_key); host/app_config/guest_config secrets handled by ConfigStore CRUD layer
+- `backend/app/api/routes/settings.py` -- settings endpoints; host/app_config/guest_config secrets handled by ConfigStore CRUD layer; preserves guest state (`scheduler._guests`) across settings save
 - `backend/app/api/routes/custom_apps.py` -- custom app definition CRUD; uses ConfigStore CRUD methods directly (list, get, upsert, delete)
 - `backend/app/api/routes/bulk_jobs.py` -- bulk os_update / app_update across multiple guests; sequential per-guest execution
 - `backend/app/api/routes/tasks.py` -- task history endpoints (list, get, clear)
 - `backend/app/api/auth_routes.py` -- login/logout/status/change-password endpoints
-- `backend/app/api/helpers.py` -- `run_os_update_bg()`, `run_app_update_bg()`; `_log_task_exception()` done-callback for fire-and-forget tasks; `_last_lines(text, n=3)` extracts last N non-empty lines for task detail; `_APP_UPDATE_PROBE_INTERVAL=5`, `_APP_UPDATE_RETRY_BUDGET=60` control post-update version probe retry
-- `backend/app/middleware/auth_middleware.py` -- session cookie + API key auth; exempts /health, /api/auth/*, /api/setup/status; loopback-only setup endpoints
+- `backend/app/api/helpers.py` -- `run_os_update_bg()`, `run_app_update_bg()`; `_keep_or_replace()` handles scalar secrets (github_token, ssh_password, ntfy_token, proxmon_api_key); `_require_api_key` honours `request.state.setup_exempt` flag from auth middleware; `_log_task_exception()` done-callback for fire-and-forget tasks; `_last_lines(text, n=3)` extracts last N non-empty lines for task detail; `_APP_UPDATE_PROBE_INTERVAL=5`, `_APP_UPDATE_RETRY_BUDGET=60` control post-update version probe retry
+- `backend/app/middleware/auth_middleware.py` -- session cookie + API key auth; exempts /health, /api/auth/*, /api/setup/status; loopback-only setup endpoints; sets `request.state.setup_exempt = True` for setup-flow requests (consumed by `_require_api_key`)
 
 ### Detectors
 - `backend/app/detectors/http_json.py` -- config-driven `DetectorConfig` entries for 13 apps (Sonarr, Radarr, Bazarr, Prowlarr, Lidarr, Readarr, Whisparr, Immich, Overseerr, Seerr, Gitea, Traefik, ntfy); add new simple apps here
@@ -42,8 +42,12 @@ Proxmox monitoring dashboard. Discovers LXC/VM guests across multiple Proxmox ho
 - Specialized: `plex.py`, `caddy.py`, `qbittorrent.py`, `sabnzbd.py`, `jackett.py`, `librespeed_rust.py`, `docker_generic.py`
 
 ### Frontend
-- `frontend/src/components/GuestActions.tsx` -- guest action dropdown; handles start/stop/shutdown/restart/snapshot/refresh/os_update/app_update/backup; snapshot has optional name input; os_update and app_update have confirm dialogs with in-progress state
-- `frontend/src/components/Tasks.tsx` -- task history; `InfoCell` shows "View output" toggle (unified for success + failed); exception-only failures show plain red detail; running tasks show UPID
+- `frontend/src/components/GuestActions.tsx` -- guest action dropdown; handles start/stop/shutdown/restart/snapshot/refresh/os_update/app_update/backup; confirm dialogs use shared `ConfirmDialog` sub-component; snapshot has optional name input
+- `frontend/src/components/GuestDetail.tsx` -- guest detail panel; delegates per-guest settings to `InstanceSettings.tsx`
+- `frontend/src/components/InstanceSettings.tsx` -- per-guest instance settings (forced_detector, version_host, app config overrides); extracted from GuestDetail
+- `frontend/src/components/Tasks.tsx` -- task history; `InfoCell` shows "View output" toggle (unified for success + failed); `TaskStatusBadge` renders task status with pulse animation for running/pending
+- `frontend/src/utils/formatRelativeTime.ts` -- shared relative time formatter (used by GuestRow, Tasks)
+- `frontend/src/types/index.ts` -- shared types; exports `SUPPORTED_OS_TYPES` constant (used by GuestActions, BulkProgressModal)
 - `frontend/src/components/Settings.tsx` -- delegates to section components
 - `frontend/src/components/settings/AppConfigSection.tsx` -- per-app config (port, api_key, scheme, github_repo, ssh_version_cmd, ssh_username, ssh_key_path, ssh_password)
 - `frontend/src/components/settings/CustomAppsSection.tsx` -- CRUD UI for user-defined custom app definitions
@@ -79,7 +83,7 @@ Register in `backend/app/detectors/registry.py` via `make_detector("name")` (con
 ---
 
 ## Config storage
-SQLite at `/app/data/proxmon.db`. Five tables: `settings` (one row, scalar fields only), `proxmox_hosts` (one row per host), `app_config` (one row per app override), `guest_config` (one row per guest override), `custom_app_defs` (one row per custom app). ConfigStore exposes per-entity CRUD (`list_hosts`, `get_host`, `upsert_host`, `delete_host`, etc.) with built-in secret masking via `preserve_secrets`. `save_full()` writes scalars + all entity upserts in a single transaction. `update_scalar(key, value)` updates a single settings column without touching normalized tables (used by `change_password`). `load()` assembles the full unified dict by joining across all tables. Only two env vars are recognized at runtime: `CONFIG_DB_PATH` (default `/app/data/proxmon.db`) and `PORT` (default `3000`).
+SQLite at `/app/data/proxmon.db`. Five tables: `settings` (one row, scalar fields only), `proxmox_hosts` (one row per host), `app_config` (one row per app override), `guest_config` (one row per guest override), `custom_app_defs` (one row per custom app). ConfigStore exposes per-entity CRUD (`list_hosts`, `get_host`, `upsert_host`, `delete_host`, etc.) with built-in secret masking via `preserve_secrets`. `save_full()` writes scalars + all entity upserts in a single transaction. `update_scalar(key, value)` updates a single settings column without touching normalized tables (used by `change_password`). `load()` assembles the full unified dict by joining across all tables. `load_auth()` and `is_configured()` are cached in-memory; all public write methods call `_invalidate_caches()` to reset them. Only two env vars are recognized at runtime: `CONFIG_DB_PATH` (default `/app/data/proxmon.db`) and `PORT` (default `3000`).
 
 ---
 

@@ -475,7 +475,7 @@ async def save_settings(
 
     # Build hosts list for atomic save
     hosts_to_save: list[dict] | None = None
-    if body.proxmox_hosts is not None and len(body.proxmox_hosts) > 0:
+    if body.proxmox_hosts is not None:
         hosts_to_save = [entry.model_dump() for entry in body.proxmox_hosts]
 
     # Build app config dict for atomic save

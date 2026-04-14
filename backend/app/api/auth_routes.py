@@ -52,14 +52,22 @@ def _is_secure_request(request: Request) -> bool:
 
 def _check_rate_limit(ip: str) -> bool:
     """Return True if the IP is within the allowed rate limit."""
-    if len(_login_attempts) > 1000:
-        _login_attempts.clear()
     now = time.monotonic()
+    # Prune expired entries for this IP
     attempts = [t for t in _login_attempts.get(ip, []) if now - t < _RATE_LIMIT_WINDOW]
-    _login_attempts[ip] = attempts
+    if attempts:
+        _login_attempts[ip] = attempts
+    else:
+        _login_attempts.pop(ip, None)
+    # Global sweep to prevent unbounded growth from distinct IPs
+    if len(_login_attempts) > 1000:
+        stale = [k for k, v in _login_attempts.items()
+                 if not any(now - t < _RATE_LIMIT_WINDOW for t in v)]
+        for k in stale:
+            del _login_attempts[k]
     if len(attempts) >= _RATE_LIMIT_MAX:
         return False
-    _login_attempts[ip].append(now)
+    _login_attempts.setdefault(ip, []).append(now)
     return True
 
 

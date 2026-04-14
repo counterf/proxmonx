@@ -63,6 +63,11 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
   }, [expandedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateHost = (id: string, patch: Partial<ProxmoxHost>) => {
+    // B8: Invalidate cached storages when credential-related fields change
+    if ('host' in patch || 'token_id' in patch || 'token_secret' in patch || 'node' in patch) {
+      setStorages((p) => { const next = { ...p }; delete next[id]; return next; });
+      setStoragesError((p) => { const next = { ...p }; delete next[id]; return next; });
+    }
     onChange(hosts.map((h) => (h.id === id ? { ...h, ...patch } : h)));
   };
 
@@ -80,6 +85,27 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
     if (expandedId === id) {
       setExpandedId(updated[0]?.id || null);
     }
+  };
+
+  const refreshStorages = (hostId: string) => {
+    const host = hosts.find((h) => h.id === hostId);
+    if (!host || !host.host || !host.token_id || !host.node) return;
+    setStorages((p) => { const next = { ...p }; delete next[hostId]; return next; });
+    setStoragesError((p) => { const next = { ...p }; delete next[hostId]; return next; });
+    setStoragesLoading((p) => ({ ...p, [hostId]: true }));
+    fetchBackupStorages(hostId).then((result) => {
+      if ('error' in result) {
+        setStoragesError((p) => ({ ...p, [hostId]: result.error }));
+        setStorages((p) => ({ ...p, [hostId]: null }));
+      } else {
+        setStorages((p) => ({ ...p, [hostId]: result }));
+      }
+    }).catch((err) => {
+      setStoragesError((p) => ({ ...p, [hostId]: err instanceof Error ? err.message : 'Failed to load storages' }));
+      setStorages((p) => ({ ...p, [hostId]: null }));
+    }).finally(() => {
+      setStoragesLoading((p) => ({ ...p, [hostId]: false }));
+    });
   };
 
   const handleTest = async (host: ProxmoxHost) => {
@@ -310,7 +336,20 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
                   </div>
 
                   <div>
-                    <label htmlFor={`host-backup-storage-${host.id}`} className="block text-xs text-gray-400 mb-1">Backup Storage</label>
+                    <div className="flex items-center gap-2 mb-1">
+                      <label htmlFor={`host-backup-storage-${host.id}`} className="block text-xs text-gray-400">Backup Storage</label>
+                      {storages[host.id] !== undefined && !storagesLoading[host.id] && (
+                        <button
+                          type="button"
+                          onClick={() => refreshStorages(host.id)}
+                          disabled={disabled}
+                          className="text-[10px] text-blue-400 hover:text-blue-300 disabled:opacity-50"
+                          aria-label="Refresh backup storages"
+                        >
+                          Refresh
+                        </button>
+                      )}
+                    </div>
                     {storagesLoading[host.id] ? (
                       <select disabled className={`${inputClass} opacity-60`}>
                         <option>Loading storages…</option>

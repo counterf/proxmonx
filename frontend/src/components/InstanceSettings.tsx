@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { AppConfigEntry, AppConfigDefault, CustomAppDef, GitHubTestResult } from '../types';
 import { fetchGuestConfig, saveGuestConfig, deleteGuestConfig, refreshGuest, fetchAppConfigDefaults, fetchCustomApps, testGithubRepo } from '../api/client';
-import { EyeIcon, EyeSlashIcon } from './icons/EyeIcons';
+import SshFieldGroup from './shared/SshFieldGroup';
 
 const SOURCE_LABELS: Record<string, string> = {
   'releases/latest': 'latest release',
@@ -22,6 +22,7 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageIsError, setMessageIsError] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [appDefaults, setAppDefaults] = useState<AppConfigDefault[]>([]);
   const [customApps, setCustomApps] = useState<CustomAppDef[]>([]);
@@ -59,12 +60,14 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
   const handleSave = async () => {
     setSaving(true);
     setMessage(null);
+    setMessageIsError(false);
     try {
       await saveGuestConfig(guestId, cfg);
       setMessage('Saved. Refreshing...');
       await refreshGuest(guestId);
       setMessage('Saved successfully.');
     } catch (err) {
+      setMessageIsError(true);
       setMessage(err instanceof Error ? err.message : 'Save failed');
     } finally {
       setSaving(false);
@@ -74,6 +77,7 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
   const handleReset = async () => {
     setSaving(true);
     setMessage(null);
+    setMessageIsError(false);
     try {
       await deleteGuestConfig(guestId);
       setCfg({});
@@ -81,6 +85,7 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
       await refreshGuest(guestId);
       setMessage('Reset to defaults.');
     } catch (err) {
+      setMessageIsError(true);
       setMessage(err instanceof Error ? err.message : 'Reset failed');
     } finally {
       setSaving(false);
@@ -104,6 +109,7 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
   const handleClearStaleForcedDetector = async () => {
     setSaving(true);
     setMessage(null);
+    setMessageIsError(false);
     try {
       const updated = { ...cfg, forced_detector: null };
       await saveGuestConfig(guestId, updated);
@@ -112,6 +118,7 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
       await refreshGuest(guestId);
       setMessage('Cleared successfully.');
     } catch (err) {
+      setMessageIsError(true);
       setMessage(err instanceof Error ? err.message : 'Clear failed');
     } finally {
       setSaving(false);
@@ -300,61 +307,21 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
               <span>SSH</span>
             </button>
             {sshExpanded && (
-              <div id="gc-ssh-panel" className="mt-2 space-y-2 pl-2 border-l border-gray-700">
-                <div>
-                  <label htmlFor="gc-ssh-cmd" className="text-xs text-gray-500">Version Command</label>
-                  <textarea
-                    id="gc-ssh-cmd"
-                    rows={2}
-                    value={cfg.ssh_version_cmd ?? ''}
-                    placeholder="e.g. myapp --version | head -1"
-                    onChange={(e) => setCfg({ ...cfg, ssh_version_cmd: e.target.value || null })}
-                    className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="gc-ssh-user" className="text-xs text-gray-500">SSH Username</label>
-                  <input
-                    id="gc-ssh-user"
-                    type="text"
-                    value={cfg.ssh_username ?? ''}
-                    placeholder="root (uses global default)"
-                    onChange={(e) => setCfg({ ...cfg, ssh_username: e.target.value || null })}
-                    className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="gc-ssh-key" className="text-xs text-gray-500">SSH Key Path</label>
-                  <input
-                    id="gc-ssh-key"
-                    type="text"
-                    value={cfg.ssh_key_path ?? ''}
-                    placeholder="/path/to/key (uses global default)"
-                    onChange={(e) => setCfg({ ...cfg, ssh_key_path: e.target.value || null })}
-                    className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="gc-ssh-pass" className="text-xs text-gray-500">SSH Password</label>
-                  <div className="relative">
-                    <input
-                      id="gc-ssh-pass"
-                      type={showSshPassword ? 'text' : 'password'}
-                      value={cfg.ssh_password ?? ''}
-                      placeholder="masked"
-                      onChange={(e) => setCfg({ ...cfg, ssh_password: e.target.value || null })}
-                      className="w-full px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowSshPassword(!showSshPassword)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
-                      aria-label={showSshPassword ? 'Hide SSH password' : 'Show SSH password'}
-                    >
-                      {showSshPassword ? <EyeSlashIcon /> : <EyeIcon />}
-                    </button>
-                  </div>
-                </div>
+              <div id="gc-ssh-panel">
+                <SshFieldGroup
+                  idPrefix="gc"
+                  versionCmd={cfg.ssh_version_cmd ?? ''}
+                  username={cfg.ssh_username ?? ''}
+                  keyPath={cfg.ssh_key_path ?? ''}
+                  password={cfg.ssh_password ?? ''}
+                  showPassword={showSshPassword}
+                  onVersionCmdChange={(v) => setCfg({ ...cfg, ssh_version_cmd: v || null })}
+                  onUsernameChange={(v) => setCfg({ ...cfg, ssh_username: v || null })}
+                  onKeyPathChange={(v) => setCfg({ ...cfg, ssh_key_path: v || null })}
+                  onPasswordChange={(v) => setCfg({ ...cfg, ssh_password: v || null })}
+                  onToggleShowPassword={() => setShowSshPassword(!showSshPassword)}
+                  passwordPlaceholder="masked"
+                />
               </div>
             )}
           </div>
@@ -377,7 +344,7 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
               </button>
             )}
             {message && (
-              <span className={`text-xs ${message.includes('fail') ? 'text-red-400' : 'text-green-400'}`}>
+              <span className={`text-xs ${messageIsError ? 'text-red-400' : 'text-green-400'}`}>
                 {message}
               </span>
             )}

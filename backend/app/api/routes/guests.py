@@ -2,8 +2,8 @@
 
 import asyncio
 import logging
-from datetime import datetime
-from typing import Any, Literal
+from datetime import datetime, timezone
+from typing import Any, Coroutine, Literal
 from uuid import uuid4
 
 import httpx
@@ -35,6 +35,36 @@ from app.api.helpers import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _register_bg_task(request: Request, coro: Coroutine[Any, Any, Any]) -> asyncio.Task:
+    """Create a background task and register it to prevent GC."""
+    bg_tasks: set = getattr(request.app.state, "background_tasks", set())
+    task = asyncio.create_task(coro)
+    bg_tasks.add(task)
+    task.add_done_callback(bg_tasks.discard)
+    task.add_done_callback(_log_task_exception)
+    return task
+
+
+def _handle_proxmox_error(
+    exc: httpx.HTTPStatusError,
+    task_store: TaskStore,
+    task_id: str,
+) -> HTTPException:
+    """Extract a Proxmox error, update the task record, and return an HTTPException."""
+    detail: str = exc.response.reason_phrase or f"Proxmox API error: {exc.response.status_code}"
+    try:
+        resp_body = exc.response.json()
+        errors = resp_body.get("errors") or resp_body.get("message") or resp_body.get("data")
+        if errors:
+            detail = str(errors)
+    except Exception:
+        if exc.response.text:
+            detail = exc.response.text.strip()
+    task_store.update(task_id, status="failed", detail=detail, finished_at=_now_iso())
+    status_code = 409 if exc.response.status_code == 500 else exc.response.status_code
+    return HTTPException(status_code=status_code, detail=detail)
 
 
 async def _poll_upid(
@@ -161,33 +191,31 @@ async def save_guest_config(
     """Save per-guest configuration overrides."""
     # ssh_version_cmd safety is enforced by _AppConfigBase.validate_ssh_version_cmd
 
+    # For non-secret fields: None = not provided (skip), "" = explicit clear.
+    def _field_value(val: Any) -> tuple[bool, Any]:
+        """Return (include, value). None = skip field. Empty string = clear to None."""
+        if val is None:
+            return False, None
+        if val == "":
+            return True, None
+        return True, val
+
     merged: dict[str, Any] = {}
     if body.port is not None:
         merged["port"] = body.port
-    if body.scheme is not None and body.scheme != "":
-        merged["scheme"] = body.scheme
-    if body.github_repo is not None and body.github_repo != "":
-        merged["github_repo"] = body.github_repo
-    if body.ssh_version_cmd is not None and body.ssh_version_cmd != "":
-        merged["ssh_version_cmd"] = body.ssh_version_cmd
-    if body.ssh_username is not None and body.ssh_username != "":
-        merged["ssh_username"] = body.ssh_username
-
-    # Regular optional fields
-    if body.ssh_key_path is not None and body.ssh_key_path != "":
-        merged["ssh_key_path"] = body.ssh_key_path
+    for field_name in ("scheme", "github_repo", "ssh_version_cmd", "ssh_username",
+                       "ssh_key_path", "forced_detector", "version_host"):
+        include, value = _field_value(getattr(body, field_name))
+        if include:
+            merged[field_name] = value
 
     # Secret fields: pass through as-is; CRUD's preserve_secrets handles "***"/None
     merged["api_key"] = body.api_key
     merged["ssh_password"] = body.ssh_password
 
-    if body.forced_detector is not None and body.forced_detector != "":
-        merged["forced_detector"] = body.forced_detector
-    if body.version_host is not None and body.version_host != "":
-        merged["version_host"] = body.version_host
-
-    # Strip None values — but keep secret keys so CRUD's preserve_secrets can handle them
-    merged = {k: v for k, v in merged.items() if v is not None or k in _CONFIG_SECRETS}
+    # Remove port if not provided; everything else was explicitly included
+    if merged.get("port") is None:
+        merged.pop("port", None)
 
     if merged:
         config_store.upsert_guest_config(guest_id, merged)
@@ -251,34 +279,16 @@ async def perform_guest_action(
     try:
         snapshot_name = None
         if body.action == "snapshot":
-            snapshot_name = body.snapshot_name or f"proxmon-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            snapshot_name = body.snapshot_name or f"proxmon-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
         upid = await client.guest_action(vmid, proxmox_type, body.action, snapshot_name)
         logger.info("Action %s on guest %s -> task %s", body.action, guest_id, upid)
         task_store.update(task_id, status="running", detail=upid)
         success_detail = f"Snapshot '{snapshot_name}' created" if snapshot_name else None
         http_client = getattr(request.app.state, "http_client", None)
-        bg_tasks: set = getattr(request.app.state, "background_tasks", set())
-        task = asyncio.create_task(_poll_upid(task_store, host_config, task_id, upid, success_detail, http_client=http_client, guest_id=guest_id, scheduler=scheduler))
-        bg_tasks.add(task)
-        task.add_done_callback(bg_tasks.discard)
-        task.add_done_callback(_log_task_exception)
+        _register_bg_task(request, _poll_upid(task_store, host_config, task_id, upid, success_detail, http_client=http_client, guest_id=guest_id, scheduler=scheduler))
         return {"status": "ok", "task": upid}
     except httpx.HTTPStatusError as exc:
-        # Extract the Proxmox error message
-        detail: str = exc.response.reason_phrase or f"Proxmox API error: {exc.response.status_code}"
-        try:
-            resp_body = exc.response.json()
-            errors = resp_body.get("errors") or resp_body.get("message") or resp_body.get("data")
-            if errors:
-                detail = str(errors)
-        except Exception:
-            if exc.response.text:
-                detail = exc.response.text.strip()
-        task_store.update(task_id, status="failed", detail=detail, finished_at=_now_iso())
-        # Proxmox uses 500 for logical conflicts (e.g. "already running", "already stopped").
-        # Map those to 409 so the frontend shows the message rather than a generic error.
-        status_code = 409 if exc.response.status_code == 500 else exc.response.status_code
-        raise HTTPException(status_code=status_code, detail=detail)
+        raise _handle_proxmox_error(exc, task_store, task_id)
     except Exception as exc:
         task_store.update(task_id, status="failed", detail=str(exc), finished_at=_now_iso())
         raise HTTPException(status_code=500, detail=str(exc))
@@ -342,13 +352,9 @@ async def os_update_guest(
     ))
 
     try:
-        bg_tasks: set = getattr(request.app.state, "background_tasks", set())
-        task = asyncio.create_task(run_os_update_bg(
+        _register_bg_task(request, run_os_update_bg(
             task_id, guest_id, ssh, host_config, vmid, guest.os_type, scheduler, task_store,
         ))
-        bg_tasks.add(task)
-        task.add_done_callback(bg_tasks.discard)
-        task.add_done_callback(_log_task_exception)
     except Exception as exc:
         task_store.update(
             task_id,
@@ -406,13 +412,9 @@ async def app_update_guest(
     ))
 
     try:
-        bg_tasks: set = getattr(request.app.state, "background_tasks", set())
-        task = asyncio.create_task(run_app_update_bg(
+        _register_bg_task(request, run_app_update_bg(
             task_id, guest_id, ssh, host_config, vmid, scheduler, task_store,
         ))
-        bg_tasks.add(task)
-        task.add_done_callback(bg_tasks.discard)
-        task.add_done_callback(_log_task_exception)
     except Exception as exc:
         task_store.update(
             task_id,
@@ -463,25 +465,10 @@ async def backup_guest(
         logger.info("Backup queued for guest %s -> %s", guest_id, upid)
         task_store.update(task_id, status="running", detail=upid)
         http_client = getattr(request.app.state, "http_client", None)
-        bg_tasks: set = getattr(request.app.state, "background_tasks", set())
-        task = asyncio.create_task(_poll_upid(task_store, host_config, task_id, upid, f"Backed up to {host_config.backup_storage}", http_client=http_client, guest_id=guest_id, scheduler=scheduler))
-        bg_tasks.add(task)
-        task.add_done_callback(bg_tasks.discard)
-        task.add_done_callback(_log_task_exception)
+        _register_bg_task(request, _poll_upid(task_store, host_config, task_id, upid, f"Backed up to {host_config.backup_storage}", http_client=http_client, guest_id=guest_id, scheduler=scheduler))
         return {"status": "ok", "task": upid}
     except httpx.HTTPStatusError as exc:
-        detail: str = exc.response.reason_phrase or f"Proxmox API error: {exc.response.status_code}"
-        try:
-            body_data = exc.response.json()
-            errors = body_data.get("errors") or body_data.get("message") or body_data.get("data")
-            if errors:
-                detail = str(errors)
-        except Exception:
-            if exc.response.text:
-                detail = exc.response.text.strip()
-        task_store.update(task_id, status="failed", detail=detail, finished_at=_now_iso())
-        status_code = 409 if exc.response.status_code == 500 else exc.response.status_code
-        raise HTTPException(status_code=status_code, detail=detail)
+        raise _handle_proxmox_error(exc, task_store, task_id)
     except Exception as exc:
         task_store.update(task_id, status="failed", detail=str(exc), finished_at=_now_iso())
         raise HTTPException(status_code=500, detail=str(exc))

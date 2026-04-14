@@ -5,6 +5,7 @@ import StatusBadge from './StatusBadge';
 import AppIcon from './AppIcon';
 import GuestActions from './GuestActions';
 import { formatRelativeTime } from '../utils/formatRelativeTime';
+import { getTypeBadgeClass, VERSION_SOURCE_SHORT_LABELS, VERSION_SOURCE_STYLES } from '../utils/guestStyles';
 
 interface GuestRowProps {
   guest: Guest;
@@ -50,20 +51,15 @@ function DiskUsageCell({ guest }: { guest: Guest }) {
   );
 }
 
-const VERSION_SOURCE_STYLES: Record<string, { label: string; bg: string; text: string }> = {
-  http: { label: 'API', bg: 'bg-blue-900/40', text: 'text-blue-300' },
-  ssh: { label: 'SSH', bg: 'bg-yellow-900/40', text: 'text-yellow-300' },
-  pct_exec: { label: 'PCT', bg: 'bg-purple-900/40', text: 'text-purple-300' },
-};
-
 function VersionSourceCell({ guest }: { guest: Guest }) {
   const method = guest.version_detection_method;
   if (!method) return <span className="text-gray-500">{'\u2014'}</span>;
+  const label = VERSION_SOURCE_SHORT_LABELS[method];
   const style = VERSION_SOURCE_STYLES[method];
-  if (!style) return <span className="text-xs text-gray-400">{method}</span>;
+  if (!label || !style) return <span className="text-xs text-gray-400">{method}</span>;
   return (
     <span className={`inline-block px-1.5 py-0.5 text-[11px] font-medium rounded ${style.bg} ${style.text}`}>
-      {style.label}
+      {label}
     </span>
   );
 }
@@ -153,9 +149,7 @@ export function GuestTableRow({ guest, visibleColumns, bulkMode, selected, onTog
   const navigate = useNavigate();
   const vis = visibleColumns ?? new Set<ColumnKey>();
 
-  const typeBadgeClass = guest.type === 'lxc'
-    ? 'border-blue-500 text-blue-400'
-    : 'border-purple-500 text-purple-400';
+  const typeBadgeClass = getTypeBadgeClass(guest.type);
 
   return (
     <tr
@@ -278,9 +272,7 @@ export function GuestTableRow({ guest, visibleColumns, bulkMode, selected, onTog
 export function GuestCard({ guest, bulkMode, selected, onToggleSelect, backupEnabled }: GuestRowProps) {
   const navigate = useNavigate();
 
-  const typeBadgeClass = guest.type === 'lxc'
-    ? 'border-blue-500 text-blue-400'
-    : 'border-purple-500 text-purple-400';
+  const typeBadgeClass = getTypeBadgeClass(guest.type);
 
   const versionStr = guest.installed_version
     ? guest.update_status === 'outdated' && guest.latest_version
