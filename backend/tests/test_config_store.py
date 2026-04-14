@@ -239,7 +239,7 @@ class TestColumnMigration:
 
         # Spot-check several columns that were missing.
         for expected in ("proxmon_api_key", "trust_proxy_headers", "discover_vms",
-                         "github_token", "proxmox_hosts", "custom_app_defs"):
+                         "github_token"):
             assert expected in cols, f"Column '{expected}' was not added by migration"
 
     def test_save_load_after_migration(self, db_path: Path) -> None:
@@ -302,3 +302,226 @@ class TestLoadAuth:
             "auth_mode": "forms",
             "auth_password_hash": "$bcrypt$somehash",
         }
+
+
+# ======================================================================
+# New tests for normalized CRUD methods
+# ======================================================================
+
+
+class TestHostsCRUD:
+    def test_upsert_and_list(self, store: ConfigStore) -> None:
+        store.upsert_host({
+            "id": "pve1", "label": "PVE1", "host": "https://10.0.0.1:8006",
+            "token_id": "root@pam!t1", "token_secret": "sec1", "node": "pve1",
+        })
+        store.upsert_host({
+            "id": "pve2", "label": "PVE2", "host": "https://10.0.0.2:8006",
+            "token_id": "root@pam!t2", "token_secret": "sec2", "node": "pve2",
+            "pct_exec_enabled": True,
+        })
+        hosts = store.list_hosts()
+        assert len(hosts) == 2
+        ids = {h["id"] for h in hosts}
+        assert ids == {"pve1", "pve2"}
+        pve2 = [h for h in hosts if h["id"] == "pve2"][0]
+        assert pve2["pct_exec_enabled"] is True
+
+    def test_get(self, store: ConfigStore) -> None:
+        store.upsert_host({
+            "id": "pve1", "label": "PVE1", "host": "https://10.0.0.1:8006",
+            "token_id": "root@pam!t1", "token_secret": "sec1", "node": "pve1",
+            "ssh_username": "admin", "backup_storage": "local-zfs",
+        })
+        h = store.get_host("pve1")
+        assert h is not None
+        assert h["label"] == "PVE1"
+        assert h["ssh_username"] == "admin"
+        assert h["backup_storage"] == "local-zfs"
+        assert h["pct_exec_enabled"] is False
+
+    def test_delete(self, store: ConfigStore) -> None:
+        store.upsert_host({
+            "id": "pve1", "label": "PVE1", "host": "https://10.0.0.1:8006",
+            "token_id": "t", "token_secret": "s", "node": "n",
+        })
+        store.delete_host("pve1")
+        assert store.get_host("pve1") is None
+        assert store.list_hosts() == []
+
+    def test_upsert_preserves_secrets(self, store: ConfigStore) -> None:
+        store.upsert_host({
+            "id": "pve1", "label": "PVE1", "host": "https://10.0.0.1:8006",
+            "token_id": "root@pam!t1", "token_secret": "real-secret",
+            "node": "pve1", "ssh_password": "real-ssh-pass",
+        })
+        # Update with masked secrets
+        store.upsert_host({
+            "id": "pve1", "label": "PVE1-Updated", "host": "https://10.0.0.1:8006",
+            "token_id": "root@pam!t1", "token_secret": "***",
+            "node": "pve1", "ssh_password": "***",
+        })
+        h = store.get_host("pve1")
+        assert h["label"] == "PVE1-Updated"
+        assert h["token_secret"] == "real-secret"
+        assert h["ssh_password"] == "real-ssh-pass"
+
+    def test_upsert_preserves_secrets_on_none(self, store: ConfigStore) -> None:
+        store.upsert_host({
+            "id": "pve1", "label": "PVE1", "host": "https://10.0.0.1:8006",
+            "token_id": "t", "token_secret": "real-secret", "node": "n",
+        })
+        store.upsert_host({
+            "id": "pve1", "label": "PVE1", "host": "https://10.0.0.1:8006",
+            "token_id": "t", "node": "n",
+            # token_secret omitted (None)
+        })
+        h = store.get_host("pve1")
+        assert h["token_secret"] == "real-secret"
+
+
+class TestAppConfigCRUD:
+    def test_upsert_and_list(self, store: ConfigStore) -> None:
+        store.upsert_app_config("sonarr", {"port": 8989, "api_key": "abc"})
+        store.upsert_app_config("radarr", {"port": 7878})
+        configs = store.list_app_configs()
+        assert "sonarr" in configs
+        assert configs["sonarr"]["port"] == 8989
+        assert configs["sonarr"]["api_key"] == "abc"
+        assert "radarr" in configs
+        assert configs["radarr"]["port"] == 7878
+
+    def test_delete(self, store: ConfigStore) -> None:
+        store.upsert_app_config("sonarr", {"port": 8989})
+        store.delete_app_config("sonarr")
+        assert store.get_app_config("sonarr") is None
+        assert store.list_app_configs() == {}
+
+    def test_upsert_preserves_secrets(self, store: ConfigStore) -> None:
+        store.upsert_app_config("sonarr", {"port": 8989, "api_key": "real-key", "ssh_password": "real-pw"})
+        store.upsert_app_config("sonarr", {"port": 9999, "api_key": "***", "ssh_password": "***"})
+        cfg = store.get_app_config("sonarr")
+        assert cfg["port"] == 9999
+        assert cfg["api_key"] == "real-key"
+        assert cfg["ssh_password"] == "real-pw"
+
+
+class TestGuestConfigCRUD:
+    def test_upsert_and_list(self, store: ConfigStore) -> None:
+        store.upsert_guest_config("pve1:100", {"port": 8080, "scheme": "https"})
+        store.upsert_guest_config("pve1:101", {"forced_detector": "sonarr"})
+        configs = store.list_guest_configs()
+        assert "pve1:100" in configs
+        assert configs["pve1:100"]["port"] == 8080
+        assert configs["pve1:100"]["scheme"] == "https"
+        assert "pve1:101" in configs
+        assert configs["pve1:101"]["forced_detector"] == "sonarr"
+
+    def test_delete(self, store: ConfigStore) -> None:
+        store.upsert_guest_config("pve1:100", {"port": 8080})
+        store.delete_guest_config("pve1:100")
+        assert store.get_guest_config("pve1:100") is None
+        assert store.list_guest_configs() == {}
+
+    def test_upsert_preserves_secrets(self, store: ConfigStore) -> None:
+        store.upsert_guest_config("pve1:100", {"api_key": "real-key", "ssh_password": "real-pw"})
+        store.upsert_guest_config("pve1:100", {"api_key": "***", "ssh_password": None})
+        cfg = store.get_guest_config("pve1:100")
+        assert cfg["api_key"] == "real-key"
+        assert cfg["ssh_password"] == "real-pw"
+
+
+class TestCustomAppDefsCRUD:
+    def test_upsert_and_list(self, store: ConfigStore) -> None:
+        store.upsert_custom_app_def({
+            "name": "mealie", "display_name": "Mealie", "default_port": 9925,
+        })
+        store.upsert_custom_app_def({
+            "name": "ha", "display_name": "Home Assistant", "default_port": 8123,
+            "scheme": "https",
+        })
+        defs = store.list_custom_app_defs()
+        assert len(defs) == 2
+        names = {d["name"] for d in defs}
+        assert names == {"mealie", "ha"}
+
+    def test_delete(self, store: ConfigStore) -> None:
+        store.upsert_custom_app_def({
+            "name": "mealie", "display_name": "Mealie", "default_port": 9925,
+        })
+        store.delete_custom_app_def("mealie")
+        assert store.get_custom_app_def("mealie") is None
+        assert store.list_custom_app_defs() == []
+
+    def test_json_list_fields_round_trip(self, store: ConfigStore) -> None:
+        store.upsert_custom_app_def({
+            "name": "myapp", "display_name": "My App", "default_port": 5000,
+            "aliases": ["myapp-alt", "ma"],
+            "docker_images": ["ghcr.io/org/myapp"],
+            "version_keys": ["info", "version"],
+            "accepts_api_key": True,
+            "strip_v": True,
+        })
+        d = store.get_custom_app_def("myapp")
+        assert d is not None
+        assert d["aliases"] == ["myapp-alt", "ma"]
+        assert d["docker_images"] == ["ghcr.io/org/myapp"]
+        assert d["version_keys"] == ["info", "version"]
+        assert d["accepts_api_key"] is True
+        assert d["strip_v"] is True
+
+
+class TestLoadFromTables:
+    def test_load_assembles_from_tables(self, store: ConfigStore) -> None:
+        """Use CRUD to insert data, call load(), verify dict shape."""
+        # Insert scalar settings
+        store.save({"poll_interval_seconds": 300, "ssh_enabled": True})
+
+        # Insert hosts via CRUD
+        store.upsert_host({
+            "id": "default", "label": "Minisforum",
+            "host": "https://192.168.1.10:8006",
+            "token_id": "root@pam!proxmon", "token_secret": "uuid-secret",
+            "node": "pve",
+        })
+
+        # Insert app config via CRUD
+        store.upsert_app_config("sonarr", {"port": 8989, "api_key": "sonarr-key"})
+
+        # Insert guest config via CRUD
+        store.upsert_guest_config("default:103", {"port": 8090, "forced_detector": "plex"})
+
+        # Insert custom app def via CRUD
+        store.upsert_custom_app_def({
+            "name": "homeassistant", "display_name": "Home Assistant",
+            "default_port": 8123, "scheme": "https",
+            "aliases": ["ha", "hass"],
+        })
+
+        data = store.load()
+
+        # Scalar fields
+        assert data["poll_interval_seconds"] == 300
+        assert data["ssh_enabled"] is True
+
+        # proxmox_hosts
+        assert len(data["proxmox_hosts"]) == 1
+        assert data["proxmox_hosts"][0]["id"] == "default"
+        assert data["proxmox_hosts"][0]["label"] == "Minisforum"
+        assert data["proxmox_hosts"][0]["token_secret"] == "uuid-secret"
+
+        # app_config
+        assert "sonarr" in data["app_config"]
+        assert data["app_config"]["sonarr"]["port"] == 8989
+        assert data["app_config"]["sonarr"]["api_key"] == "sonarr-key"
+
+        # guest_config
+        assert "default:103" in data["guest_config"]
+        assert data["guest_config"]["default:103"]["port"] == 8090
+        assert data["guest_config"]["default:103"]["forced_detector"] == "plex"
+
+        # custom_app_defs
+        assert len(data["custom_app_defs"]) == 1
+        assert data["custom_app_defs"][0]["name"] == "homeassistant"
+        assert data["custom_app_defs"][0]["aliases"] == ["ha", "hass"]
+        assert data["custom_app_defs"][0]["scheme"] == "https"

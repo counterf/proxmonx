@@ -36,9 +36,6 @@ _SCALAR_BOOL_FIELDS: frozenset[str] = frozenset({
     "discover_vms", "ssh_enabled", "notifications_enabled",
     "notify_on_outdated", "trust_proxy_headers",
 })
-_JSON_FIELDS: frozenset[str] = frozenset({
-    "proxmox_hosts", "app_config", "guest_config", "custom_app_defs",
-})
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -66,31 +63,110 @@ CREATE TABLE IF NOT EXISTS settings (
     notify_on_outdated           INTEGER  DEFAULT 1,
     proxmon_api_key              TEXT,
     trust_proxy_headers          INTEGER  DEFAULT 0,
-    proxmox_hosts                TEXT     DEFAULT '[]',
-    app_config                   TEXT     DEFAULT '{}',
-    guest_config                 TEXT     DEFAULT '{}',
-    custom_app_defs              TEXT     DEFAULT '[]',
     updated_at                   TEXT     NOT NULL
                                  DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 )
 """
 
+_CREATE_PROXMOX_HOSTS = """
+CREATE TABLE IF NOT EXISTS proxmox_hosts (
+    id              TEXT PRIMARY KEY,
+    label           TEXT NOT NULL,
+    host            TEXT NOT NULL,
+    token_id        TEXT NOT NULL DEFAULT '',
+    token_secret    TEXT NOT NULL DEFAULT '',
+    node            TEXT NOT NULL DEFAULT '',
+    ssh_username    TEXT NOT NULL DEFAULT 'root',
+    ssh_password    TEXT,
+    ssh_key_path    TEXT,
+    pct_exec_enabled INTEGER NOT NULL DEFAULT 0,
+    backup_storage  TEXT
+)
+"""
+
+_CREATE_APP_CONFIG = """
+CREATE TABLE IF NOT EXISTS app_config (
+    app_name        TEXT PRIMARY KEY,
+    port            INTEGER,
+    api_key         TEXT,
+    scheme          TEXT,
+    github_repo     TEXT,
+    ssh_version_cmd TEXT,
+    ssh_username    TEXT,
+    ssh_key_path    TEXT,
+    ssh_password    TEXT
+)
+"""
+
+_CREATE_GUEST_CONFIG = """
+CREATE TABLE IF NOT EXISTS guest_config (
+    guest_id        TEXT PRIMARY KEY,
+    port            INTEGER,
+    api_key         TEXT,
+    scheme          TEXT,
+    github_repo     TEXT,
+    ssh_version_cmd TEXT,
+    ssh_username    TEXT,
+    ssh_key_path    TEXT,
+    ssh_password    TEXT,
+    forced_detector TEXT,
+    version_host    TEXT
+)
+"""
+
+_CREATE_CUSTOM_APP_DEFS = """
+CREATE TABLE IF NOT EXISTS custom_app_defs (
+    name            TEXT PRIMARY KEY,
+    display_name    TEXT NOT NULL,
+    default_port    INTEGER NOT NULL,
+    scheme          TEXT NOT NULL DEFAULT 'http',
+    version_path    TEXT,
+    github_repo     TEXT,
+    aliases         TEXT NOT NULL DEFAULT '[]',
+    docker_images   TEXT NOT NULL DEFAULT '[]',
+    accepts_api_key INTEGER NOT NULL DEFAULT 0,
+    auth_header     TEXT,
+    version_keys    TEXT NOT NULL DEFAULT '["version"]',
+    strip_v         INTEGER NOT NULL DEFAULT 0
+)
+"""
+
+# Registry of all table DDLs for column migration.
+_TABLE_DDLS: dict[str, str] = {
+    "settings": _CREATE_TABLE,
+    "proxmox_hosts": _CREATE_PROXMOX_HOSTS,
+    "app_config": _CREATE_APP_CONFIG,
+    "guest_config": _CREATE_GUEST_CONFIG,
+    "custom_app_defs": _CREATE_CUSTOM_APP_DEFS,
+}
+
 # Columns that can be added via ALTER TABLE ADD COLUMN on upgrade.
-# Derived automatically from _CREATE_TABLE so there is a single source of truth.
+# Derived automatically from DDLs so there is a single source of truth.
 _SKIP_COLUMNS = frozenset({"id", "updated_at"})
 # DEFAULT is included to skip the continuation line of the multi-line updated_at definition.
 _CONSTRAINT_PREFIXES = ("PRIMARY", "CHECK", "UNIQUE", "CONSTRAINT", "CREATE", ")", "DEFAULT")
 
+# Primary key column name per table (excluded from migration).
+_TABLE_PK: dict[str, str] = {
+    "settings": "id",
+    "proxmox_hosts": "id",
+    "app_config": "app_name",
+    "guest_config": "guest_id",
+    "custom_app_defs": "name",
+}
 
-def _parse_migratable_columns() -> list[tuple[str, str]]:
-    """Extract ``(column_name, type_and_default)`` from ``_CREATE_TABLE``.
 
-    Skips ``id`` (PRIMARY KEY with CHECK) and ``updated_at`` (NOT NULL +
-    expression default) because SQLite's ALTER TABLE ADD COLUMN does not
-    support those constraints.
+def _parse_migratable_columns(ddl: str, *, skip: frozenset[str] | None = None) -> list[tuple[str, str]]:
+    """Extract ``(column_name, type_and_default)`` from a CREATE TABLE DDL.
+
+    Skips columns in *skip* (and always skips ``updated_at``) because
+    SQLite's ALTER TABLE ADD COLUMN does not support those constraints.
     """
+    if skip is None:
+        skip = frozenset()
+    skip = skip | {"updated_at"}
     result: list[tuple[str, str]] = []
-    for raw in _CREATE_TABLE.splitlines():
+    for raw in ddl.splitlines():
         line = raw.strip().rstrip(",")
         if not line:
             continue
@@ -100,7 +176,7 @@ def _parse_migratable_columns() -> list[tuple[str, str]]:
         col_name = parts[0]
         if col_name.upper().startswith(_CONSTRAINT_PREFIXES):
             continue
-        if col_name in _SKIP_COLUMNS:
+        if col_name in skip:
             continue
         # Everything after the column name is the type + default clause
         typedef = " ".join(parts[1:])
@@ -109,11 +185,19 @@ def _parse_migratable_columns() -> list[tuple[str, str]]:
     return result
 
 
-_MIGRATABLE_COLUMNS: list[tuple[str, str]] = _parse_migratable_columns()
+# Pre-compute migratable columns for every table.
+_ALL_MIGRATABLE: dict[str, list[tuple[str, str]]] = {}
+for _tbl_name, _tbl_ddl in _TABLE_DDLS.items():
+    _pk = _TABLE_PK.get(_tbl_name)
+    _skip = frozenset({_pk}) if _pk else frozenset()
+    _ALL_MIGRATABLE[_tbl_name] = _parse_migratable_columns(_tbl_ddl, skip=_skip)
+
+# Backward compat alias used by existing tests.
+_MIGRATABLE_COLUMNS: list[tuple[str, str]] = _ALL_MIGRATABLE["settings"]
 
 
 def _dict_to_params(data: dict) -> dict:
-    """Convert a settings dict to a column-name → SQLite-value mapping.
+    """Convert a settings dict to a column-name -> SQLite-value mapping.
 
     Keys not in the known field sets are silently ignored.
     None values result in SQL NULL (omitting a key from the save dict clears it).
@@ -128,10 +212,16 @@ def _dict_to_params(data: dict) -> dict:
     for key in _SCALAR_BOOL_FIELDS:
         v = data.get(key)
         params[key] = int(bool(v)) if v is not None else None
-    for key in _JSON_FIELDS:
-        v = data.get(key)
-        params[key] = json.dumps(v, default=str) if v is not None else None
     return params
+
+
+# Secret fields per table that should be preserved when "***" is sent.
+_HOST_SECRETS = ("token_secret", "ssh_password")
+_CONFIG_SECRETS = ("api_key", "ssh_password")
+
+# Custom app defs: JSON list fields that need ser/deser.
+_CUSTOM_APP_JSON_FIELDS = ("aliases", "docker_images", "version_keys")
+_CUSTOM_APP_BOOL_FIELDS = ("accepts_api_key", "strip_v")
 
 
 class ConfigStore:
@@ -161,61 +251,74 @@ class ConfigStore:
 
     def _init_db(self) -> None:
         with self._connect() as conn:
-            conn.execute(_CREATE_TABLE)
+            for ddl in _TABLE_DDLS.values():
+                conn.execute(ddl)
             self._migrate_columns(conn)
 
     @staticmethod
     def _migrate_columns(conn: sqlite3.Connection) -> None:
         """Add any columns present in the schema but missing from the DB.
 
-        Runs on every startup.  Only issues ALTER TABLE for columns not yet in
-        ``PRAGMA table_info``.  ``id`` and ``updated_at`` are excluded because
-        they are always present in the original CREATE TABLE and have constraints
-        incompatible with ALTER TABLE ADD COLUMN.
+        Runs on every startup for all managed tables.
         """
-        existing = {row[1] for row in conn.execute("PRAGMA table_info(settings)").fetchall()}
-        for col, typedef in _MIGRATABLE_COLUMNS:
-            if col not in existing:
-                logger.info("Migrating settings table: adding column '%s'", col)
-                conn.execute(f"ALTER TABLE settings ADD COLUMN {col} {typedef}")
+        for table_name, columns in _ALL_MIGRATABLE.items():
+            existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+            for col, typedef in columns:
+                if col not in existing:
+                    logger.info("Migrating %s table: adding column '%s'", table_name, col)
+                    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {col} {typedef}")
+
+    # ------------------------------------------------------------------
+    # load / save (settings scalars + assembled complex fields)
+    # ------------------------------------------------------------------
 
     def load(self) -> dict:
         """Read settings from SQLite, return as dict.
 
-        None-valued columns are omitted from the result so callers using
-        ``.get()`` with defaults continue to work correctly.
+        Assembles the full settings dict from the settings table (scalars)
+        and the four normalized tables.
         """
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM settings WHERE id = 1").fetchone()
-            if row is None:
-                return {}
             result: dict = {}
-            for key in _SCALAR_STR_FIELDS:
-                v = row[key]
-                if v is not None:
-                    result[key] = v
-            for key in _SCALAR_INT_FIELDS:
-                v = row[key]
-                if v is not None:
-                    result[key] = int(v)
-            for key in _SCALAR_BOOL_FIELDS:
-                v = row[key]
-                if v is not None:
-                    result[key] = bool(v)
-            for key in _JSON_FIELDS:
-                raw = row[key]
-                if raw is not None:
-                    try:
-                        result[key] = json.loads(raw)
-                    except (json.JSONDecodeError, TypeError) as exc:
-                        logger.error("Failed to parse JSON column '%s': %s", key, exc)
+            row = conn.execute("SELECT * FROM settings WHERE id = 1").fetchone()
+            if row is not None:
+                for key in _SCALAR_STR_FIELDS:
+                    v = row[key]
+                    if v is not None:
+                        result[key] = v
+                for key in _SCALAR_INT_FIELDS:
+                    v = row[key]
+                    if v is not None:
+                        result[key] = int(v)
+                for key in _SCALAR_BOOL_FIELDS:
+                    v = row[key]
+                    if v is not None:
+                        result[key] = bool(v)
+
+            # proxmox_hosts
+            hosts = self._list_hosts_conn(conn)
+            if hosts:
+                result["proxmox_hosts"] = hosts
+
+            # app_config
+            app_cfgs = self._list_app_configs_conn(conn)
+            if app_cfgs:
+                result["app_config"] = app_cfgs
+
+            # guest_config
+            guest_cfgs = self._list_guest_configs_conn(conn)
+            if guest_cfgs:
+                result["guest_config"] = guest_cfgs
+
+            # custom_app_defs
+            custom_defs = self._list_custom_app_defs_conn(conn)
+            if custom_defs:
+                result["custom_app_defs"] = custom_defs
+
             return result
 
     def load_auth(self) -> dict:
-        """Fast-path read of auth fields only (used by auth middleware hot path).
-
-        Avoids loading and JSON-parsing the full settings row on every request.
-        """
+        """Fast-path read of auth fields only (used by auth middleware hot path)."""
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT auth_mode, auth_password_hash FROM settings WHERE id = 1"
@@ -230,14 +333,19 @@ class ConfigStore:
     def save(self, data: dict) -> None:
         """Write settings to SQLite.
 
-        Every save fully replaces all columns — keys absent from *data* are
-        written as NULL, so a subsequent load() will not return them.
-        Unknown keys (not in any field-type set) are silently ignored.
+        Scalar fields go to the settings table. Complex fields
+        (proxmox_hosts, app_config, guest_config, custom_app_defs) are
+        routed to their normalized tables.
+
+        Every save fully replaces all columns -- keys absent from *data*
+        are written as NULL, so a subsequent load() will not return them.
         Callers must supply the full settings dict, not a partial patch.
         """
         params = _dict_to_params(data)
         cols = list(params.keys())
+
         with self._connect() as conn:
+            # Scalar settings
             conn.execute(
                 "INSERT OR IGNORE INTO settings (id, updated_at) "
                 "VALUES (1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
@@ -245,7 +353,329 @@ class ConfigStore:
             update_parts = ", ".join(f"{c} = :{c}" for c in cols)
             update_parts += ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
             conn.execute(f"UPDATE settings SET {update_parts} WHERE id = 1", params)
+
+            # Normalized tables -- replace-all semantics
+            if "proxmox_hosts" in data:
+                conn.execute("DELETE FROM proxmox_hosts")
+                for h in (data["proxmox_hosts"] or []):
+                    if isinstance(h, dict):
+                        self._upsert_host_conn(conn, h)
+
+            if "app_config" in data:
+                conn.execute("DELETE FROM app_config")
+                cfg = data["app_config"]
+                if isinstance(cfg, dict):
+                    for app_name, app_data in cfg.items():
+                        if isinstance(app_data, dict):
+                            self._upsert_app_config_conn(conn, app_name, app_data)
+
+            if "guest_config" in data:
+                conn.execute("DELETE FROM guest_config")
+                cfg = data["guest_config"]
+                if isinstance(cfg, dict):
+                    for guest_id, guest_data in cfg.items():
+                        if isinstance(guest_data, dict):
+                            self._upsert_guest_config_conn(conn, guest_id, guest_data)
+
+            if "custom_app_defs" in data:
+                conn.execute("DELETE FROM custom_app_defs")
+                for d in (data["custom_app_defs"] or []):
+                    if isinstance(d, dict):
+                        self._upsert_custom_app_def_conn(conn, d)
+
         logger.info("Settings saved via UI")
+
+    # ------------------------------------------------------------------
+    # proxmox_hosts CRUD
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _row_to_host(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        d["pct_exec_enabled"] = bool(d.get("pct_exec_enabled", 0))
+        return d
+
+    @staticmethod
+    def _list_hosts_conn(conn: sqlite3.Connection) -> list[dict]:
+        rows = conn.execute("SELECT * FROM proxmox_hosts").fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["pct_exec_enabled"] = bool(d.get("pct_exec_enabled", 0))
+            result.append(d)
+        return result
+
+    def list_hosts(self) -> list[dict]:
+        with self._connect() as conn:
+            return self._list_hosts_conn(conn)
+
+    def get_host(self, host_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM proxmox_hosts WHERE id = ?", (host_id,)).fetchone()
+            return self._row_to_host(row) if row else None
+
+    @staticmethod
+    def _upsert_host_conn(conn: sqlite3.Connection, data: dict, *, preserve_secrets: bool = False) -> None:
+        host_id = data.get("id", "")
+        if preserve_secrets:
+            existing = conn.execute("SELECT * FROM proxmox_hosts WHERE id = ?", (host_id,)).fetchone()
+            if existing:
+                existing = dict(existing)
+                for secret in _HOST_SECRETS:
+                    val = data.get(secret)
+                    if val is None or val == "***":
+                        data[secret] = existing.get(secret)
+
+        conn.execute(
+            "INSERT OR REPLACE INTO proxmox_hosts "
+            "(id, label, host, token_id, token_secret, node, ssh_username, "
+            "ssh_password, ssh_key_path, pct_exec_enabled, backup_storage) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                data.get("id", ""),
+                data.get("label", ""),
+                data.get("host", ""),
+                data.get("token_id", ""),
+                data.get("token_secret", ""),
+                data.get("node", ""),
+                data.get("ssh_username", "root"),
+                data.get("ssh_password"),
+                data.get("ssh_key_path"),
+                int(bool(data.get("pct_exec_enabled", False))),
+                data.get("backup_storage"),
+            ),
+        )
+
+    def upsert_host(self, data: dict) -> None:
+        with self._connect() as conn:
+            self._upsert_host_conn(conn, data, preserve_secrets=True)
+
+    def delete_host(self, host_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM proxmox_hosts WHERE id = ?", (host_id,))
+
+    # ------------------------------------------------------------------
+    # app_config CRUD
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _row_to_app_config(row: sqlite3.Row) -> dict:
+        """Convert a row to a dict, omitting None-valued fields and the PK."""
+        d = dict(row)
+        d.pop("app_name", None)
+        return {k: v for k, v in d.items() if v is not None}
+
+    @staticmethod
+    def _list_app_configs_conn(conn: sqlite3.Connection) -> dict[str, dict]:
+        rows = conn.execute("SELECT * FROM app_config").fetchall()
+        result: dict[str, dict] = {}
+        for r in rows:
+            d = dict(r)
+            name = d.pop("app_name")
+            clean = {k: v for k, v in d.items() if v is not None}
+            if clean:
+                result[name] = clean
+        return result
+
+    def list_app_configs(self) -> dict[str, dict]:
+        with self._connect() as conn:
+            return self._list_app_configs_conn(conn)
+
+    def get_app_config(self, app_name: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM app_config WHERE app_name = ?", (app_name,)).fetchone()
+            return self._row_to_app_config(row) if row else None
+
+    @staticmethod
+    def _upsert_app_config_conn(
+        conn: sqlite3.Connection, app_name: str, data: dict, *, preserve_secrets: bool = False,
+    ) -> None:
+        if preserve_secrets:
+            existing = conn.execute("SELECT * FROM app_config WHERE app_name = ?", (app_name,)).fetchone()
+            if existing:
+                existing = dict(existing)
+                for secret in _CONFIG_SECRETS:
+                    val = data.get(secret)
+                    if val is None or val == "***":
+                        data[secret] = existing.get(secret)
+
+        conn.execute(
+            "INSERT OR REPLACE INTO app_config "
+            "(app_name, port, api_key, scheme, github_repo, ssh_version_cmd, "
+            "ssh_username, ssh_key_path, ssh_password) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                app_name,
+                data.get("port"),
+                data.get("api_key"),
+                data.get("scheme"),
+                data.get("github_repo"),
+                data.get("ssh_version_cmd"),
+                data.get("ssh_username"),
+                data.get("ssh_key_path"),
+                data.get("ssh_password"),
+            ),
+        )
+
+    def upsert_app_config(self, app_name: str, data: dict) -> None:
+        with self._connect() as conn:
+            self._upsert_app_config_conn(conn, app_name, data, preserve_secrets=True)
+
+    def delete_app_config(self, app_name: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM app_config WHERE app_name = ?", (app_name,))
+
+    # ------------------------------------------------------------------
+    # guest_config CRUD
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _row_to_guest_config(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        d.pop("guest_id", None)
+        return {k: v for k, v in d.items() if v is not None}
+
+    @staticmethod
+    def _list_guest_configs_conn(conn: sqlite3.Connection) -> dict[str, dict]:
+        rows = conn.execute("SELECT * FROM guest_config").fetchall()
+        result: dict[str, dict] = {}
+        for r in rows:
+            d = dict(r)
+            gid = d.pop("guest_id")
+            clean = {k: v for k, v in d.items() if v is not None}
+            if clean:
+                result[gid] = clean
+        return result
+
+    def list_guest_configs(self) -> dict[str, dict]:
+        with self._connect() as conn:
+            return self._list_guest_configs_conn(conn)
+
+    def get_guest_config(self, guest_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM guest_config WHERE guest_id = ?", (guest_id,)).fetchone()
+            return self._row_to_guest_config(row) if row else None
+
+    @staticmethod
+    def _upsert_guest_config_conn(
+        conn: sqlite3.Connection, guest_id: str, data: dict, *, preserve_secrets: bool = False,
+    ) -> None:
+        if preserve_secrets:
+            existing = conn.execute("SELECT * FROM guest_config WHERE guest_id = ?", (guest_id,)).fetchone()
+            if existing:
+                existing = dict(existing)
+                for secret in _CONFIG_SECRETS:
+                    val = data.get(secret)
+                    if val is None or val == "***":
+                        data[secret] = existing.get(secret)
+
+        conn.execute(
+            "INSERT OR REPLACE INTO guest_config "
+            "(guest_id, port, api_key, scheme, github_repo, ssh_version_cmd, "
+            "ssh_username, ssh_key_path, ssh_password, forced_detector, version_host) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                guest_id,
+                data.get("port"),
+                data.get("api_key"),
+                data.get("scheme"),
+                data.get("github_repo"),
+                data.get("ssh_version_cmd"),
+                data.get("ssh_username"),
+                data.get("ssh_key_path"),
+                data.get("ssh_password"),
+                data.get("forced_detector"),
+                data.get("version_host"),
+            ),
+        )
+
+    def upsert_guest_config(self, guest_id: str, data: dict) -> None:
+        with self._connect() as conn:
+            self._upsert_guest_config_conn(conn, guest_id, data, preserve_secrets=True)
+
+    def delete_guest_config(self, guest_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM guest_config WHERE guest_id = ?", (guest_id,))
+
+    # ------------------------------------------------------------------
+    # custom_app_defs CRUD
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _row_to_custom_app_def(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        for f in _CUSTOM_APP_JSON_FIELDS:
+            raw = d.get(f)
+            if isinstance(raw, str):
+                try:
+                    d[f] = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    d[f] = []
+        for f in _CUSTOM_APP_BOOL_FIELDS:
+            d[f] = bool(d.get(f, 0))
+        return d
+
+    @staticmethod
+    def _list_custom_app_defs_conn(conn: sqlite3.Connection) -> list[dict]:
+        rows = conn.execute("SELECT * FROM custom_app_defs").fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            for f in _CUSTOM_APP_JSON_FIELDS:
+                raw = d.get(f)
+                if isinstance(raw, str):
+                    try:
+                        d[f] = json.loads(raw)
+                    except (json.JSONDecodeError, TypeError):
+                        d[f] = []
+            for f in _CUSTOM_APP_BOOL_FIELDS:
+                d[f] = bool(d.get(f, 0))
+            result.append(d)
+        return result
+
+    def list_custom_app_defs(self) -> list[dict]:
+        with self._connect() as conn:
+            return self._list_custom_app_defs_conn(conn)
+
+    def get_custom_app_def(self, name: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM custom_app_defs WHERE name = ?", (name,)).fetchone()
+            return self._row_to_custom_app_def(row) if row else None
+
+    @staticmethod
+    def _upsert_custom_app_def_conn(conn: sqlite3.Connection, data: dict) -> None:
+        conn.execute(
+            "INSERT OR REPLACE INTO custom_app_defs "
+            "(name, display_name, default_port, scheme, version_path, github_repo, "
+            "aliases, docker_images, accepts_api_key, auth_header, version_keys, strip_v) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                data.get("name", ""),
+                data.get("display_name", ""),
+                data.get("default_port", 0),
+                data.get("scheme", "http"),
+                data.get("version_path"),
+                data.get("github_repo"),
+                json.dumps(data.get("aliases", []), default=str),
+                json.dumps(data.get("docker_images", []), default=str),
+                int(bool(data.get("accepts_api_key", False))),
+                data.get("auth_header"),
+                json.dumps(data.get("version_keys", ["version"]), default=str),
+                int(bool(data.get("strip_v", False))),
+            ),
+        )
+
+    def upsert_custom_app_def(self, data: dict) -> None:
+        with self._connect() as conn:
+            self._upsert_custom_app_def_conn(conn, data)
+
+    def delete_custom_app_def(self, name: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM custom_app_defs WHERE name = ?", (name,))
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     def is_configured(self) -> bool:
         """True if at least one host has all required fields in the DB."""
