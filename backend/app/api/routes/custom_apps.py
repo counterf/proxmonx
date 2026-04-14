@@ -81,20 +81,6 @@ def _reload_custom_detectors(
                 continue
     load_custom_detectors(defs)
 
-    # Sync app_config scheme for custom apps
-    app_configs = config_store.list_app_configs()
-    for defn in defs:
-        if defn.scheme != "http" and defn.name not in app_configs:
-            config_store.upsert_app_config(defn.name, {"scheme": defn.scheme})
-        elif defn.scheme == "http" and defn.name in app_configs:
-            entry = app_configs[defn.name]
-            if isinstance(entry, dict) and entry.get("scheme"):
-                cleaned = {k: v for k, v in entry.items() if k != "scheme"}
-                if cleaned:
-                    config_store.upsert_app_config(defn.name, cleaned)
-                else:
-                    config_store.delete_app_config(defn.name)
-
     # Reload settings into engine
     _reload_settings_into_engine(request, config_store)
 

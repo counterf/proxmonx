@@ -136,7 +136,7 @@ def _reload_settings_into_engine(request: Request, config_store) -> None:
 class _AppConfigBase(BaseModel):
     """Shared fields and validators for per-app / per-guest config entries."""
 
-    port: int | None = Field(default=None, ge=1, le=65535)
+    port: int | None = Field(default=None, ge=0, le=65535)  # 0 = clear sentinel
     api_key: str | None = None
     scheme: str | None = None
     github_repo: str | None = None

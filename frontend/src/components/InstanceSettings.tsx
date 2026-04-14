@@ -237,9 +237,9 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
               <input
                 id="gc-port"
                 type="number"
-                value={cfg.port ?? ''}
+                value={cfg.port || ''}
                 placeholder="Default"
-                onChange={(e) => setCfg({ ...cfg, port: e.target.value ? parseInt(e.target.value, 10) : null })}
+                onChange={(e) => setCfg({ ...cfg, port: e.target.value ? parseInt(e.target.value, 10) : 0 })}
                 className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>

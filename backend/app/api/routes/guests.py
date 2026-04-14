@@ -202,7 +202,8 @@ async def save_guest_config(
 
     merged: dict[str, Any] = {}
     if body.port is not None:
-        merged["port"] = body.port
+        # 0 is the clear sentinel — port 0 is never valid for an app
+        merged["port"] = body.port if body.port != 0 else None
     for field_name in ("scheme", "github_repo", "ssh_version_cmd", "ssh_username",
                        "ssh_key_path", "forced_detector", "version_host"):
         include, value = _field_value(getattr(body, field_name))
@@ -212,10 +213,6 @@ async def save_guest_config(
     # Secret fields: pass through as-is; CRUD's preserve_secrets handles "***"/None
     merged["api_key"] = body.api_key
     merged["ssh_password"] = body.ssh_password
-
-    # Remove port if not provided; everything else was explicitly included
-    if merged.get("port") is None:
-        merged.pop("port", None)
 
     if any(v is not None and v != "***" for v in merged.values()):
         config_store.upsert_guest_config(guest_id, merged)

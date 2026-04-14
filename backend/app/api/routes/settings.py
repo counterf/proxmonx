@@ -482,6 +482,15 @@ async def save_settings(
     # Build hosts list for atomic save
     hosts_to_save: list[dict] | None = None
     if body.proxmox_hosts is not None:
+        # Validate token_secret is provided for new hosts
+        existing_host_ids = {h["id"] for h in config_store.list_hosts()}
+        for entry in body.proxmox_hosts:
+            is_new = entry.id not in existing_host_ids
+            if is_new and (not entry.token_secret or entry.token_secret == "***"):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"token_secret is required for new host '{entry.id}'",
+                )
         hosts_to_save = [entry.model_dump() for entry in body.proxmox_hosts]
 
     # Build app config dict for atomic save
@@ -492,13 +501,10 @@ async def save_settings(
             prev = config_store.get_app_config(app_name) or {}
             merged_entry: dict[str, Any] = {}
             if entry.port is not None:
-                merged_entry["port"] = entry.port
-            if entry.scheme is not None:
-                merged_entry["scheme"] = entry.scheme
-            elif prev.get("scheme"):
-                merged_entry["scheme"] = prev["scheme"]
+                # 0 is the clear sentinel — maps to NULL in DB
+                merged_entry["port"] = entry.port if entry.port != 0 else None
             # Non-secret optional fields: None = keep, "" = clear
-            for field in ("github_repo", "ssh_version_cmd", "ssh_username", "ssh_key_path"):
+            for field in ("scheme", "github_repo", "ssh_version_cmd", "ssh_username", "ssh_key_path"):
                 val = getattr(entry, field)
                 if val is None:
                     if prev.get(field):
@@ -508,7 +514,19 @@ async def save_settings(
             # Secret fields: pass through, CRUD handles "***"/None preservation
             merged_entry["api_key"] = entry.api_key
             merged_entry["ssh_password"] = entry.ssh_password
-            if merged_entry:
+            # Check for meaningful content: ignore None-valued secret placeholders,
+            # but also check prev for existing secrets to avoid silent deletion
+            has_content = any(
+                v is not None for k, v in merged_entry.items()
+                if k not in ("api_key", "ssh_password")
+            ) or any(
+                merged_entry.get(s) not in (None, "***")
+                for s in ("api_key", "ssh_password")
+            ) or any(
+                prev.get(s) not in (None, "", "***")
+                for s in ("api_key", "ssh_password")
+            )
+            if has_content:
                 app_configs_to_save[app_name] = merged_entry
             else:
                 config_store.delete_app_config(app_name)

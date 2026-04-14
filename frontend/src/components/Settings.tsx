@@ -262,8 +262,14 @@ export default function Settings() {
       const appConfigPayload: Record<string, AppConfigEntry> = {};
       for (const [name, cfg] of Object.entries(appConfigs)) {
         const entry: AppConfigEntry = {};
+        const prev = savedAppConfigs[name];
+        // Port: send 0 (clear sentinel) when user cleared a previously-set port
+        if (cfg.port) {
+          entry.port = cfg.port;
+        } else if (prev?.port) {
+          entry.port = 0;  // clear sentinel; backend maps to NULL
+        }
         // Plain fields -- always send current value (null = clear/default)
-        entry.port = cfg.port || null;
         entry.scheme = cfg.scheme || null;
         entry.github_repo = cfg.github_repo || null;
         entry.ssh_version_cmd = cfg.ssh_version_cmd || null;
@@ -275,8 +281,8 @@ export default function Settings() {
           entry.api_key = cfg.api_key ?? '';
           entry.ssh_password = cfg.ssh_password ?? '';
         }
-        // Only include this app if at least one field is set
-        const hasContent = entry.port || entry.scheme || entry.github_repo ||
+        // Include this app if at least one field is set
+        const hasContent = entry.port != null || entry.scheme || entry.github_repo ||
           entry.ssh_version_cmd || entry.ssh_username || entry.ssh_key_path ||
           changedApiKeys.current.has(name);
         if (hasContent) {
