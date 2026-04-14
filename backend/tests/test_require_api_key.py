@@ -17,16 +17,16 @@ def app(tmp_path: Path):
     """Minimal FastAPI app with a protected endpoint, API key configured."""
     db_path = str(tmp_path / "test.db")
     config_store = ConfigStore(db_path)
-    config_store.save({
-        "proxmon_api_key": "test-secret-key",
-        "proxmox_hosts": [{
+    config_store.save_full(
+        {"proxmon_api_key": "test-secret-key"},
+        hosts=[{
             "id": "pve1", "label": "PVE1",
             "host": "https://10.0.0.1:8006",
             "token_id": "root@pam!test",
             "token_secret": "secret-uuid",
             "node": "pve",
         }],
-    })
+    )
     session_store = SessionStore(db_path)
 
     settings = SimpleNamespace(proxmon_api_key="test-secret-key")

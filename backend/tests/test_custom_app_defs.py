@@ -253,12 +253,8 @@ class TestCustomAppRoutes:
         })
 
         # Manually set guest_config with forced_detector
-        data = store.load()
-        data["guest_config"] = {
-            "pve1:100": {"forced_detector": "clearapp", "port": 5000},
-            "pve1:101": {"forced_detector": "sonarr", "port": 8989},
-        }
-        store.save(data)
+        store.upsert_guest_config("pve1:100", {"forced_detector": "clearapp", "port": 5000})
+        store.upsert_guest_config("pve1:101", {"forced_detector": "sonarr", "port": 8989})
 
         # Delete the custom app
         resp = client.delete("/api/custom-apps/clearapp")

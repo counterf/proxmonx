@@ -6,13 +6,14 @@ import uuid
 from itertools import groupby
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.api.helpers import (
     _get_config_store,
     _get_scheduler,
     _get_task_store,
+    _log_task_exception,
     _now_iso,
     _require_api_key,
     run_app_update_bg,
@@ -23,14 +24,6 @@ from app.core.task_store import TaskRecord, TaskStore
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-def _log_task_exception(task: asyncio.Task) -> None:
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc:
-        logger.error("Background task failed: %s", exc, exc_info=exc)
 
 
 class StartBulkJobRequest(BaseModel):
@@ -186,6 +179,7 @@ async def _run_bulk_job(
 @router.post("/api/bulk-jobs", dependencies=[Depends(_require_api_key)])
 async def start_bulk_job(
     request_body: StartBulkJobRequest,
+    request: Request,
     task_store: TaskStore = Depends(_get_task_store),
     scheduler=Depends(_get_scheduler),
     config_store=Depends(_get_config_store),
@@ -221,6 +215,7 @@ async def start_bulk_job(
         )
         task_ids[guest_id] = task_id
 
+    bg_tasks: set = getattr(request.app.state, "background_tasks", set())
     task = asyncio.create_task(
         _run_bulk_job(
             job_id=job_id,
@@ -232,6 +227,8 @@ async def start_bulk_job(
             config_store=config_store,
         )
     )
+    bg_tasks.add(task)
+    task.add_done_callback(bg_tasks.discard)
     task.add_done_callback(_log_task_exception)
     return {"job_id": job_id, "status": "pending"}
 

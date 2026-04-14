@@ -2,7 +2,7 @@
 
 Self-hosted Proxmox monitoring dashboard that continuously discovers LXC containers and VMs, identifies the application running inside each guest, compares the installed version against the latest upstream release on GitHub, and shows a live update-status dashboard — with a built-in setup wizard so you never have to touch a config file.
 
-![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 235 passing](https://img.shields.io/badge/tests-235%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
+![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 275 passing](https://img.shields.io/badge/tests-275%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
 
 <!-- screenshot: dashboard showing guests table with version status badges -->
 
@@ -60,7 +60,7 @@ Every N seconds (default: 1 hour), a background scheduler runs a full discovery 
 └─────────────────────┬───────────────────────────────────────┘
                       │ HTTP  :3000
 ┌─────────────────────▼───────────────────────────────────────┐
-│  Single Docker container (Python 3.12)                       │
+│  Single Docker container (Python 3)                          │
 │  Uvicorn serves API + built React SPA                        │
 │                                                               │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
@@ -70,8 +70,8 @@ Every N seconds (default: 1 hour), a background scheduler runs a full discovery 
 │         │                                                     │
 │  ┌──────▼──────────────────────────────────────────────┐    │
 │  │  DiscoveryEngine                                      │    │
-│  │  • ProxmoxClient (async httpx, GET-only)             │    │
-│  │  • 19 built-in detectors + user-defined custom apps   │    │
+│  │  • ProxmoxClient (async httpx)                        │    │
+│  │  • 21 built-in detectors + user-defined custom apps   │    │
 │  │    (config-driven HttpJsonDetector + specialized)     │    │
 │  │  • GitHubClient (releases API + 1h cache)            │    │
 │  │  • SSHClient (paramiko, command whitelist)           │    │
@@ -90,12 +90,12 @@ Every N seconds (default: 1 hour), a background scheduler runs a full discovery 
 | Component | Responsibility |
 |---|---|
 | **Scheduler** | asyncio background task; runs full discovery cycle every `POLL_INTERVAL_SECONDS`; supports manual trigger via `asyncio.Event` |
-| **ProxmoxClient** | Async HTTP client for the Proxmox VE API; lists LXC containers and optionally VMs; resolves guest IPs from network config; enforces GET-only |
+| **ProxmoxClient** | Async HTTP client for the Proxmox VE API; lists LXC containers and optionally VMs; resolves guest IPs from network config; POST for guest actions and backups |
 | **DiscoveryEngine** | Orchestrates the full cycle: list guests → detect app → get installed version → get latest version → compute status |
 | **Detector plugins** | One class per app; matches guests by name/tag/Docker image; queries the app's local HTTP API for its version |
 | **GitHubClient** | Fetches the latest release tag from GitHub Releases API; caches results for 1 hour; handles rate limits gracefully |
 | **SSHClient** | Connects to guests via paramiko; runs `docker ps` to identify running containers; executes version commands via SSH or `pct exec`; enforces a command whitelist and metacharacter guard |
-| **ConfigStore** | Reads/writes `/app/data/proxmon.db` (SQLite); single-row settings table with JSON blob; all application config lives in the database |
+| **ConfigStore** | Reads/writes `/app/data/proxmon.db` (SQLite); normalized tables (`settings`, `proxmox_hosts`, `app_config`, `guest_config`, `custom_app_defs`); per-entity CRUD with built-in secret masking |
 | **FastAPI routes** | REST API serving guests, settings, setup status, and connection test; dependency injection via `app.dependency_overrides` |
 | **React frontend** | Dashboard, per-guest detail, editable settings, 5-step setup wizard; polls `/api/guests` every 60 s |
 
@@ -105,7 +105,7 @@ Every N seconds (default: 1 hour), a background scheduler runs a full discovery 
 1. Scheduler fires (interval elapsed or manual trigger)
 2. ProxmoxClient.list_guests()
    └── GET /nodes/{node}/lxc  →  list of LXC containers
-   └── GET /nodes/{node}/qemu  →  list of VMs (if DISCOVER_VMS=true)
+   └── GET /nodes/{node}/qemu  →  list of VMs (if discover_vms enabled in settings)
 3. For each running guest (asyncio.gather, max 10 concurrent):
    a. Resolve guest IP + OS type
       └── GET /nodes/{node}/lxc/{vmid}/config  →  parse net0 ip= field + ostype
@@ -188,7 +188,7 @@ Every N seconds (default: 1 hour), a background scheduler runs a full discovery 
 |---|---|---|---|---|
 | **Sonarr** | `sonarr` | `GET /api/v3/system/status` → `version` | Sonarr/Sonarr | 8989 |
 | **Radarr** | `radarr` | `GET /api/v3/system/status` → `version` | Radarr/Radarr | 7878 |
-| **Bazarr** | `bazarr` | `GET /api/bazarr/api/v1/system/status` → `bazarr_version` | morpheus65535/bazarr | 6767 |
+| **Bazarr** | `bazarr` | `GET /api/system/status` → `data.bazarr_version` | morpheus65535/bazarr | 6767 |
 | **Prowlarr** | `prowlarr` | `GET /api/v1/system/status` → `version` | Prowlarr/Prowlarr | 9696 |
 | **Lidarr** | `lidarr` | `GET /api/v1/system/status` → `version` | Lidarr/Lidarr | 8686 |
 | **Readarr** | `readarr` | `GET /api/v1/system/status` → `version` | Readarr/Readarr | 8787 |
@@ -410,7 +410,6 @@ Step 1 — Proxmox Connection
 Step 2 — Discovery
   • Poll Interval     (seconds, 30–86400, default 3600)
   • Include VMs       (toggle, default off)
-  • Verify SSL        (toggle, default off — amber warning shown when off)
 
 Step 3 — SSH
   • Enable SSH        (toggle; collapses rest of section if off)
@@ -444,7 +443,7 @@ Key behaviors:
 
 ### Config persistence
 
-Settings are stored in a SQLite database at `/app/data/proxmon.db` (mounted as `./data:/app/data` in Docker Compose). The database uses a single `settings` table with one row containing a JSON blob.
+Settings are stored in a SQLite database at `/app/data/proxmon.db` (mounted as `./data:/app/data` in Docker Compose). The database uses normalized tables: `settings` (scalar config), `proxmox_hosts`, `app_config`, `guest_config`, and `custom_app_defs`.
 
 ---
 
@@ -624,7 +623,7 @@ installed <  latest       →  update_status = "outdated"
 
 ## 12. SSH Integration
 
-SSH is used for Docker container detection (Stage 3 of the detection pipeline) and as a fallback for version detection when the app's HTTP API probe fails. The version detection cascade (configurable via `VERSION_DETECT_METHOD`) tries API first, then `pct exec` or SSH depending on the strategy. SSH is optional — disable it with `SSH_ENABLED=false` if your guests don't run Docker or you prefer not to grant SSH access.
+SSH is used for Docker container detection (Stage 3 of the detection pipeline) and as a fallback for version detection when the app's HTTP API probe fails. The version detection cascade (configurable via `version_detect_method` in Settings) tries API first, then `pct exec` or SSH depending on the strategy. SSH is optional — disable it in Settings → SSH if your guests don't run Docker or you prefer not to grant SSH access.
 
 ### How it works
 
@@ -674,17 +673,9 @@ ssh-keyscan 192.168.1.100 192.168.1.101 ... >> ./data/known_hosts
 
 ### Authentication
 
-Key file (recommended):
-```bash
-SSH_KEY_PATH=/app/ssh/id_ed25519
-SSH_USERNAME=root
-```
+Key file (recommended): Set **SSH Key Path** to `/app/ssh/id_ed25519` and **SSH Username** to `root` in Settings → SSH.
 
-Password (fallback):
-```bash
-SSH_PASSWORD=yourpassword
-SSH_USERNAME=root
-```
+Password (fallback): Set **SSH Password** and **SSH Username** in Settings → SSH.
 
 ---
 
@@ -917,7 +908,6 @@ Returns all settings for pre-populating the settings form. Secrets shown as `"**
       "token_id": "root@pam!proxmon",
       "token_secret": "***",
       "node": "pve",
-      "verify_ssl": false,
       "ssh_username": "root",
       "ssh_password": null,
       "ssh_key_path": null,
@@ -926,7 +916,6 @@ Returns all settings for pre-populating the settings form. Secrets shown as `"**
   ],
   "poll_interval_seconds": 3600,
   "discover_vms": false,
-  "verify_ssl": false,
   "ssh_enabled": true,
   "ssh_username": "root",
   "ssh_key_path": "/app/ssh/id_rsa",
@@ -958,8 +947,7 @@ Request body:
   "proxmox_host": "https://192.168.1.10:8006",
   "proxmox_token_id": "root@pam!proxmon",
   "proxmox_token_secret": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "proxmox_node": "pve",
-  "verify_ssl": false
+  "proxmox_node": "pve"
 }
 ```
 
@@ -1000,7 +988,6 @@ Request body (all fields):
   "proxmox_node": "pve",
   "poll_interval_seconds": 3600,
   "discover_vms": false,
-  "verify_ssl": false,
   "ssh_enabled": true,
   "ssh_username": "root",
   "ssh_key_path": null,
@@ -1113,16 +1100,10 @@ uv run --extra dev pytest -v
 ```
 
 ```
-tests/test_alerting.py        17 tests  — disk threshold, cooldown, outdated transitions, enable/disable
-tests/test_config_store.py     6 tests  — load, save, merge, is_configured
-tests/test_detectors.py       37 tests  — detection matching + version fetching for all 15 apps
-tests/test_discovery.py       16 tests  — Proxmox parsing, IP resolution, config resolution, full cycle
-tests/test_github.py           8 tests  — caching, v-prefix stripping, rate limit, auth header
-tests/test_notifier.py         8 tests  — ntfy send, auth, priority, error handling, shared client
-tests/test_ssh_version_cmd.py 22 tests  — SSH version command safety validation
-─────────────────────────────────────────────────────
-Total: 169 tests, ~5 seconds
+275 tests, ~6 seconds
 ```
+
+Test files cover: alerting, auth, auth routes, config store CRUD, custom app defs, detectors, discovery, GitHub API, version normalization, notifier, API key auth, route helpers, SSH command safety, and task locking.
 
 ---
 
@@ -1245,7 +1226,7 @@ docker compose up -d --build
 ```
 proxmon/
 │
-├── backend/                          Python 3.12 / FastAPI
+├── backend/                          Python 3 / FastAPI
 │   ├── app/
 │   │   ├── __init__.py
 │   │   ├── main.py                   FastAPI app entry point
@@ -1260,15 +1241,21 @@ proxmon/
 │   │   │
 │   │   ├── api/
 │   │   │   ├── __init__.py
-│   │   │   └── routes.py             All HTTP endpoints + request/response models
-│   │   │                             • SettingsSaveRequest (Pydantic v2, field validators)
-│   │   │                             • ConnectionTestRequest
-│   │   │                             • graceful 503 when scheduler is None (unconfigured)
+│   │   │   ├── auth_routes.py        login/logout/status/change-password
+│   │   │   ├── helpers.py            run_os_update_bg, run_app_update_bg, _last_lines
+│   │   │   └── routes/
+│   │   │       ├── settings.py       settings CRUD, _keep_or_replace for scalar secrets
+│   │   │       ├── guests.py         guest endpoints, _poll_upid, os/app update
+│   │   │       ├── custom_apps.py    custom app def CRUD (uses ConfigStore directly)
+│   │   │       ├── bulk_jobs.py      bulk os_update / app_update
+│   │   │       └── tasks.py          task history endpoints
 │   │   │
 │   │   ├── core/
 │   │   │   ├── __init__.py
 │   │   │   ├── config_store.py       /app/data/proxmon.db SQLite read/write
-│   │   │   │                         • single settings row, JSON blob
+│   │   │   │                         • normalized tables (settings, proxmox_hosts, app_config, guest_config, custom_app_defs)
+│   │   │   │                         • per-entity CRUD with preserve_secrets
+│   │   │   │                         • save_full() atomic multi-table writes
 │   │   │   │                         • merge_into_settings(settings) → Settings
 │   │   │   │                         • is_configured() / get_missing_fields()
 │   │   │   │
@@ -1295,7 +1282,7 @@ proxmon/
 │   │   │   │                         • never raises (logs warnings on failure)
 │   │   │   │
 │   │   │   ├── proxmox.py            Proxmox VE async API client
-│   │   │   │                         • GET-only enforced (ALLOWED_METHODS = frozenset{"GET"})
+│   │   │   │                         • GET for discovery, POST for guest actions/backups
 │   │   │   │                         • list_guests() → LXC + optional VM
 │   │   │   │                         • get_guest_network() → (IP, os_type) from net0/config
 │   │   │   │                         • check_connection() for settings test
@@ -1315,28 +1302,22 @@ proxmon/
 │   │   ├── detectors/
 │   │   │   ├── __init__.py
 │   │   │   ├── base.py               BaseDetector ABC
-│   │   │   │                         • instance-level http_client (not class-level)
+│   │   │   │                         • http_client passed per-call (shared pool or fallback)
 │   │   │   │                         • _name_matches(): token-split matching
-│   │   │   │                         • detect(): tag → name → None
 │   │   │   │                         • match_docker_image(): substring match
 │   │   │   │                         • _http_get(): shared client or per-request fallback
 │   │   │   │
 │   │   │   ├── registry.py           ALL_DETECTORS list + DOCKER_DETECTOR + DETECTOR_MAP
-│   │   │   ├── sonarr.py
-│   │   │   ├── radarr.py
-│   │   │   ├── bazarr.py
-│   │   │   ├── prowlarr.py
-│   │   │   ├── overseerr.py
+│   │   │   ├── http_json.py          config-driven DetectorConfig entries (sonarr, radarr, etc.)
 │   │   │   ├── plex.py               XML parsing via xml.etree.ElementTree
-│   │   │   ├── immich.py
-│   │   │   ├── gitea.py
 │   │   │   ├── qbittorrent.py        plain-text response
-│   │   │   ├── sabnzbd.py
-│   │   │   ├── traefik.py
+│   │   │   ├── sabnzbd.py            custom query string auth
+│   │   │   ├── jackett.py            AppVersion key
+│   │   │   ├── librespeed_rust.py    LibreSpeed Rust detector
 │   │   │   ├── caddy.py              admin API on port 2019
-│   │   │   ├── ntfy.py
-│   │   │   ├── seerr.py              aliases: seer
-│   │   │   └── docker_generic.py     image tag parsing, no GitHub lookup
+│   │   │   ├── truenas.py            JSON-RPC 2.0 over WebSocket
+│   │   │   ├── docker_generic.py     image tag parsing, no GitHub lookup
+│   │   │   └── utils.py              shared detector utilities
 │   │   │
 │   │   └── models/
 │   │       ├── __init__.py
@@ -1349,12 +1330,19 @@ proxmon/
 │   ├── tests/
 │   │   ├── __init__.py
 │   │   ├── test_alerting.py          disk/outdated alert logic, cooldowns
-│   │   ├── test_config_store.py      config store: load, save, merge, is_configured
-│   │   ├── test_detectors.py         detection matching + version fetching (all 15 apps)
+│   │   ├── test_auth.py              password hashing + verification
+│   │   ├── test_auth_routes.py       login/logout/status/change-password endpoints
+│   │   ├── test_config_store.py      config store: load, save, CRUD, secret preservation
+│   │   ├── test_custom_app_defs.py   custom app CRUD endpoints
+│   │   ├── test_detectors.py         detection matching + version fetching
 │   │   ├── test_discovery.py         Proxmox parsing, IP resolution, config resolution, full cycle
 │   │   ├── test_github.py            caching, normalization, rate limits
+│   │   ├── test_normalize_version.py version string normalization
 │   │   ├── test_notifier.py          ntfy send, auth, errors, shared client
-│   │   └── test_ssh_version_cmd.py   SSH command whitelist + metacharacter guard
+│   │   ├── test_require_api_key.py   API key + session cookie auth
+│   │   ├── test_routes_helpers.py    route helper utilities
+│   │   ├── test_ssh_version_cmd.py   SSH command whitelist + metacharacter guard
+│   │   └── test_update_task_locking.py  task creation locking
 │   │
 │   ├── Dockerfile                    Backend-only build (dev use only)
 │   ├── pyproject.toml                hatchling build, uv deps, pytest config
@@ -1431,6 +1419,7 @@ proxmon/
 │   │       │
 │   │       ├── settings/
 │   │       │   ├── AppConfigSection.tsx    Per-app config (port, api_key, scheme, github_repo)
+│   │       │   ├── CustomAppsSection.tsx   Custom app definition CRUD
 │   │       │   └── ProxmoxHostsSection.tsx Multi-host config with per-host settings
 │   │       │
 │   │       ├── setup/
@@ -1483,27 +1472,26 @@ proxmon/
 ### Proxmox access
 
 - proxmon uses an **API token**, not your root password
-- The `ProxmoxClient` enforces `ALLOWED_METHODS = frozenset({"GET"})` — write requests are refused at the client level, not just avoided
-- The recommended `PVEAuditor` role grants read-only access only
+- The `ProxmoxClient` uses GET for discovery and POST for guest actions (start/stop/snapshot/backup)
+- The recommended `PVEAuditor` role grants read-only access; guest actions require additional permissions (e.g., `VM.PowerMgmt`, `VM.Snapshot`, `VM.Backup`)
 - Token secret is never logged; `masked_settings()` replaces it with `"****"` in all API responses
 
 ### SSH access
 
-- Commands are validated against `COMMAND_WHITELIST` (prefix match) **and** a metacharacter guard (regex rejecting `;`, `|`, `$`, `(`, `)`, `{`, `}`, `!`, `#`, `\n`, `\`)
+- Commands are validated against `COMMAND_WHITELIST` (prefix match) **and** a metacharacter guard (regex rejecting `;`, `&`, `|`, `` ` ``, `$`, `<`, `>`, `(`, `)`, `!`, `\n`, `\`, `#`)
 - Only `docker ps`, `docker inspect`, `cat`, `which`, `dpkg -l`, `rpm -q` prefixes are permitted
 - `WarningPolicy` by default; set `SSH_KNOWN_HOSTS_PATH` for `RejectPolicy` (MITM protection)
 
 ### Config database
 
-- `/app/data/proxmon.db` is a SQLite database with a single settings row
-- Token secret is stored in plaintext in the database — this is an accepted trade-off for a self-hosted homelab tool; do not expose the data volume publicly
+- `/app/data/proxmon.db` is a SQLite database with normalized tables (settings, proxmox_hosts, app_config, guest_config, custom_app_defs)
+- Secrets (token_secret, ssh_password, api_key) are stored in plaintext in the database — this is an accepted trade-off for a self-hosted homelab tool; do not expose the data volume publicly
 
 ### Network
 
 - The app listens on port 3000 by default (configurable via `PORT` env var)
 - CORS is configured with explicit allowed origins for local development; production uses same-origin
-- Forms-based authentication is enabled by default (see [§9 Login & Authentication](#9-login--authentication)); set `auth_mode=disabled` only on trusted local networks
-- Default password is `proxmon!` — change it immediately after first login
+- Authentication is disabled by default; enable it in Settings → Security (see [§9 Login & Authentication](#9-login--authentication))
 
 ### GitHub API
 
@@ -1521,7 +1509,7 @@ proxmon/
 | "Connection refused" in test-connection | Wrong host or port | Verify `PROXMOX_HOST` includes the port (`:8006`) |
 | "Authentication failed" | Wrong token ID or secret | Regenerate token in Proxmox; check format `user@realm!tokenname` |
 | "Authorization denied" | Insufficient token permissions | Add `PVEAuditor` role to the token at path `/` |
-| SSL errors with `VERIFY_SSL=true` | Self-signed certificate | Set `VERIFY_SSL=false` or install a valid cert on Proxmox |
+| SSL errors | Self-signed certificate | proxmon disables SSL verification by default; install a valid cert on Proxmox if needed |
 | Wizard keeps showing | No valid config in SQLite database | Complete the setup wizard or check that `./data` volume is mounted |
 
 ### Detection issues
@@ -1582,13 +1570,11 @@ docker compose logs --tail=100
 
 ### Phase 2 (planned)
 
-- [ ] **Update button** — trigger app update directly from the dashboard
 - [ ] **Pre-update snapshot** — automatic Proxmox snapshot before every update (rollback point)
 - [ ] **App-specific update handlers** — plugin per app (e.g. `apt upgrade sonarr`, Docker pull + restart)
 - [ ] **Audit log** — immutable record of all update actions with timestamps, outcomes, and user context
 - [ ] **Health checks** — per-app HTTP health probe (is the app actually responding, not just running?)
 - [ ] **Additional notification channels** — Gotify, Discord, generic webhook support
-- [ ] **Persistent history** — SQLite backend so version history survives restarts
 
 ### Already shipped (Phase 1.x)
 

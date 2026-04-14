@@ -80,7 +80,7 @@ async def login(body: LoginRequest, request: Request):
 
     config_store = request.app.state.config_store
     session_store = request.app.state.session_store
-    data = config_store.load()
+    data = config_store.load_auth()
 
     stored_username = data.get("auth_username", "root")
     stored_hash = data.get("auth_password_hash", "")
@@ -131,7 +131,7 @@ async def auth_status(request: Request):
     """Return current auth mode and whether the caller is authenticated."""
     config_store = request.app.state.config_store
     session_store = request.app.state.session_store
-    data = config_store.load()
+    data = config_store.load_auth()
     auth_mode = data.get("auth_mode", "disabled")
 
     if auth_mode == "disabled":
@@ -157,7 +157,7 @@ async def change_password(body: ChangePasswordRequest, request: Request):
         return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 
     config_store = request.app.state.config_store
-    data = config_store.load()
+    data = config_store.load_auth()
 
     stored_hash = data.get("auth_password_hash", "")
     # Allow recovery from an empty-hash state (e.g. migration/older config); in that
@@ -165,8 +165,7 @@ async def change_password(body: ChangePasswordRequest, request: Request):
     if stored_hash and not verify_password(body.current_password, stored_hash):
         return JSONResponse({"detail": "Current password is incorrect"}, status_code=400)
 
-    data["auth_password_hash"] = hash_password(body.new_password)
-    config_store.save(data)
+    config_store.update_scalar("auth_password_hash", hash_password(body.new_password))
     # Invalidate every other active session after password rotation.
     session_store.revoke_all(except_token=token)
     logger.info("Auth password changed")

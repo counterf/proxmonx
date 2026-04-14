@@ -4,8 +4,6 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import NamedTuple
-from urllib.parse import urlparse
-
 import httpx
 
 from app.config import ProxmoxHostConfig, Settings  # Settings kept for DiscoveryEngine type hint
@@ -463,9 +461,8 @@ class DiscoveryEngine:
             return
 
         vmid = guest.id.rsplit(":", 1)[-1]
-        ssh_host = _extract_ssh_host(host_config.host)
         ssh_kwargs = dict(
-            proxmox_host=ssh_host,
+            proxmox_host=host_config.host,
             vmid=vmid,
             ssh_username=host_config.ssh_username,
             ssh_key_path=host_config.ssh_key_path,
@@ -655,7 +652,7 @@ class DiscoveryEngine:
         ):
             return False
         raw_vmid = guest.id.split(":")[-1] if ":" in guest.id else guest.id
-        proxmox_ip = _extract_host_ip(host_config.host)
+        proxmox_ip = _extract_ssh_host(host_config.host) or None  # "" → None
         if not proxmox_ip:
             return False
         try:
@@ -734,19 +731,6 @@ class DiscoveryEngine:
         if not await self._try_ssh(guest, ssh_version_cmd, ssh_username, ssh_key_path, ssh_password):
             await self._try_pct_exec(guest, host_config, ssh_version_cmd)
 
-
-def _extract_host_ip(host_url: str) -> str | None:
-    """Extract hostname/IP from a Proxmox host URL.
-
-    Handles formats like ``https://192.168.1.10:8006`` or bare ``192.168.1.10``.
-    """
-    if not host_url:
-        return None
-    if "://" in host_url:
-        parsed = urlparse(host_url)
-        return parsed.hostname
-    # Bare hostname/IP, possibly with port
-    return host_url.split(":")[0]
 
 
 def _determine_update_status(

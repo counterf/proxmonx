@@ -12,6 +12,13 @@ from app.core.task_store import TaskRecord, TaskStore
 from app.config import Settings
 
 
+class _FakeTask:
+    """Minimal stub replacing MagicMock — only implements what production code calls."""
+
+    def add_done_callback(self, cb):
+        pass
+
+
 class _SchedulerStub:
     def __init__(self, guests):
         self.guests = guests
@@ -23,17 +30,15 @@ class _SchedulerStub:
 def _make_guest_routes_app(tmp_path):
     db_path = str(tmp_path / "test.db")
     config_store = ConfigStore(db_path)
-    config_store.save({
-        "proxmox_hosts": [{
-            "id": "pve1",
-            "label": "PVE 1",
-            "host": "https://pve1.local:8006",
-            "token_id": "root@pam!proxmon",
-            "token_secret": "secret",
-            "node": "pve1",
-            "pct_exec_enabled": True,
-        }],
-    })
+    config_store.save_full({}, hosts=[{
+        "id": "pve1",
+        "label": "PVE 1",
+        "host": "https://pve1.local:8006",
+        "token_id": "root@pam!proxmon",
+        "token_secret": "secret",
+        "node": "pve1",
+        "pct_exec_enabled": True,
+    }])
     settings = config_store.merge_into_settings(Settings())
     task_store = TaskStore(db_path)
     guest = SimpleNamespace(
@@ -50,6 +55,7 @@ def _make_guest_routes_app(tmp_path):
     app = FastAPI()
     app.state.config_store = config_store
     app.state.settings = settings
+    app.state.background_tasks = set()
     app.dependency_overrides[_get_scheduler] = lambda: scheduler
     app.dependency_overrides[_get_settings] = lambda: settings
     app.dependency_overrides[_get_config_store] = lambda: config_store
@@ -112,7 +118,7 @@ class TestUpdateTaskLocking:
 
         def _fake_create_task(coro):
             coro.close()
-            return SimpleNamespace()
+            return _FakeTask()
 
         monkeypatch.setattr(guests_routes.asyncio, "create_task", _fake_create_task)
 

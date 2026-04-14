@@ -4,7 +4,7 @@
 Proxmox monitoring dashboard. Discovers LXC/VM guests across multiple Proxmox hosts, detects the app running inside each guest, compares installed vs latest GitHub release version, and supports remote actions (OS update, app update, snapshot, backup, start/stop/restart).
 
 ## Stack
-- Backend: Python 3.12, FastAPI, httpx, sqlite3 (stdlib), uv
+- Backend: Python 3, FastAPI, httpx, sqlite3 (stdlib), uv
 - Frontend: React 18, TypeScript, Vite, Tailwind CSS
 - Infra: Docker Compose, GitHub Actions (ghcr.io)
 
@@ -14,30 +14,31 @@ Proxmox monitoring dashboard. Discovers LXC/VM guests across multiple Proxmox ho
 
 ### Core
 - `backend/app/config.py` -- Settings (pydantic-settings); AppConfig (per-app/guest overrides); CustomAppDef; ProxmoxHostConfig
-- `backend/app/core/config_store.py` -- SQLite config persistence (single settings row, JSON blob for complex fields)
+- `backend/app/core/config_store.py` -- SQLite config persistence; normalized tables (`settings`, `proxmox_hosts`, `app_config`, `guest_config`, `custom_app_defs`); per-entity CRUD with built-in secret masking (`preserve_secrets`); `save_full()` for atomic multi-table writes; `update_scalar(key, value)` for targeted single-field settings updates; `load()` assembles full dict from all tables
 - `backend/app/core/discovery.py` -- main orchestration: guest discovery → app detection → version check → community-script check; handles `forced_detector` and `version_host` overrides
 - `backend/app/core/scheduler.py` -- asyncio background polling; `trigger_guest_refresh(guest_id)` (fire-and-forget); `refresh_single_guest_awaitable(guest_id)` (awaitable, returns bool, used by post-update retry loop); `trigger_refresh()` (full cycle)
 - `backend/app/core/proxmox.py` -- ProxmoxClient: `list_guests()`, `guest_action()`, `get_task_status()`, `create_backup()`, `list_backup_storages()`, `get_guest_network()`
 - `backend/app/core/ssh.py` -- SSHClient; `OS_UPDATE_COMMANDS` dict maps Proxmox ostype → package manager command; `run_os_update()`, `run_app_update()`, `run_pending_updates_list()`, `run_reboot_required_check()`, `run_community_script_check()`; `_strip_ansi()` strips ANSI escape codes from command output; `_extract_ssh_host()` strips scheme/port from Proxmox host URL before SSH
 - `backend/app/core/github.py` -- GitHub releases API client with 1h TTL cache; `parse_github_repo()` normalizes URLs; `test_repo()` for UI validation
 - `backend/app/core/task_store.py` -- TaskRecord (id, guest_id, guest_name, host_id, action, status, started_at, finished_at, output, detail, batch_id); retains last 500 records; auto-reconciles stale running tasks on restart
-- `backend/app/core/session_store.py` -- in-memory session management (24h TTL)
+- `backend/app/core/session_store.py` -- SQLite-backed session management (24h TTL)
 - `backend/app/core/auth.py` -- password hashing (scrypt) and verification; login rate limiting (10 attempts / 60s / IP)
 - `backend/app/core/notifier.py` -- NtfyNotifier (HTTP POST); AlertManager evaluates disk threshold + outdated-app alerts after each discovery cycle
 
 ### API routes
 - `backend/app/api/routes/guests.py` -- guest endpoints; snapshot name resolved here before calling `guest_action()` (auto-generates `proxmon-YYYYMMDD-HHMMSS` if not provided); `_poll_upid()` background task polls Proxmox UPID for completion; `POST /api/guests/{id}/os-update` and `/app-update` fire background tasks via `run_os_update_bg` / `run_app_update_bg`
-- `backend/app/api/routes/settings.py` -- settings endpoints; `_keep_or_replace()` prevents `"***"` mask from overwriting real secrets
+- `backend/app/api/routes/settings.py` -- settings endpoints; `_keep_or_replace()` handles scalar secrets (github_token, ssh_password, ntfy_token, proxmon_api_key); host/app_config/guest_config secrets handled by ConfigStore CRUD layer
+- `backend/app/api/routes/custom_apps.py` -- custom app definition CRUD; uses ConfigStore CRUD methods directly (list, get, upsert, delete)
 - `backend/app/api/routes/bulk_jobs.py` -- bulk os_update / app_update across multiple guests; sequential per-guest execution
 - `backend/app/api/routes/tasks.py` -- task history endpoints (list, get, clear)
 - `backend/app/api/auth_routes.py` -- login/logout/status/change-password endpoints
-- `backend/app/api/helpers.py` -- `run_os_update_bg()`, `run_app_update_bg()`; `_last_lines(text, n=3)` extracts last N non-empty lines for task detail; `_APP_UPDATE_PROBE_INTERVAL=5`, `_APP_UPDATE_RETRY_BUDGET=60` control post-update version probe retry
+- `backend/app/api/helpers.py` -- `run_os_update_bg()`, `run_app_update_bg()`; `_log_task_exception()` done-callback for fire-and-forget tasks; `_last_lines(text, n=3)` extracts last N non-empty lines for task detail; `_APP_UPDATE_PROBE_INTERVAL=5`, `_APP_UPDATE_RETRY_BUDGET=60` control post-update version probe retry
 - `backend/app/middleware/auth_middleware.py` -- session cookie + API key auth; exempts /health, /api/auth/*, /api/setup/status; loopback-only setup endpoints
 
 ### Detectors
 - `backend/app/detectors/http_json.py` -- config-driven `DetectorConfig` entries for 13 apps (Sonarr, Radarr, Bazarr, Prowlarr, Lidarr, Readarr, Whisparr, Immich, Overseerr, Seerr, Gitea, Traefik, ntfy); add new simple apps here
 - `backend/app/detectors/registry.py` -- `ALL_DETECTORS` list, `DETECTOR_MAP`; `load_custom_detectors()` for runtime injection of user-defined apps; called at startup and after every custom-app CRUD save
-- `backend/app/detectors/truenas.py` -- TrueNAS; JSON-RPC 2.0 over WebSocket (`wss://{host}/api/current`); auth via `auth.login_with_api_key`; installed from `system.info`, latest from `update.status`; **latest is cached in `_cached_latest` during `get_installed_version()`** — no separate `get_latest_version()` call
+- `backend/app/detectors/truenas.py` -- TrueNAS; JSON-RPC 2.0 over WebSocket (`wss://{host}/api/current`); auth via `auth.login_with_api_key`; installed from `system.info`, latest from `update.status`; returns `(installed, cached_latest)` tuple — `get_latest_version()` returns None
 - Specialized: `plex.py`, `caddy.py`, `qbittorrent.py`, `sabnzbd.py`, `jackett.py`, `librespeed_rust.py`, `docker_generic.py`
 
 ### Frontend
@@ -78,7 +79,7 @@ Register in `backend/app/detectors/registry.py` via `make_detector("name")` (con
 ---
 
 ## Config storage
-SQLite at `/app/data/proxmon.db`. Single `settings` table, one row. Scalar fields are stored as columns; complex fields (`proxmox_hosts`, `app_config`, `guest_config`, `custom_app_defs`) as JSON blobs. Only two env vars are recognized at runtime: `CONFIG_DB_PATH` (default `/app/data/proxmon.db`) and `PORT` (default `3000`).
+SQLite at `/app/data/proxmon.db`. Five tables: `settings` (one row, scalar fields only), `proxmox_hosts` (one row per host), `app_config` (one row per app override), `guest_config` (one row per guest override), `custom_app_defs` (one row per custom app). ConfigStore exposes per-entity CRUD (`list_hosts`, `get_host`, `upsert_host`, `delete_host`, etc.) with built-in secret masking via `preserve_secrets`. `save_full()` writes scalars + all entity upserts in a single transaction. `update_scalar(key, value)` updates a single settings column without touching normalized tables (used by `change_password`). `load()` assembles the full unified dict by joining across all tables. Only two env vars are recognized at runtime: `CONFIG_DB_PATH` (default `/app/data/proxmon.db`) and `PORT` (default `3000`).
 
 ---
 
@@ -89,7 +90,7 @@ Note: `rocky` and `alma` containers are configured as `centos` in Proxmox — th
 ---
 
 ## Tests
-`cd backend && pytest tests/` -- tests across test_detectors.py, test_discovery.py, test_github.py, test_config_store.py, test_ssh_version_cmd.py, test_notifier.py, test_alerting.py, test_routes_helpers.py, test_auth_routes.py, test_custom_app_defs.py
+`cd backend && pytest tests/` -- 275 tests across test_alerting.py, test_auth.py, test_auth_routes.py, test_config_store.py, test_custom_app_defs.py, test_detectors.py, test_discovery.py, test_github.py, test_normalize_version.py, test_notifier.py, test_require_api_key.py, test_routes_helpers.py, test_ssh_version_cmd.py, test_update_task_locking.py
 
 ---
 
@@ -110,28 +111,32 @@ docker compose build && docker compose up -d
 ## Common pitfalls
 
 **Secrets & masking**
-- GitHub token, SSH password, and api_key must NOT be pre-populated with `"***"` when saving settings — `_keep_or_replace()` in settings route handles this; verify any new secret fields follow the same pattern.
+- Scalar secrets (github_token, ssh_password, ntfy_token, proxmon_api_key) use `_keep_or_replace()` in the settings route to prevent `"***"` mask from overwriting real values.
+- Nested secrets inside hosts, app_config, and guest_config (token_secret, ssh_password, api_key) are handled by ConfigStore CRUD methods via `preserve_secrets=True` — the CRUD layer reads the existing row and keeps `"***"` or `None` values unchanged.
 
 **Detectors**
 - All detectors default to `http://`; use per-app `scheme=https` for HTTPS-only apps.
 - `HttpJsonDetector.get_installed_version` raises `ProbeError` on HTTP/connection failures; `_check_version` in discovery.py catches it and stores the message in `guest.probe_error`; surfaced in guest detail UI.
 - Custom app detectors are injected into `ALL_DETECTORS`/`DETECTOR_MAP` at runtime via `load_custom_detectors()`; called at startup (main.py lifespan) and after every CRUD save.
 - User-defined app names must not collide with built-in detector names; collisions are logged and skipped.
-- TrueNAS `get_latest_version()` has no host/api_key params — latest version is cached in `self._cached_latest` during `get_installed_version()` and returned from there; don't refactor to decouple them.
+- TrueNAS `get_installed_version()` returns a `(installed, latest)` tuple — latest is fetched from `update.status` during the same WebSocket session and returned as `cached_latest`. `get_latest_version()` returns `None`; discovery.py unpacks the tuple directly. Don't refactor to decouple them.
 
 **Per-guest config**
 - `forced_detector` and `version_host` live on `AppConfig` (shared model) but are semantically guest-only; only the guest config save path uses them.
 - `version_host` overrides both the version probe IP **and** the clickable web URL link for a guest.
 
+**Background tasks**
+- All fire-and-forget `asyncio.create_task()` calls in route handlers must store the task in `app.state.background_tasks` (a `set`) and add `task.add_done_callback(bg_tasks.discard)` + `task.add_done_callback(_log_task_exception)`. Without this, Python holds only a weak reference and the task can be GC'd before completion.
+
 **SSH**
-- `_extract_ssh_host()` is required before any SSH call — `ProxmoxHostConfig.host` may contain a full URL (`https://192.168.1.10:8006`), not a bare hostname.
+- SSH methods (`run_os_update`, `run_app_update`, `run_pending_updates_list`, etc.) call `_extract_ssh_host()` internally — callers should pass `host_config.host` (the raw URL) directly, not pre-extract.
 - SSH command whitelist allows: `docker ps`, `docker inspect`, `cat`, `which`, `dpkg -l`, `rpm -q`.
 - User-configured `ssh_version_cmd` is validated with `_is_version_cmd_safe()` — no `;`, `&&`, `||`, `$()`, backticks; pipes only to safe filters (`awk grep cut head tail sed tr xargs`).
 - `_strip_ansi()` is applied to `run_app_update()` output — community scripts emit terminal control sequences that render as garbage without stripping.
 
 **Multi-host**
 - Guest IDs are namespaced as `{host_id}:{vmid}` to prevent collisions across hosts.
-- `ProxmoxHostConfig.host` is a full URL; always pass through `_extract_ssh_host()` before SSH.
+- `ProxmoxHostConfig.host` is a full URL; SSH methods extract the hostname internally.
 
 **Disk usage**
 - LXC disk comes from Proxmox list endpoint directly.
@@ -152,7 +157,7 @@ docker compose build && docker compose up -d
 
 **Settings payload**
 - `Settings.tsx` AppConfig payload builder must include ALL per-app fields when posting — easy to miss new fields when adding them.
-- `proxmox_hosts` list is merged (not replaced) on save to preserve per-host fields not sent by the UI.
+- `save_full()` uses per-host `upsert_host()` calls — each host is upserted individually with `preserve_secrets=True`, so partial saves are safe. Hosts not in the payload are deleted (full replacement semantics at the list level).
 
 **Shell metacharacters**
 - `SHELL_METACHARACTERS` regex blocks: `; & | \` $ < > ( ) ! \n \\ #`

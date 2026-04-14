@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
 from app.config import ProxmoxHostConfig, Settings
+from app.core.config_store import _CONFIG_SECRETS
 from app.core.proxmox import ProxmoxClient
 from app.core.task_store import TaskRecord, TaskStore
 from app.detectors.registry import DETECTOR_MAP
@@ -23,6 +24,7 @@ from app.api.helpers import (
     _get_scheduler,
     _get_settings,
     _get_task_store,
+    _log_task_exception,
     _reload_settings_into_engine,
     _require_api_key,
     run_app_update_bg,
@@ -46,11 +48,14 @@ async def _poll_upid(
     scheduler=None,
 ) -> None:
     """Background task: poll Proxmox for UPID completion and update the task record."""
+    own_client: httpx.AsyncClient | None = None
     try:
         for _ in range(60):  # poll every 10s up to 10 min
             await asyncio.sleep(10)
             safe_client = http_client if (http_client and not http_client.is_closed) else None
-            client = ProxmoxClient(host_config, http_client=safe_client)
+            if safe_client is None and own_client is None:
+                own_client = httpx.AsyncClient(timeout=10.0, verify=False, follow_redirects=True)
+            client = ProxmoxClient(host_config, http_client=safe_client or own_client)
             try:
                 data = await client.get_task_status(upid)
             except Exception:
@@ -82,6 +87,9 @@ async def _poll_upid(
             task_store.update(task_id, status="failed", detail="internal polling error", finished_at=_now_iso())
         except Exception:
             logger.warning("Failed to mark task %s as failed after _poll_upid crash", task_id, exc_info=True)
+    finally:
+        if own_client is not None:
+            await own_client.aclose()
 
 
 # --- Request/Response models ---
@@ -178,8 +186,8 @@ async def save_guest_config(
     if body.version_host is not None and body.version_host != "":
         merged["version_host"] = body.version_host
 
-    # Strip None values (None means "clear" or "keep existing" — CRUD handles secrets)
-    merged = {k: v for k, v in merged.items() if v is not None}
+    # Strip None values — but keep secret keys so CRUD's preserve_secrets can handle them
+    merged = {k: v for k, v in merged.items() if v is not None or k in _CONFIG_SECRETS}
 
     if merged:
         config_store.upsert_guest_config(guest_id, merged)
@@ -249,7 +257,11 @@ async def perform_guest_action(
         task_store.update(task_id, status="running", detail=upid)
         success_detail = f"Snapshot '{snapshot_name}' created" if snapshot_name else None
         http_client = getattr(request.app.state, "http_client", None)
-        asyncio.create_task(_poll_upid(task_store, host_config, task_id, upid, success_detail, http_client=http_client, guest_id=guest_id, scheduler=scheduler))
+        bg_tasks: set = getattr(request.app.state, "background_tasks", set())
+        task = asyncio.create_task(_poll_upid(task_store, host_config, task_id, upid, success_detail, http_client=http_client, guest_id=guest_id, scheduler=scheduler))
+        bg_tasks.add(task)
+        task.add_done_callback(bg_tasks.discard)
+        task.add_done_callback(_log_task_exception)
         return {"status": "ok", "task": upid}
     except httpx.HTTPStatusError as exc:
         # Extract the Proxmox error message
@@ -288,6 +300,7 @@ async def refresh_guest(
 @router.post("/api/guests/{guest_id}/os-update", dependencies=[Depends(_require_api_key)])
 async def os_update_guest(
     guest_id: str,
+    request: Request,
     batch_id: str | None = None,
     scheduler=Depends(_get_scheduler),
     config_store=Depends(_get_config_store),
@@ -335,9 +348,13 @@ async def os_update_guest(
     ))
 
     try:
-        asyncio.create_task(run_os_update_bg(
+        bg_tasks: set = getattr(request.app.state, "background_tasks", set())
+        task = asyncio.create_task(run_os_update_bg(
             task_id, guest_id, ssh, host_config, vmid, guest.os_type, scheduler, task_store,
         ))
+        bg_tasks.add(task)
+        task.add_done_callback(bg_tasks.discard)
+        task.add_done_callback(_log_task_exception)
     except Exception as exc:
         task_store.update(
             task_id,
@@ -353,6 +370,7 @@ async def os_update_guest(
 @router.post("/api/guests/{guest_id}/app-update", dependencies=[Depends(_require_api_key)])
 async def app_update_guest(
     guest_id: str,
+    request: Request,
     batch_id: str | None = None,
     scheduler=Depends(_get_scheduler),
     config_store=Depends(_get_config_store),
@@ -400,9 +418,13 @@ async def app_update_guest(
     ))
 
     try:
-        asyncio.create_task(run_app_update_bg(
+        bg_tasks: set = getattr(request.app.state, "background_tasks", set())
+        task = asyncio.create_task(run_app_update_bg(
             task_id, guest_id, ssh, host_config, vmid, scheduler, task_store,
         ))
+        bg_tasks.add(task)
+        task.add_done_callback(bg_tasks.discard)
+        task.add_done_callback(_log_task_exception)
     except Exception as exc:
         task_store.update(
             task_id,
@@ -453,7 +475,11 @@ async def backup_guest(
         logger.info("Backup queued for guest %s -> %s", guest_id, upid)
         task_store.update(task_id, status="running", detail=upid)
         http_client = getattr(request.app.state, "http_client", None)
-        asyncio.create_task(_poll_upid(task_store, host_config, task_id, upid, f"Backed up to {host_config.backup_storage}", http_client=http_client, guest_id=guest_id, scheduler=scheduler))
+        bg_tasks: set = getattr(request.app.state, "background_tasks", set())
+        task = asyncio.create_task(_poll_upid(task_store, host_config, task_id, upid, f"Backed up to {host_config.backup_storage}", http_client=http_client, guest_id=guest_id, scheduler=scheduler))
+        bg_tasks.add(task)
+        task.add_done_callback(bg_tasks.discard)
+        task.add_done_callback(_log_task_exception)
         return {"status": "ok", "task": upid}
     except httpx.HTTPStatusError as exc:
         detail: str = exc.response.reason_phrase or f"Proxmox API error: {exc.response.status_code}"

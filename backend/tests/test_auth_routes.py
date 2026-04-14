@@ -28,7 +28,7 @@ def _make_app(tmp_path, auth_mode="forms", password="proxmon!", **extra_config):
         "auth_password_hash": hash_password(password) if password else "",
         **extra_config,
     }
-    config_store.save(data)
+    config_store.save_full(data)
 
     app = FastAPI()
     app.state.config_store = config_store

@@ -1,11 +1,12 @@
 """Tests for ConfigStore: SQLite-backed config persistence."""
 
+import sqlite3
 from pathlib import Path
 
 import pytest
 
 from app.config import AppConfig, CustomAppDef, ProxmoxHostConfig, Settings
-from app.core.config_store import ConfigStore, _MIGRATABLE_COLUMNS, _CREATE_TABLE
+from app.core.config_store import ConfigStore, _ALL_MIGRATABLE, _CREATE_TABLE
 
 
 @pytest.fixture()
@@ -32,7 +33,7 @@ _FULL_CONFIG = {
 class TestSaveLoadRoundTrip:
     def test_roundtrip(self, store: ConfigStore) -> None:
         original = {"poll_interval_seconds": 120, "discover_vms": True}
-        store.save(original)
+        store.save_full(original)
         assert store.load() == original
 
     def test_load_empty_db_returns_empty_dict(self, store: ConfigStore) -> None:
@@ -44,15 +45,13 @@ class TestIsConfigured:
         assert store.is_configured() is False
 
     def test_true_when_host_fully_configured(self, store: ConfigStore) -> None:
-        store.save({
-            "proxmox_hosts": [{
-                "id": "pve1", "label": "PVE1",
-                "host": "https://10.0.0.1:8006",
-                "token_id": "root@pam!test",
-                "token_secret": "secret-uuid",
-                "node": "pve",
-            }],
-        })
+        store.save_full({}, hosts=[{
+            "id": "pve1", "label": "PVE1",
+            "host": "https://10.0.0.1:8006",
+            "token_id": "root@pam!test",
+            "token_secret": "secret-uuid",
+            "node": "pve",
+        }])
         assert store.is_configured() is True
 
 
@@ -65,8 +64,9 @@ class TestGetMissingFields:
 
 class TestSaveIdempotent:
     def test_second_save_overwrites_first(self, store: ConfigStore) -> None:
-        store.save({"log_level": "debug"})
-        store.save({"poll_interval_seconds": 60})
+        """save_full uses full-replace semantics — omitted scalars revert to NULL."""
+        store.save_full({"log_level": "debug"})
+        store.save_full({"poll_interval_seconds": 60})
         data = store.load()
         assert "log_level" not in data
         assert data["poll_interval_seconds"] == 60
@@ -74,15 +74,16 @@ class TestSaveIdempotent:
 
 class TestMergeIntoSettings:
     def test_merges_basic_fields(self, store: ConfigStore) -> None:
-        store.save({"poll_interval_seconds": 120})
+        store.save_full({"poll_interval_seconds": 120})
         result = store.merge_into_settings(Settings())
         assert result.poll_interval_seconds == 120
 
     def test_merges_app_config(self, store: ConfigStore) -> None:
-        store.save({
-            **_FULL_CONFIG,
-            "app_config": {"sonarr": {"port": 9999, "api_key": "abc123"}},
-        })
+        store.save_full(
+            {},
+            hosts=_FULL_CONFIG["proxmox_hosts"],
+            app_configs={"sonarr": {"port": 9999, "api_key": "abc123"}},
+        )
         result = store.merge_into_settings(Settings())
         assert "sonarr" in result.app_config
         assert isinstance(result.app_config["sonarr"], AppConfig)
@@ -90,10 +91,8 @@ class TestMergeIntoSettings:
         assert result.app_config["sonarr"].api_key == "abc123"
 
     def test_merges_guest_config(self, store: ConfigStore) -> None:
-        store.save({
-            **_FULL_CONFIG,
-            "guest_config": {"pve1:100": {"port": 8080, "scheme": "https"}},
-        })
+        store.save_full({}, hosts=_FULL_CONFIG["proxmox_hosts"])
+        store.upsert_guest_config("pve1:100", {"port": 8080, "scheme": "https"})
         result = store.merge_into_settings(Settings())
         assert "pve1:100" in result.guest_config
         assert isinstance(result.guest_config["pve1:100"], AppConfig)
@@ -101,42 +100,54 @@ class TestMergeIntoSettings:
         assert result.guest_config["pve1:100"].scheme == "https"
 
     def test_merges_proxmox_hosts(self, store: ConfigStore) -> None:
-        store.save({
-            **_FULL_CONFIG,
-            "proxmox_hosts": [{
-                "id": "pve1", "label": "PVE1",
-                "host": "https://10.0.0.1:8006",
-                "token_id": "root@pam!test", "token_secret": "secret",
-                "node": "pve",
-            }],
-        })
+        store.save_full({}, hosts=[{
+            "id": "pve1", "label": "PVE1",
+            "host": "https://10.0.0.1:8006",
+            "token_id": "root@pam!test", "token_secret": "secret",
+            "node": "pve",
+        }])
         result = store.merge_into_settings(Settings())
         assert len(result.proxmox_hosts) == 1
         assert isinstance(result.proxmox_hosts[0], ProxmoxHostConfig)
         assert result.proxmox_hosts[0].id == "pve1"
 
-    def test_skips_invalid_app_config_entries(self, store: ConfigStore) -> None:
-        store.save({
-            **_FULL_CONFIG,
-            "app_config": {
-                "sonarr": {"port": 8989},
-                "bad_entry": "not-a-dict",
-            },
-        })
+    def test_skips_invalid_app_config_entries(self, store: ConfigStore, db_path: Path) -> None:
+        store.save_full(
+            {},
+            hosts=_FULL_CONFIG["proxmox_hosts"],
+            app_configs={"sonarr": {"port": 8989}},
+        )
+        # Inject a corrupt row: non-numeric string in the INTEGER port column.
+        # SQLite allows this (type affinity); merge_into_settings must skip it.
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO app_config (app_name, port) VALUES (?, ?)",
+            ("bad_entry", "not-a-number"),
+        )
+        conn.commit()
+        conn.close()
         result = store.merge_into_settings(Settings())
         assert "sonarr" in result.app_config
         assert result.app_config["sonarr"].port == 8989
+        # Corrupt row must have been skipped
         assert "bad_entry" not in result.app_config
 
-    def test_skips_invalid_proxmox_host_entries(self, store: ConfigStore) -> None:
-        store.save({
-            **_FULL_CONFIG,
-            "proxmox_hosts": [
-                {"id": "pve1", "label": "PVE1", "host": "https://10.0.0.1:8006",
-                 "token_id": "root@pam!test", "token_secret": "secret", "node": "pve"},
-                "not-a-dict",
-            ],
+    def test_skips_invalid_proxmox_host_entries(self, store: ConfigStore, monkeypatch) -> None:
+        store.upsert_host({
+            "id": "pve1", "label": "PVE1", "host": "https://10.0.0.1:8006",
+            "token_id": "root@pam!test", "token_secret": "secret", "node": "pve",
         })
+        valid_host = store.list_hosts()[0]
+        # ProxmoxHostConfig is very permissive (no field validators), so SQL
+        # corruption alone cannot trigger a validation error.  Simulate a
+        # corrupt row returned by the load layer (e.g. schema mismatch after a
+        # failed migration) by injecting a dict missing the required 'id' key.
+        corrupt_host = {"label": "bad", "host": "x"}
+
+        def _patched_list_hosts(conn):
+            return [valid_host, corrupt_host]
+
+        monkeypatch.setattr(ConfigStore, "_list_hosts_conn", staticmethod(_patched_list_hosts))
         result = store.merge_into_settings(Settings())
         assert len(result.proxmox_hosts) == 1
         assert result.proxmox_hosts[0].id == "pve1"
@@ -147,28 +158,35 @@ class TestMergeIntoSettings:
         assert result.poll_interval_seconds == original.poll_interval_seconds
 
     def test_merges_custom_app_defs(self, store: ConfigStore) -> None:
-        store.save({
-            **_FULL_CONFIG,
-            "custom_app_defs": [
-                {"name": "mealie", "display_name": "Mealie", "default_port": 9925},
-            ],
-        })
+        store.save_full({}, hosts=_FULL_CONFIG["proxmox_hosts"])
+        store.upsert_custom_app_def(
+            {"name": "mealie", "display_name": "Mealie", "default_port": 9925},
+        )
         result = store.merge_into_settings(Settings())
         assert len(result.custom_app_defs) == 1
         assert isinstance(result.custom_app_defs[0], CustomAppDef)
         assert result.custom_app_defs[0].name == "mealie"
         assert result.custom_app_defs[0].default_port == 9925
 
-    def test_skips_invalid_custom_app_defs(self, store: ConfigStore) -> None:
-        store.save({
-            **_FULL_CONFIG,
-            "custom_app_defs": [
-                {"name": "good-app", "display_name": "Good", "default_port": 8080},
-                "not-a-dict",
-                {"name": "BAD_NAME", "display_name": "Bad", "default_port": 80},
-            ],
-        })
+    def test_skips_invalid_custom_app_defs(self, store: ConfigStore, db_path: Path) -> None:
+        store.save_full({}, hosts=_FULL_CONFIG["proxmox_hosts"])
+        store.upsert_custom_app_def(
+            {"name": "good-app", "display_name": "Good", "default_port": 8080},
+        )
+        # Inject a corrupt row via raw SQL — uppercase name fails CustomAppDef
+        # validator (must match ^[a-z][a-z0-9-]{1,31}$).
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO custom_app_defs"
+            " (name, display_name, default_port, scheme, aliases,"
+            "  docker_images, accepts_api_key, version_keys, strip_v)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("BAD_NAME", "Bad", 80, "http", "[]", "[]", 0, '["version"]', 0),
+        )
+        conn.commit()
+        conn.close()
         result = store.merge_into_settings(Settings())
+        # Only the valid entry survives; corrupt row is skipped
         assert len(result.custom_app_defs) == 1
         assert result.custom_app_defs[0].name == "good-app"
 
@@ -176,24 +194,20 @@ class TestMergeIntoSettings:
 
 class TestGetMissingFieldsMultiHost:
     def test_configured_when_host_has_all_fields(self, store: ConfigStore) -> None:
-        store.save({
-            "proxmox_hosts": [{
-                "id": "pve1", "label": "PVE1",
-                "host": "https://10.0.0.1:8006",
-                "token_id": "root@pam!test",
-                "token_secret": "secret",
-                "node": "pve",
-            }],
+        store.upsert_host({
+            "id": "pve1", "label": "PVE1",
+            "host": "https://10.0.0.1:8006",
+            "token_id": "root@pam!test",
+            "token_secret": "secret",
+            "node": "pve",
         })
         assert store.get_missing_fields() == []
 
     def test_missing_when_host_lacks_fields(self, store: ConfigStore) -> None:
-        store.save({
-            "proxmox_hosts": [{
-                "id": "pve1", "label": "PVE1",
-                "host": "https://10.0.0.1:8006",
-                "token_id": "", "token_secret": "", "node": "",
-            }],
+        store.upsert_host({
+            "id": "pve1", "label": "PVE1",
+            "host": "https://10.0.0.1:8006",
+            "token_id": "", "token_secret": "", "node": "",
         })
         missing = store.get_missing_fields()
         assert "token_id" in missing
@@ -201,12 +215,10 @@ class TestGetMissingFieldsMultiHost:
         assert "node" in missing
 
     def test_configured_if_any_host_is_complete(self, store: ConfigStore) -> None:
-        store.save({
-            "proxmox_hosts": [
-                {"id": "bad", "label": "Bad", "host": "", "token_id": "", "token_secret": "", "node": ""},
-                {"id": "pve1", "label": "PVE1", "host": "https://10.0.0.1:8006",
-                 "token_id": "root@pam!test", "token_secret": "secret", "node": "pve"},
-            ],
+        store.upsert_host({"id": "bad", "label": "Bad", "host": "", "token_id": "", "token_secret": "", "node": ""})
+        store.upsert_host({
+            "id": "pve1", "label": "PVE1", "host": "https://10.0.0.1:8006",
+            "token_id": "root@pam!test", "token_secret": "secret", "node": "pve",
         })
         assert store.get_missing_fields() == []
 
@@ -258,7 +270,7 @@ class TestColumnMigration:
         conn.close()
 
         store = ConfigStore(str(db_path))
-        store.save({"poll_interval_seconds": 120, "discover_vms": True, "proxmon_api_key": "abc"})
+        store.save_full({"poll_interval_seconds": 120, "discover_vms": True, "proxmon_api_key": "abc"})
         data = store.load()
         assert data["poll_interval_seconds"] == 120
         assert data["discover_vms"] is True
@@ -267,15 +279,15 @@ class TestColumnMigration:
     def test_no_op_on_fresh_db(self, db_path: Path) -> None:
         """On a fresh database, migration should be a no-op (no errors)."""
         store = ConfigStore(str(db_path))
-        store.save({"log_level": "debug"})
+        store.save_full({"log_level": "debug"})
         assert store.load()["log_level"] == "debug"
 
 
 class TestMigratableColumnsDrift:
-    """Guard against _MIGRATABLE_COLUMNS drifting from _CREATE_TABLE."""
+    """Guard against _ALL_MIGRATABLE['settings'] drifting from _CREATE_TABLE."""
 
     def test_covers_all_ddl_columns(self, db_path: Path) -> None:
-        """Every column in a fresh table (except id, updated_at) must appear in _MIGRATABLE_COLUMNS."""
+        """Every column in a fresh table (except id, updated_at) must appear in _ALL_MIGRATABLE['settings']."""
         import sqlite3
         # Use SQLite itself as the authoritative DDL parser.
         conn = sqlite3.connect(str(db_path))
@@ -284,7 +296,7 @@ class TestMigratableColumnsDrift:
         actual_cols = {row[1] for row in conn.execute("PRAGMA table_info(settings)").fetchall()}
         conn.close()
         actual_cols -= {"id", "updated_at"}
-        migratable_names = {col for col, _ in _MIGRATABLE_COLUMNS}
+        migratable_names = {col for col, _ in _ALL_MIGRATABLE["settings"]}
         assert actual_cols == migratable_names, (
             f"Drift: in DDL only={actual_cols - migratable_names}, "
             f"in migration only={migratable_names - actual_cols}"
@@ -293,7 +305,7 @@ class TestMigratableColumnsDrift:
 
 class TestLoadAuth:
     def test_load_auth_fast_path(self, store: ConfigStore) -> None:
-        store.save({
+        store.save_full({
             "auth_mode": "forms",
             "auth_password_hash": "$bcrypt$somehash",
         })
@@ -301,6 +313,7 @@ class TestLoadAuth:
         assert auth == {
             "auth_mode": "forms",
             "auth_password_hash": "$bcrypt$somehash",
+            "auth_username": "root",
         }
 
 
@@ -475,7 +488,7 @@ class TestLoadFromTables:
     def test_load_assembles_from_tables(self, store: ConfigStore) -> None:
         """Use CRUD to insert data, call load(), verify dict shape."""
         # Insert scalar settings
-        store.save({"poll_interval_seconds": 300, "ssh_enabled": True})
+        store.save_full({"poll_interval_seconds": 300, "ssh_enabled": True})
 
         # Insert hosts via CRUD
         store.upsert_host({

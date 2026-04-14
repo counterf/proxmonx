@@ -18,7 +18,7 @@ _HOST_REQUIRED_KEYS = ("host", "token_id", "token_secret", "node")
 
 # ---------------------------------------------------------------------------
 # Field-type mappings
-# Every key that config_store.save() persists belongs to exactly one set.
+# Every scalar key belongs to exactly one set.
 # ---------------------------------------------------------------------------
 
 _SCALAR_STR_FIELDS: frozenset[str] = frozenset({
@@ -192,8 +192,6 @@ for _tbl_name, _tbl_ddl in _TABLE_DDLS.items():
     _skip = frozenset({_pk}) if _pk else frozenset()
     _ALL_MIGRATABLE[_tbl_name] = _parse_migratable_columns(_tbl_ddl, skip=_skip)
 
-# Backward compat alias used by existing tests.
-_MIGRATABLE_COLUMNS: list[tuple[str, str]] = _ALL_MIGRATABLE["settings"]
 
 
 def _dict_to_params(data: dict) -> dict:
@@ -318,90 +316,19 @@ class ConfigStore:
             return result
 
     def load_auth(self) -> dict:
-        """Fast-path read of auth fields only (used by auth middleware hot path)."""
+        """Fast-path read of auth fields only (used by middleware + auth routes)."""
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT auth_mode, auth_password_hash FROM settings WHERE id = 1"
+                "SELECT auth_mode, auth_password_hash, auth_username"
+                " FROM settings WHERE id = 1"
             ).fetchone()
             if row is None:
                 return {}
             return {
                 "auth_mode": row["auth_mode"] or "disabled",
                 "auth_password_hash": row["auth_password_hash"] or "",
+                "auth_username": row["auth_username"] or "root",
             }
-
-    def save(self, data: dict) -> None:
-        """Write settings to SQLite.
-
-        Scalar fields go to the settings table. Complex fields
-        (proxmox_hosts, app_config, guest_config, custom_app_defs) are
-        routed to their normalized tables.
-
-        Every save fully replaces all columns -- keys absent from *data*
-        are written as NULL, so a subsequent load() will not return them.
-        Callers must supply the full settings dict, not a partial patch.
-        """
-        params = _dict_to_params(data)
-        cols = list(params.keys())
-
-        with self._connect() as conn:
-            # Scalar settings
-            conn.execute(
-                "INSERT OR IGNORE INTO settings (id, updated_at) "
-                "VALUES (1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
-            )
-            update_parts = ", ".join(f"{c} = :{c}" for c in cols)
-            update_parts += ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
-            conn.execute(f"UPDATE settings SET {update_parts} WHERE id = 1", params)
-
-            # Normalized tables -- replace-all semantics.
-            # Read existing secrets BEFORE deleting so preserve_secrets can
-            # prevent masked "***" values from overwriting real secrets.
-            if "proxmox_hosts" in data:
-                old_hosts = {dict(r)["id"]: dict(r) for r in conn.execute("SELECT * FROM proxmox_hosts").fetchall()}
-                conn.execute("DELETE FROM proxmox_hosts")
-                for h in (data["proxmox_hosts"] or []):
-                    if isinstance(h, dict):
-                        hid = h.get("id", "")
-                        for secret in _HOST_SECRETS:
-                            val = h.get(secret)
-                            if (val is None or val == "***") and hid in old_hosts:
-                                h[secret] = old_hosts[hid].get(secret)
-                        self._upsert_host_conn(conn, h)
-
-            if "app_config" in data:
-                old_apps = {dict(r)["app_name"]: dict(r) for r in conn.execute("SELECT * FROM app_config").fetchall()}
-                conn.execute("DELETE FROM app_config")
-                cfg = data["app_config"]
-                if isinstance(cfg, dict):
-                    for app_name, app_data in cfg.items():
-                        if isinstance(app_data, dict):
-                            for secret in _CONFIG_SECRETS:
-                                val = app_data.get(secret)
-                                if (val is None or val == "***") and app_name in old_apps:
-                                    app_data[secret] = old_apps[app_name].get(secret)
-                            self._upsert_app_config_conn(conn, app_name, app_data)
-
-            if "guest_config" in data:
-                old_guests = {dict(r)["guest_id"]: dict(r) for r in conn.execute("SELECT * FROM guest_config").fetchall()}
-                conn.execute("DELETE FROM guest_config")
-                cfg = data["guest_config"]
-                if isinstance(cfg, dict):
-                    for guest_id, guest_data in cfg.items():
-                        if isinstance(guest_data, dict):
-                            for secret in _CONFIG_SECRETS:
-                                val = guest_data.get(secret)
-                                if (val is None or val == "***") and guest_id in old_guests:
-                                    guest_data[secret] = old_guests[guest_id].get(secret)
-                            self._upsert_guest_config_conn(conn, guest_id, guest_data)
-
-            if "custom_app_defs" in data:
-                conn.execute("DELETE FROM custom_app_defs")
-                for d in (data["custom_app_defs"] or []):
-                    if isinstance(d, dict):
-                        self._upsert_custom_app_def_conn(conn, d)
-
-        logger.info("Settings saved via UI")
 
     def save_full(
         self,
@@ -716,6 +643,32 @@ class ConfigStore:
     def delete_custom_app_def(self, name: str) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM custom_app_defs WHERE name = ?", (name,))
+
+    def update_scalar(self, key: str, value) -> None:
+        """Update a single scalar field in the settings table.
+
+        Only touches the one column -- no DELETE/INSERT on normalized tables.
+        """
+        all_fields = _SCALAR_STR_FIELDS | _SCALAR_INT_FIELDS | _SCALAR_BOOL_FIELDS
+        if key not in all_fields:
+            raise ValueError(f"Unknown scalar field: {key!r}")
+        if key in _SCALAR_BOOL_FIELDS:
+            db_val = int(bool(value)) if value is not None else None
+        elif key in _SCALAR_INT_FIELDS:
+            db_val = int(value) if value is not None else None
+        else:
+            db_val = str(value) if value is not None else None
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (id, updated_at) "
+                "VALUES (1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+            )
+            # safe: `key` validated against known column set above (line 728)
+            conn.execute(
+                f"UPDATE settings SET {key} = ?, "
+                "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = 1",
+                (db_val,),
+            )
 
     # ------------------------------------------------------------------
     # Helpers

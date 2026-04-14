@@ -79,7 +79,7 @@ def _make_guest_config_app(tmp_path):
 
     db_path = str(tmp_path / "test.db")
     config_store = ConfigStore(db_path)
-    config_store.save({})
+    config_store.save_full({})
 
     app = FastAPI()
     settings = config_store.merge_into_settings(Settings())

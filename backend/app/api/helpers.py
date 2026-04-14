@@ -18,6 +18,14 @@ from app.core.task_store import TaskStore
 logger = logging.getLogger(__name__)
 
 
+def _log_task_exception(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        logger.error("Background task failed: %s", exc, exc_info=exc)
+
+
 # --- Dependency placeholders ---
 
 
@@ -84,7 +92,7 @@ async def _require_api_key(
 # --- Secret masking ---
 
 _TOP_SECRET_FIELDS = frozenset({
-    "proxmox_token_secret", "github_token", "ssh_password",
+    "github_token", "ssh_password",
     "ntfy_token", "proxmon_api_key",
 })
 _NESTED_SECRET_FIELDS = frozenset({"api_key", "ssh_password", "token_secret"})

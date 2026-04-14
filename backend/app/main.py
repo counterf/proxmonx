@@ -73,6 +73,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.config_store = config_store
     app.state.settings = settings
+    app.state.background_tasks = set()
 
     # Task history store (same DB file)
     task_store = TaskStore(db_path)
@@ -192,8 +193,6 @@ if _static_dir.is_dir():
                     response = await super().get_response("index.html", scope)
                 else:
                     raise
-            for header, value in _SECURITY_HEADERS.items():
-                response.headers[header] = value
             return response
 
     # Mounted last so /api and /health routes are matched first by the router.

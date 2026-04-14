@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from app.api.helpers import _log_task_exception
 from app.config import Settings
 from app.core.discovery import DiscoveryEngine
 from app.models.guest import GuestInfo
@@ -17,14 +18,6 @@ if TYPE_CHECKING:
     from app.core.alerting import AlertManager
 
 logger = logging.getLogger(__name__)
-
-
-def _log_task_exception(task: asyncio.Task) -> None:
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc:
-        logger.error("Background task failed: %s", exc, exc_info=exc)
 
 
 class Scheduler:
