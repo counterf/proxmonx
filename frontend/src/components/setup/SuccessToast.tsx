@@ -27,7 +27,7 @@ export default function SuccessToast({ message, onDismiss, duration = 4000 }: Su
     <div
       role="status"
       aria-live="polite"
-      className="fixed bottom-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 text-sm rounded bg-green-900 border border-green-800 text-green-200"
+      className="fixed bottom-16 right-4 z-50 flex items-center gap-2 px-4 py-2.5 text-sm rounded bg-green-900 border border-green-800 text-green-200"
     >
       <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />

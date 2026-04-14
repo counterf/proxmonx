@@ -1,4 +1,6 @@
 export type UpdateStatus = 'up-to-date' | 'outdated' | 'unknown';
+
+export const SUPPORTED_OS_TYPES = ['alpine','debian','ubuntu','devuan','fedora','centos','archlinux','opensuse'] as const;
 export type GuestType = 'lxc' | 'vm';
 export type GuestStatus = 'running' | 'stopped';
 
@@ -6,7 +8,7 @@ export interface VersionCheck {
   timestamp: string;
   installed_version: string | null;
   latest_version: string | null;
-  update_status: string;
+  update_status: UpdateStatus;
 }
 
 export interface Guest {

@@ -26,18 +26,18 @@ function App() {
       setCheckError(false);
       const auth = await fetchAuthStatus();
       setAuthStatus(auth);
-      if (auth.auth_mode === 'forms' && !auth.authenticated && location.pathname !== '/login') {
+      if (auth.auth_mode === 'forms' && !auth.authenticated && window.location.pathname !== '/login') {
         navigate('/login', { replace: true });
       }
     } catch {
       setCheckError(true);
       setConfigured(false);
     }
-  }, [navigate, location.pathname]);
+  }, [navigate]);
 
   useEffect(() => {
     checkSetup();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [checkSetup]);
 
   useEffect(() => {
     const handleUnauthorized = () => {

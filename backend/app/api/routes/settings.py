@@ -527,6 +527,9 @@ async def save_settings(
 
     from app.main import build_runtime
     new_client, new_scheduler = build_runtime(new_settings)
+    # Transfer cached guest state so the dashboard doesn't go blank after save
+    if scheduler is not None:
+        new_scheduler._guests = scheduler._guests
     try:
         new_scheduler.start()
         request.app.state.http_client = new_client

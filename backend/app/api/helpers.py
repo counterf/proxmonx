@@ -60,9 +60,10 @@ async def _require_api_key(
 
     Accepts the key via ``Authorization: Bearer <token>`` or ``X-Api-Key: <token>``.
     If no API key is configured, authentication is skipped (backwards compatible).
+    During initial setup, the auth middleware grants a setup exemption (local-
+    network only) and sets ``request.state.setup_exempt``; honour that flag here.
     """
-    config_store = getattr(request.app.state, "config_store", None)
-    if config_store is not None and not config_store.is_configured():
+    if getattr(request.state, "setup_exempt", False):
         return
 
     settings = getattr(request.app.state, "settings", None)

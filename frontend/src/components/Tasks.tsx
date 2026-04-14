@@ -2,20 +2,9 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import type { TaskRecord, BulkJob } from '../types';
 import { fetchTasks, fetchBulkJobs, clearTasks } from '../api/client';
+import { formatRelativeTime } from '../utils/formatRelativeTime';
 
 // --- Formatting helpers ---
-
-function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000);
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin} min ago`;
-  const diffHrs = Math.floor(diffMin / 60);
-  if (diffHrs < 24) return `${diffHrs}h ago`;
-  return `${Math.floor(diffHrs / 24)}d ago`;
-}
 
 function formatDuration(started: string, finished: string | null): string {
   if (!finished) return 'in progress\u2026';
@@ -58,7 +47,7 @@ const STATUS_STYLES: Record<string, { label: string; bg: string; text: string; p
   partial: { label: 'Partial', bg: 'bg-amber-900/40',  text: 'text-amber-300' },
 };
 
-function StatusBadge({ status }: { status: TaskRecord['status'] }) {
+function TaskStatusBadge({ status }: { status: TaskRecord['status'] }) {
   const s = STATUS_STYLES[status] ?? { label: status, bg: 'bg-gray-800', text: 'text-gray-300' };
   return (
     <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] font-medium rounded ${s.bg} ${s.text}`}>
@@ -165,7 +154,7 @@ function BatchGroupRows({ group }: { group: TaskGroupBatch }) {
           {action && <ActionBadge action={action} />}
         </td>
         <td className="px-3 py-2">
-          <StatusBadge status={batchAggregateStatus(group.tasks) as TaskRecord['status']} />
+          <TaskStatusBadge status={batchAggregateStatus(group.tasks) as TaskRecord['status']} />
         </td>
         <td className="px-3 py-2 text-xs text-gray-500" title={earliestStart}>
           {formatRelativeTime(earliestStart)}
@@ -192,7 +181,7 @@ function BatchGroupRows({ group }: { group: TaskGroupBatch }) {
             </Link>
           </td>
           <td className="px-3 py-2"><ActionBadge action={task.action} /></td>
-          <td className="px-3 py-2"><StatusBadge status={task.status} /></td>
+          <td className="px-3 py-2"><TaskStatusBadge status={task.status} /></td>
           <td className="px-3 py-2 text-xs text-gray-500" title={task.started_at}>{formatRelativeTime(task.started_at)}</td>
           <td className="px-3 py-2 text-xs text-gray-500 tabular-nums">{formatDuration(task.started_at, task.finished_at)}</td>
           <td className="px-3 py-2 max-w-xs"><InfoCell task={task} /></td>
@@ -220,7 +209,7 @@ function BatchGroupCard({ group }: { group: TaskGroupBatch }) {
       </div>
       <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
         {action && <ActionBadge action={action} />}
-        <StatusBadge status={batchAggregateStatus(group.tasks) as TaskRecord['status']} />
+        <TaskStatusBadge status={batchAggregateStatus(group.tasks) as TaskRecord['status']} />
         <span className="text-gray-600">{'\u00B7'}</span>
         <span>{formatRelativeTime(earliestStart)}</span>
         {!hasActive && doneCount > 0 && <span className="text-green-400">{'\u00B7'} {doneCount} done</span>}
@@ -233,7 +222,7 @@ function BatchGroupCard({ group }: { group: TaskGroupBatch }) {
             <div key={task.id} className="border border-gray-800 rounded px-3 py-2">
               <div className="flex items-center justify-between mb-1">
                 <Link to={`/guest/${encodeURIComponent(task.guest_id)}`} className="text-sm font-medium text-blue-400 hover:text-blue-300">{task.guest_name}</Link>
-                <StatusBadge status={task.status} />
+                <TaskStatusBadge status={task.status} />
               </div>
               <InfoCell task={task} />
             </div>
@@ -418,7 +407,7 @@ export default function Tasks() {
                       </Link>
                     </td>
                     <td className="px-3 py-2"><ActionBadge action={group.task.action} /></td>
-                    <td className="px-3 py-2"><StatusBadge status={group.task.status} /></td>
+                    <td className="px-3 py-2"><TaskStatusBadge status={group.task.status} /></td>
                     <td className="px-3 py-2 text-xs text-gray-500" title={group.task.started_at}>
                       {formatRelativeTime(group.task.started_at)}
                     </td>
@@ -449,7 +438,7 @@ export default function Tasks() {
                   >
                     {group.task.guest_name}
                   </Link>
-                  <StatusBadge status={group.task.status} />
+                  <TaskStatusBadge status={group.task.status} />
                 </div>
                 <div className="flex items-center gap-2 mb-1">
                   <ActionBadge action={group.task.action} />

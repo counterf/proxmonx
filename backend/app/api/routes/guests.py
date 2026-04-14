@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
-from app.config import ProxmoxHostConfig, Settings
+from app.config import ProxmoxHostConfig
 from app.core.config_store import _CONFIG_SECRETS
 from app.core.proxmox import ProxmoxClient
 from app.core.task_store import TaskRecord, TaskStore
@@ -330,13 +330,7 @@ async def os_update_guest(
     if task_store.list_running_for_guest(guest_id, "os_update"):
         raise HTTPException(status_code=409, detail="An OS update is already running for this guest")
 
-    ssh_settings = Settings(
-        ssh_enabled=True,
-        ssh_username=host_config.ssh_username,
-        ssh_key_path=host_config.ssh_key_path,
-        ssh_password=host_config.ssh_password,
-    )
-    ssh = SSHClient(ssh_settings)
+    ssh = SSHClient.from_host_config(host_config)
     vmid = guest_id.rsplit(":", 1)[-1]
 
     task_id = str(uuid4())
@@ -400,13 +394,7 @@ async def app_update_guest(
     if task_store.list_running_for_guest(guest_id, "app_update"):
         raise HTTPException(status_code=409, detail="An app update is already running for this guest")
 
-    ssh_settings = Settings(
-        ssh_enabled=True,
-        ssh_username=host_config.ssh_username,
-        ssh_key_path=host_config.ssh_key_path,
-        ssh_password=host_config.ssh_password,
-    )
-    ssh = SSHClient(ssh_settings)
+    ssh = SSHClient.from_host_config(host_config)
     vmid = guest_id.rsplit(":", 1)[-1]
 
     task_id = str(uuid4())

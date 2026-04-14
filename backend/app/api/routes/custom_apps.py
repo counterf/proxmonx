@@ -89,11 +89,11 @@ def _reload_custom_detectors(
         elif defn.scheme == "http" and defn.name in app_configs:
             entry = app_configs[defn.name]
             if isinstance(entry, dict) and entry.get("scheme"):
-                entry.pop("scheme")
-                if not entry:
-                    config_store.delete_app_config(defn.name)
+                cleaned = {k: v for k, v in entry.items() if k != "scheme"}
+                if cleaned:
+                    config_store.upsert_app_config(defn.name, cleaned)
                 else:
-                    config_store.upsert_app_config(defn.name, entry)
+                    config_store.delete_app_config(defn.name)
 
     # Reload settings into engine
     _reload_settings_into_engine(request, config_store)

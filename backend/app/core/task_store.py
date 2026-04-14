@@ -117,7 +117,8 @@ class TaskStore:
                            LIMIT ?
                        )
                    )
-                   ORDER BY batch_id, started_at""",
+                   ORDER BY batch_id, started_at
+                   LIMIT 500""",
                 (limit,),
             ).fetchall()
         return [TaskRecord(**dict(r)) for r in rows]

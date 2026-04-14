@@ -19,7 +19,7 @@ from app.api.helpers import (
     run_app_update_bg,
     run_os_update_bg,
 )
-from app.config import ProxmoxHostConfig, Settings
+from app.config import ProxmoxHostConfig
 from app.core.task_store import TaskRecord, TaskStore
 
 logger = logging.getLogger(__name__)
@@ -123,13 +123,7 @@ async def _run_bulk_job(
             continue
 
         vmid = guest_id.rsplit(":", 1)[-1]
-        ssh_settings = Settings(
-            ssh_enabled=True,
-            ssh_username=host_config.ssh_username or "root",
-            ssh_key_path=host_config.ssh_key_path or "",
-            ssh_password=host_config.ssh_password or "",
-        )
-        ssh = SSHClient(ssh_settings)
+        ssh = SSHClient.from_host_config(host_config)
 
         try:
             if action == "os_update":

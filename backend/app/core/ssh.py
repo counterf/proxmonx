@@ -91,6 +91,17 @@ class SSHClient:
         self._enabled = settings.ssh_enabled
         self._known_hosts_path = settings.ssh_known_hosts_path
 
+    @classmethod
+    def from_host_config(cls, host_config) -> SSHClient:
+        """Create an SSHClient from a ProxmoxHostConfig (avoids building a full Settings)."""
+        instance = cls.__new__(cls)
+        instance._username = host_config.ssh_username or "root"
+        instance._key_path = host_config.ssh_key_path or ""
+        instance._password = host_config.ssh_password or ""
+        instance._enabled = True
+        instance._known_hosts_path = ""
+        return instance
+
     def _is_command_allowed(self, command: str) -> bool:
         """Check command against whitelist, rejecting shell metacharacters."""
         if SHELL_METACHARACTERS.search(command):

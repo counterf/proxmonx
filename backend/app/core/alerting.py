@@ -12,11 +12,11 @@ from app.models.guest import GuestInfo
 logger = logging.getLogger(__name__)
 
 
-def _format_bytes(n: int) -> str:
+def _format_bytes(n: int | float) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if abs(n) < 1024:
             return f"{n:.1f} {unit}"
-        n /= 1024  # type: ignore[assignment]
+        n /= 1024
     return f"{n:.1f} PB"
 
 

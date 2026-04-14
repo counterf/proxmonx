@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Guest, BulkJob } from '../types';
+import { SUPPORTED_OS_TYPES } from '../types';
 import { startBulkJob, fetchBulkJob } from '../api/client';
 
 interface Props {
@@ -8,15 +9,10 @@ interface Props {
   onClose: () => void;
 }
 
-// Must match backend OS_UPDATE_COMMANDS keys in ssh.py
-const SUPPORTED_OS_TYPES = [
-  'alpine', 'debian', 'ubuntu', 'devuan', 'fedora', 'centos', 'archlinux', 'opensuse',
-];
-
 export function isEligible(guest: Guest, action: 'os_update' | 'app_update'): boolean {
   if (guest.type !== 'lxc' || guest.status !== 'running') return false;
   if (action === 'os_update') {
-    if (!guest.os_type || !SUPPORTED_OS_TYPES.includes(guest.os_type)) return false;
+    if (!guest.os_type || !(SUPPORTED_OS_TYPES as readonly string[]).includes(guest.os_type)) return false;
   }
   if (action === 'app_update' && guest.has_community_script !== true) return false;
   return true;

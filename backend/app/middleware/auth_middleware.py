@@ -85,6 +85,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # from racing to configure the instance first.
         if not config_store.is_configured() and path in self.SETUP_EXEMPT_PATHS:
             if self._is_local_network(request):
+                request.state.setup_exempt = True
                 return await call_next(request)
             return JSONResponse(
                 {"detail": "Setup is only allowed from a local network"},

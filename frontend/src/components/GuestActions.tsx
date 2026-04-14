@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { Guest, TaskRecord } from '../types';
+import { SUPPORTED_OS_TYPES } from '../types';
 import { guestAction, refreshGuest, osUpdateGuest, appUpdateGuest, backupGuest, fetchTask } from '../api/client';
 
 async function pollTask(
@@ -59,8 +60,7 @@ export default function GuestActions({ guest, onActionComplete, backupEnabled = 
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  const SUPPORTED_OS_TYPES = ['alpine','debian','ubuntu','devuan','fedora','centos','archlinux','opensuse'];
-  const canOsUpdate = guest.type === 'lxc' && guest.status === 'running' && SUPPORTED_OS_TYPES.includes(guest.os_type ?? '');
+  const canOsUpdate = guest.type === 'lxc' && guest.status === 'running' && (SUPPORTED_OS_TYPES as readonly string[]).includes(guest.os_type ?? '');
   const running = guest.status === 'running';
 
   const execute = async (action: ActionKey, snapName?: string) => {
@@ -185,87 +185,45 @@ export default function GuestActions({ guest, onActionComplete, backupEnabled = 
               {pending === 'app_update' ? 'Updating app... (this may take several minutes)' : 'Updating OS... (this may take several minutes)'}
             </div>
           ) : confirm === 'stop' || confirm === 'shutdown' ? (
-            <div className="px-3 py-2">
-              <p className="text-xs text-gray-300 mb-2">
-                {confirm === 'stop' ? 'Hard stop the guest?' : 'Gracefully shut down?'}
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => execute(confirm)}
-                  className="px-2 py-1 text-xs rounded bg-red-700 hover:bg-red-600 text-white"
-                >
-                  Confirm
-                </button>
-                <button
-                  onClick={() => setConfirm(null)}
-                  className="px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
+            <ConfirmDialog
+              message={confirm === 'stop' ? 'Hard stop the guest?' : 'Gracefully shut down?'}
+              confirmLabel="Confirm"
+              confirmColor="bg-red-700 hover:bg-red-600"
+              onConfirm={() => execute(confirm)}
+              onCancel={() => setConfirm(null)}
+            />
           ) : confirm === 'os_update' ? (
-            <div className="px-3 py-2">
-              <p className="text-xs text-gray-300 mb-2">
-                Update all system packages in <span className="text-white">{guest.name}</span>? Running services may restart.
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => execute('os_update')}
-                  className="px-2 py-1 text-xs rounded bg-cyan-700 hover:bg-cyan-600 text-white"
-                >
-                  Update
-                </button>
-                <button
-                  onClick={() => setConfirm(null)}
-                  className="px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
+            <ConfirmDialog
+              message={<>Update all system packages in <span className="text-white">{guest.name}</span>? Running services may restart.</>}
+              confirmLabel="Update"
+              confirmColor="bg-cyan-700 hover:bg-cyan-600"
+              onConfirm={() => execute('os_update')}
+              onCancel={() => setConfirm(null)}
+            />
           ) : confirm === 'app_update' ? (
-            <div className="px-3 py-2">
-              <p className="text-xs text-gray-300 mb-2">
-                Run community-script updater in <span className="text-white">{guest.name}</span>?
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => execute('app_update')}
-                  className="px-2 py-1 text-xs rounded bg-teal-700 hover:bg-teal-600 text-white"
-                >
-                  Update
-                </button>
-                <button
-                  onClick={() => setConfirm(null)}
-                  className="px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
+            <ConfirmDialog
+              message={<>Run community-script updater in <span className="text-white">{guest.name}</span>?</>}
+              confirmLabel="Update"
+              confirmColor="bg-teal-700 hover:bg-teal-600"
+              onConfirm={() => execute('app_update')}
+              onCancel={() => setConfirm(null)}
+            />
           ) : confirm === 'backup' ? (
-            <div className="px-3 py-2">
-              <p className="text-xs text-gray-300 mb-2">
-                Create a vzdump backup of <span className="text-white">{guest.name}</span>?
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => execute('backup')}
-                  className="px-2 py-1 text-xs rounded bg-indigo-700 hover:bg-indigo-600 text-white"
-                >
-                  Backup
-                </button>
-                <button
-                  onClick={() => setConfirm(null)}
-                  className="px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
+            <ConfirmDialog
+              message={<>Create a vzdump backup of <span className="text-white">{guest.name}</span>?</>}
+              confirmLabel="Backup"
+              confirmColor="bg-indigo-700 hover:bg-indigo-600"
+              onConfirm={() => execute('backup')}
+              onCancel={() => setConfirm(null)}
+            />
           ) : confirm === 'snapshot' ? (
-            <div className="px-3 py-2">
+            <ConfirmDialog
+              message=""
+              confirmLabel="Create"
+              confirmColor="bg-blue-700 hover:bg-blue-600"
+              onConfirm={() => execute('snapshot', snapshotName)}
+              onCancel={() => setConfirm(null)}
+            >
               <p className="text-xs text-gray-400 mb-1">Snapshot name (optional)</p>
               <input
                 type="text"
@@ -275,21 +233,7 @@ export default function GuestActions({ guest, onActionComplete, backupEnabled = 
                 className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-600 rounded text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 mb-2"
                 autoFocus
               />
-              <div className="flex gap-2">
-                <button
-                  onClick={() => execute('snapshot', snapshotName)}
-                  className="px-2 py-1 text-xs rounded bg-blue-700 hover:bg-blue-600 text-white"
-                >
-                  Create
-                </button>
-                <button
-                  onClick={() => setConfirm(null)}
-                  className="px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
+            </ConfirmDialog>
           ) : (
             <>
               {!running && (
@@ -343,6 +287,24 @@ export default function GuestActions({ guest, onActionComplete, backupEnabled = 
         </div>,
         document.body
       )}
+    </div>
+  );
+}
+
+function ConfirmDialog({ message, confirmLabel, confirmColor, onConfirm, onCancel, children }: {
+  message: React.ReactNode; confirmLabel: string; confirmColor: string; onConfirm: () => void; onCancel: () => void; children?: React.ReactNode;
+}) {
+  return (
+    <div className="px-3 py-2">
+      {children ?? <p className="text-xs text-gray-300 mb-2">{message}</p>}
+      <div className="flex gap-2">
+        <button onClick={onConfirm} className={`px-2 py-1 text-xs rounded ${confirmColor} text-white`}>
+          {confirmLabel}
+        </button>
+        <button onClick={onCancel} className="px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300">
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

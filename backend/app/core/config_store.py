@@ -142,7 +142,6 @@ _TABLE_DDLS: dict[str, str] = {
 
 # Columns that can be added via ALTER TABLE ADD COLUMN on upgrade.
 # Derived automatically from DDLs so there is a single source of truth.
-_SKIP_COLUMNS = frozenset({"id", "updated_at"})
 # DEFAULT is included to skip the continuation line of the multi-line updated_at definition.
 _CONSTRAINT_PREFIXES = ("PRIMARY", "CHECK", "UNIQUE", "CONSTRAINT", "CREATE", ")", "DEFAULT")
 
@@ -228,6 +227,8 @@ class ConfigStore:
     def __init__(self, path: str = "/app/data/proxmon.db") -> None:
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._cached_auth: dict | None = None
+        self._cached_is_configured: bool | None = None
         self._init_db()
 
     @property
@@ -315,8 +316,15 @@ class ConfigStore:
 
             return result
 
+    def _invalidate_caches(self) -> None:
+        """Clear in-memory caches so next access re-reads from SQLite."""
+        self._cached_auth = None
+        self._cached_is_configured = None
+
     def load_auth(self) -> dict:
         """Fast-path read of auth fields only (used by middleware + auth routes)."""
+        if self._cached_auth is not None:
+            return self._cached_auth
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT auth_mode, auth_password_hash, auth_username"
@@ -324,11 +332,13 @@ class ConfigStore:
             ).fetchone()
             if row is None:
                 return {}
-            return {
+            result = {
                 "auth_mode": row["auth_mode"] or "disabled",
                 "auth_password_hash": row["auth_password_hash"] or "",
                 "auth_username": row["auth_username"] or "root",
             }
+            self._cached_auth = result
+            return result
 
     def save_full(
         self,
@@ -372,6 +382,7 @@ class ConfigStore:
                 for app_name, app_data in app_configs.items():
                     self._upsert_app_config_conn(conn, app_name, app_data, preserve_secrets=True)
 
+        self._invalidate_caches()
         logger.info("Settings saved via UI (atomic)")
 
     # ------------------------------------------------------------------
@@ -433,10 +444,12 @@ class ConfigStore:
     def upsert_host(self, data: dict) -> None:
         with self._connect() as conn:
             self._upsert_host_conn(conn, data, preserve_secrets=True)
+        self._invalidate_caches()
 
     def delete_host(self, host_id: str) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM proxmox_hosts WHERE id = ?", (host_id,))
+        self._invalidate_caches()
 
     # ------------------------------------------------------------------
     # app_config CRUD
@@ -504,10 +517,12 @@ class ConfigStore:
     def upsert_app_config(self, app_name: str, data: dict) -> None:
         with self._connect() as conn:
             self._upsert_app_config_conn(conn, app_name, data, preserve_secrets=True)
+        self._invalidate_caches()
 
     def delete_app_config(self, app_name: str) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM app_config WHERE app_name = ?", (app_name,))
+        self._invalidate_caches()
 
     # ------------------------------------------------------------------
     # guest_config CRUD
@@ -576,10 +591,12 @@ class ConfigStore:
     def upsert_guest_config(self, guest_id: str, data: dict) -> None:
         with self._connect() as conn:
             self._upsert_guest_config_conn(conn, guest_id, data, preserve_secrets=True)
+        self._invalidate_caches()
 
     def delete_guest_config(self, guest_id: str) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM guest_config WHERE guest_id = ?", (guest_id,))
+        self._invalidate_caches()
 
     # ------------------------------------------------------------------
     # custom_app_defs CRUD
@@ -639,10 +656,12 @@ class ConfigStore:
     def upsert_custom_app_def(self, data: dict) -> None:
         with self._connect() as conn:
             self._upsert_custom_app_def_conn(conn, data)
+        self._invalidate_caches()
 
     def delete_custom_app_def(self, name: str) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM custom_app_defs WHERE name = ?", (name,))
+        self._invalidate_caches()
 
     def update_scalar(self, key: str, value) -> None:
         """Update a single scalar field in the settings table.
@@ -663,12 +682,13 @@ class ConfigStore:
                 "INSERT OR IGNORE INTO settings (id, updated_at) "
                 "VALUES (1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
             )
-            # safe: `key` validated against known column set above (line 728)
+            # safe: `key` validated against known column set above
             conn.execute(
                 f"UPDATE settings SET {key} = ?, "
                 "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = 1",
                 (db_val,),
             )
+        self._invalidate_caches()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -676,11 +696,15 @@ class ConfigStore:
 
     def is_configured(self) -> bool:
         """True if at least one host has all required fields in the DB."""
-        return len(self.get_missing_fields()) == 0
+        if self._cached_is_configured is not None:
+            return self._cached_is_configured
+        result = len(self.get_missing_fields()) == 0
+        self._cached_is_configured = result
+        return result
 
     def get_missing_fields(self) -> list[str]:
         """Return names of required fields that are missing or empty."""
-        hosts = self.load().get("proxmox_hosts", [])
+        hosts = self.list_hosts()
         if not isinstance(hosts, list) or not hosts:
             return list(_HOST_REQUIRED_KEYS)
         for host in hosts:
