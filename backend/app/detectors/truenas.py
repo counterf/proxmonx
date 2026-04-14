@@ -48,13 +48,13 @@ class TrueNASDetector(BaseDetector):
         except ImportError as exc:
             raise ProbeError("websockets package not installed") from exc
 
-        ssl_ctx: ssl.SSLContext | bool
+        ssl_ctx: ssl.SSLContext | None
         if ws_scheme == "wss":
             ssl_ctx = ssl.create_default_context()
             ssl_ctx.check_hostname = False
             ssl_ctx.verify_mode = ssl.CERT_NONE
         else:
-            ssl_ctx = False  # type: ignore[assignment]
+            ssl_ctx = None
 
         # Local message ID counter — avoids shared state across concurrent probes
         # (e.g. two TrueNAS hosts probed simultaneously via asyncio.gather).
@@ -67,7 +67,10 @@ class TrueNASDetector(BaseDetector):
 
         logger.debug("TrueNAS WSS probe starting: %s", uri)
         try:
-            async with websockets.connect(uri, ssl=ssl_ctx, open_timeout=10) as ws:
+            connect_kwargs = {"open_timeout": 10}
+            if ssl_ctx is not None:
+                connect_kwargs["ssl"] = ssl_ctx
+            async with websockets.connect(uri, **connect_kwargs) as ws:
                 # 1. Authenticate
                 if api_key:
                     auth_id = next_id()
