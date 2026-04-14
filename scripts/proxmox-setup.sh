@@ -96,17 +96,15 @@ else
     info "Created user '$PVE_USER'"
 fi
 
-# 3. API Token
+# 3. API Token (always regenerate — Proxmox only reveals the secret at creation)
 if pveum user token list "$PVE_USER" --output-format json 2>/dev/null | grep -q "\"$PVE_TOKEN_NAME\""; then
-    log_skipped "API token '$PVE_TOKEN_ID' (already exists)"
-    info "Token '$PVE_TOKEN_ID' already exists (secret not re-displayed)"
-    TOKEN_SECRET="(existing — not re-displayed)"
-else
-    TOKEN_OUTPUT=$(pveum user token add "$PVE_USER" "$PVE_TOKEN_NAME" -privsep 0 --output-format json 2>&1)
-    TOKEN_SECRET=$(echo "$TOKEN_OUTPUT" | grep -oP '"value"\s*:\s*"\K[^"]+' || echo "$TOKEN_OUTPUT")
-    log_created "API token '$PVE_TOKEN_ID'"
-    info "Created token '$PVE_TOKEN_ID'"
+    pveum user token remove "$PVE_USER" "$PVE_TOKEN_NAME" >/dev/null 2>&1
+    info "Removed existing token '$PVE_TOKEN_ID'"
 fi
+TOKEN_OUTPUT=$(pveum user token add "$PVE_USER" "$PVE_TOKEN_NAME" -privsep 0 --output-format json 2>&1)
+TOKEN_SECRET=$(echo "$TOKEN_OUTPUT" | grep -oP '"value"\s*:\s*"\K[^"]+' || echo "$TOKEN_OUTPUT")
+log_created "API token '$PVE_TOKEN_ID'"
+info "Created token '$PVE_TOKEN_ID'"
 
 # 4. ACL
 pveum acl modify / -user "$PVE_USER" -role "$PVE_ROLE"
