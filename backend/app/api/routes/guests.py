@@ -11,7 +11,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
 from app.config import ProxmoxHostConfig
-from app.core.config_store import _CONFIG_SECRETS
 from app.core.proxmox import ProxmoxClient
 from app.core.task_store import TaskRecord, TaskStore
 from app.detectors.registry import DETECTOR_MAP
@@ -214,7 +213,20 @@ async def save_guest_config(
     merged["api_key"] = body.api_key
     merged["ssh_password"] = body.ssh_password
 
-    if any(v is not None and v != "***" for v in merged.values()):
+    # Check for meaningful content: ignore secret placeholders,
+    # but consult prev DB row to avoid deleting rows with real secrets
+    prev = config_store.get_guest_config(guest_id) or {}
+    has_content = any(
+        v is not None for k, v in merged.items()
+        if k not in ("api_key", "ssh_password")
+    ) or any(
+        merged.get(s) not in (None, "***", "")
+        for s in ("api_key", "ssh_password")
+    ) or any(
+        prev.get(s) not in (None, "", "***") and merged.get(s) not in ("",)
+        for s in ("api_key", "ssh_password")
+    )
+    if has_content:
         config_store.upsert_guest_config(guest_id, merged)
     else:
         config_store.delete_guest_config(guest_id)

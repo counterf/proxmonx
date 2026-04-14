@@ -418,6 +418,21 @@ class TestAppConfigCRUD:
         assert cfg["api_key"] == "real-key"
         assert cfg["ssh_password"] == "real-pw"
 
+    def test_empty_string_secret_clears_to_null(self, store: ConfigStore) -> None:
+        store.upsert_app_config("sonarr", {"api_key": "real-key", "ssh_password": "real-pw"})
+        store.upsert_app_config("sonarr", {"api_key": "", "ssh_password": ""})
+        cfg = store.get_app_config("sonarr")
+        # "" is normalized to NULL; _row_to_app_config strips None keys
+        assert cfg is None or cfg.get("api_key") is None
+        assert cfg is None or cfg.get("ssh_password") is None
+
+    def test_port_zero_stored_as_zero(self, store: ConfigStore) -> None:
+        """ConfigStore stores port 0 as-is; the route layer maps 0→None."""
+        store.upsert_app_config("sonarr", {"port": 8989})
+        store.upsert_app_config("sonarr", {"port": 0})
+        cfg = store.get_app_config("sonarr")
+        assert cfg is not None and cfg.get("port") == 0
+
 
 class TestGuestConfigCRUD:
     def test_upsert_and_list(self, store: ConfigStore) -> None:
@@ -442,6 +457,20 @@ class TestGuestConfigCRUD:
         cfg = store.get_guest_config("pve1:100")
         assert cfg["api_key"] == "real-key"
         assert cfg["ssh_password"] == "real-pw"
+
+    def test_empty_string_secret_clears_to_null(self, store: ConfigStore) -> None:
+        store.upsert_guest_config("pve1:100", {"api_key": "real-key", "ssh_password": "real-pw"})
+        store.upsert_guest_config("pve1:100", {"api_key": "", "ssh_password": ""})
+        cfg = store.get_guest_config("pve1:100")
+        assert cfg is None or cfg.get("api_key") is None
+        assert cfg is None or cfg.get("ssh_password") is None
+
+    def test_port_zero_stored_as_zero(self, store: ConfigStore) -> None:
+        """ConfigStore stores port 0 as-is; the route layer maps 0→None."""
+        store.upsert_guest_config("pve1:100", {"port": 8080})
+        store.upsert_guest_config("pve1:100", {"port": 0})
+        cfg = store.get_guest_config("pve1:100")
+        assert cfg is not None and cfg.get("port") == 0
 
 
 class TestCustomAppDefsCRUD:

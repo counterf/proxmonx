@@ -503,13 +503,15 @@ async def save_settings(
             if entry.port is not None:
                 # 0 is the clear sentinel — maps to NULL in DB
                 merged_entry["port"] = entry.port if entry.port != 0 else None
-            # Non-secret optional fields: None = keep, "" = clear
+            # Non-secret optional fields: None = keep, "" = clear to NULL
             for field in ("scheme", "github_repo", "ssh_version_cmd", "ssh_username", "ssh_key_path"):
                 val = getattr(entry, field)
                 if val is None:
-                    if prev.get(field):
+                    if prev.get(field) is not None:
                         merged_entry[field] = prev[field]
-                elif val != "":
+                elif val == "":
+                    merged_entry[field] = None  # explicit clear — present in dict prevents CRUD re-fill
+                else:
                     merged_entry[field] = val
             # Secret fields: pass through, CRUD handles "***"/None preservation
             merged_entry["api_key"] = entry.api_key
@@ -520,10 +522,10 @@ async def save_settings(
                 v is not None for k, v in merged_entry.items()
                 if k not in ("api_key", "ssh_password")
             ) or any(
-                merged_entry.get(s) not in (None, "***")
+                merged_entry.get(s) not in (None, "***", "")
                 for s in ("api_key", "ssh_password")
             ) or any(
-                prev.get(s) not in (None, "", "***")
+                prev.get(s) not in (None, "", "***") and merged_entry.get(s) not in ("",)
                 for s in ("api_key", "ssh_password")
             )
             if has_content:

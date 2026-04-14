@@ -149,3 +149,92 @@ class TestSaveGuestConfigVersionCmdValidation:
             json={},
         )
         assert resp.status_code == 200
+
+
+class TestGuestConfigSecretPreservation:
+    """Verify that masked secrets are preserved and clears restore inheritance."""
+
+    def test_masked_secret_preserves_row(self, tmp_path) -> None:
+        app = _make_guest_config_app(tmp_path)
+        config_store: ConfigStore = app.state.config_store
+        # Seed a guest with only an api_key
+        config_store.upsert_guest_config("g1", {"api_key": "real-key"})
+        client = TestClient(app)
+        # Re-save with masked secret — row must survive
+        resp = client.put("/api/guests/g1/config", json={"api_key": "***"})
+        assert resp.status_code == 200
+        cfg = config_store.get_guest_config("g1")
+        assert cfg is not None
+        assert cfg["api_key"] == "real-key"
+
+    def test_clear_api_key_restores_inheritance(self, tmp_path) -> None:
+        app = _make_guest_config_app(tmp_path)
+        config_store: ConfigStore = app.state.config_store
+        config_store.upsert_guest_config("g1", {"api_key": "real-key"})
+        client = TestClient(app)
+        # Clear with empty string — should delete the row entirely
+        resp = client.put("/api/guests/g1/config", json={"api_key": ""})
+        assert resp.status_code == 200
+        cfg = config_store.get_guest_config("g1")
+        assert cfg is None, f"Expected row deletion but got: {cfg}"
+
+    def test_port_clear_via_zero_sentinel(self, tmp_path) -> None:
+        app = _make_guest_config_app(tmp_path)
+        config_store: ConfigStore = app.state.config_store
+        config_store.upsert_guest_config("g1", {"port": 8080})
+        client = TestClient(app)
+        resp = client.put("/api/guests/g1/config", json={"port": 0})
+        assert resp.status_code == 200
+        cfg = config_store.get_guest_config("g1")
+        # Port 0 maps to None in the route; row deleted since no other content
+        assert cfg is None or cfg.get("port") is None
+
+
+class TestNewHostTokenSecretValidation:
+    """Verify that new hosts require a real token_secret."""
+
+    def test_new_host_missing_token_secret_returns_422(self, tmp_path) -> None:
+        app = _make_guest_config_app(tmp_path)
+        client = TestClient(app)
+        resp = client.post("/api/settings", json={
+            "proxmox_hosts": [{
+                "id": "new-host",
+                "label": "New Host",
+                "host": "https://10.0.0.1:8006",
+                "token_id": "root@pam!test",
+                "token_secret": None,
+                "node": "pve",
+            }],
+        })
+        assert resp.status_code == 422
+        assert "token_secret" in resp.text
+
+    def test_new_host_masked_token_secret_returns_422(self, tmp_path) -> None:
+        app = _make_guest_config_app(tmp_path)
+        client = TestClient(app)
+        resp = client.post("/api/settings", json={
+            "proxmox_hosts": [{
+                "id": "new-host",
+                "label": "New Host",
+                "host": "https://10.0.0.1:8006",
+                "token_id": "root@pam!test",
+                "token_secret": "***",
+                "node": "pve",
+            }],
+        })
+        assert resp.status_code == 422
+
+    def test_new_host_with_real_token_secret_accepted(self, tmp_path) -> None:
+        app = _make_guest_config_app(tmp_path)
+        client = TestClient(app)
+        resp = client.post("/api/settings", json={
+            "proxmox_hosts": [{
+                "id": "new-host",
+                "label": "New Host",
+                "host": "https://10.0.0.1:8006",
+                "token_id": "root@pam!test",
+                "token_secret": "real-secret-uuid",
+                "node": "pve",
+            }],
+        })
+        assert resp.status_code == 200

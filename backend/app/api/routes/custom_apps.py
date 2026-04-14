@@ -69,7 +69,7 @@ class CustomAppDefRequest(BaseModel):
 def _reload_custom_detectors(
     request: Request, config_store,
 ) -> None:
-    """Reload custom detectors from the DB and seed app_config for https apps."""
+    """Reload custom detectors from the DB and refresh the settings engine."""
     defs_raw = config_store.list_custom_app_defs()
     defs = []
     for i, item in enumerate(defs_raw):

@@ -96,7 +96,7 @@ Note: `rocky` and `alma` containers are configured as `centos` in Proxmox — th
 ---
 
 ## Tests
-`cd backend && pytest tests/` -- 275 tests across test_alerting.py, test_auth.py, test_auth_routes.py, test_config_store.py, test_custom_app_defs.py, test_detectors.py, test_discovery.py, test_github.py, test_normalize_version.py, test_notifier.py, test_require_api_key.py, test_routes_helpers.py, test_ssh_version_cmd.py, test_update_task_locking.py
+`cd backend && pytest tests/` -- 285 tests across test_alerting.py, test_auth.py, test_auth_routes.py, test_config_store.py, test_custom_app_defs.py, test_detectors.py, test_discovery.py, test_github.py, test_normalize_version.py, test_notifier.py, test_require_api_key.py, test_routes_helpers.py, test_ssh_version_cmd.py, test_update_task_locking.py
 
 ---
 
@@ -118,7 +118,8 @@ docker compose build && docker compose up -d
 
 **Secrets & masking**
 - Scalar secrets (github_token, ssh_password, ntfy_token, proxmon_api_key) use `_keep_or_replace()` in the settings route to prevent `"***"` mask from overwriting real values.
-- Nested secrets inside hosts, app_config, and guest_config (token_secret, ssh_password, api_key) are handled by ConfigStore CRUD methods via `preserve_secrets=True` — the CRUD layer reads the existing row and keeps `"***"` or `None` values unchanged.
+- Nested secrets inside hosts, app_config, and guest_config (token_secret, ssh_password, api_key) are handled by ConfigStore CRUD methods via `preserve_secrets=True` — the CRUD layer reads the existing row and keeps `"***"` or `None` values unchanged. Empty-string secrets (`""`) are normalized to `NULL` in `upsert_app_config` / `upsert_guest_config`, restoring inheritance from the parent config level.
+- New hosts must supply a real `token_secret` — `None`, `""`, or `"***"` are rejected with 422 by the settings route.
 
 **Detectors**
 - All detectors default to `http://`; use per-app `scheme=https` for HTTPS-only apps.
@@ -131,6 +132,7 @@ docker compose build && docker compose up -d
 - `forced_detector` and `version_host` live on `AppConfig` (shared model) but are semantically guest-only; only the guest config save path uses them.
 - `version_host` overrides both the version probe IP **and** the clickable web URL link for a guest.
 - Non-secret fields (scheme, github_repo, ssh_version_cmd, etc.) can be cleared back to default by sending `""` (empty string) — `_field_value()` in `guests.py` maps `""` to `None` which writes NULL to the database.
+- Guest config save (`save_guest_config`) checks the previous DB row before deciding to delete — prevents accidental row deletion when real secrets exist behind masked `"***"` values.
 
 **Background tasks**
 - All fire-and-forget `asyncio.create_task()` calls in route handlers must use `_register_bg_task(request, coro)` from `guests.py`, which stores the task in `app.state.background_tasks` (a `set`) and adds `discard` + `_log_task_exception` done-callbacks. Without this, Python holds only a weak reference and the task can be GC'd before completion.
@@ -163,6 +165,7 @@ docker compose build && docker compose up -d
 - Tasks marked `running` for `os_update` or `app_update` are reconciled to `failed` on app restart (stale guard).
 
 **Settings payload**
+- `Settings.tsx` AppConfig payload builder uses clear sentinels: `""` for string fields cleared by the user (backend maps to NULL), `0` for port clears; fields never set are omitted (Pydantic `None` → backend keeps existing). The `hasContent` guard uses `!= null` (not falsy) since `""` is a valid clear sentinel.
 - `Settings.tsx` AppConfig payload builder must include ALL per-app fields when posting — easy to miss new fields when adding them.
 - `save_full()` uses per-host `upsert_host()` calls — each host is upserted individually with `preserve_secrets=True`, so partial saves are safe. Hosts not in the payload are deleted (full replacement semantics at the list level).
 

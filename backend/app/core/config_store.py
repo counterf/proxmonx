@@ -499,6 +499,10 @@ class ConfigStore:
                 for key in existing:
                     if key != "app_name" and key not in data:
                         data[key] = existing[key]
+        # Normalize empty-string secrets to NULL (restores inheritance)
+        for secret in _CONFIG_SECRETS:
+            if data.get(secret) == "":
+                data[secret] = None
 
         conn.execute(
             "INSERT OR REPLACE INTO app_config "
@@ -575,6 +579,10 @@ class ConfigStore:
                 for key in existing:
                     if key != "guest_id" and key not in data:
                         data[key] = existing[key]
+        # Normalize empty-string secrets to NULL (restores inheritance)
+        for secret in _CONFIG_SECRETS:
+            if data.get(secret) == "":
+                data[secret] = None
 
         conn.execute(
             "INSERT OR REPLACE INTO guest_config "

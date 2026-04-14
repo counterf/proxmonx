@@ -269,21 +269,24 @@ export default function Settings() {
         } else if (prev?.port) {
           entry.port = 0;  // clear sentinel; backend maps to NULL
         }
-        // Plain fields -- always send current value (null = clear/default)
-        entry.scheme = cfg.scheme || null;
-        entry.github_repo = cfg.github_repo || null;
-        entry.ssh_version_cmd = cfg.ssh_version_cmd || null;
-        entry.ssh_username = cfg.ssh_username || null;
-        entry.ssh_key_path = cfg.ssh_key_path || null;
+        // String fields: send "" (clear sentinel) when user cleared a previously-set value.
+        // Omit when never set (undefined → Pydantic None → backend keeps existing).
+        for (const field of ['scheme', 'github_repo', 'ssh_version_cmd', 'ssh_username', 'ssh_key_path'] as const) {
+          if (cfg[field]) {
+            entry[field] = cfg[field];
+          } else if (prev?.[field]) {
+            entry[field] = '';  // clear sentinel; backend maps to NULL
+          }
+        }
         // Secret fields -- only send if explicitly changed; otherwise backend
         // keeps existing value (prevents "***" being written back as the token)
         if (changedApiKeys.current.has(name)) {
           entry.api_key = cfg.api_key ?? '';
           entry.ssh_password = cfg.ssh_password ?? '';
         }
-        // Include this app if at least one field is set
-        const hasContent = entry.port != null || entry.scheme || entry.github_repo ||
-          entry.ssh_version_cmd || entry.ssh_username || entry.ssh_key_path ||
+        // Include this app if at least one field is set (use != null since "" is a clear sentinel)
+        const hasContent = entry.port != null || entry.scheme != null || entry.github_repo != null ||
+          entry.ssh_version_cmd != null || entry.ssh_username != null || entry.ssh_key_path != null ||
           changedApiKeys.current.has(name);
         if (hasContent) {
           appConfigPayload[name] = entry;

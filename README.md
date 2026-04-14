@@ -2,7 +2,7 @@
 
 Self-hosted Proxmox monitoring dashboard that continuously discovers LXC containers and VMs, identifies the application running inside each guest, compares the installed version against the latest upstream release on GitHub, and shows a live update-status dashboard — with a built-in setup wizard so you never have to touch a config file.
 
-![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 275 passing](https://img.shields.io/badge/tests-275%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
+![build: passing](https://img.shields.io/badge/build-passing-brightgreen) ![tests: 285 passing](https://img.shields.io/badge/tests-285%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
 
 <!-- screenshot: dashboard showing guests table with version status badges -->
 
@@ -1100,7 +1100,7 @@ uv run --extra dev pytest -v
 ```
 
 ```
-275 tests, ~6 seconds
+285 tests, ~6 seconds
 ```
 
 Test files cover: alerting, auth, auth routes, config store CRUD, custom app defs, detectors, discovery, GitHub API, version normalization, notifier, API key auth, route helpers, SSH command safety, and task locking.
@@ -1538,9 +1538,11 @@ proxmon/
 | "Command not in whitelist" in logs | A detector tried a non-whitelisted command | This is a bug; open an issue |
 | Host key warnings in logs | `SSH_KNOWN_HOSTS_PATH` not set | Expected; set it to enable strict verification |
 
-### GitHub token `"***"` bug
+### Secret masking `"***"` issues
 
-If GitHub API calls return 401 Unauthorized after saving settings, the masked placeholder `"***"` may have been saved as the actual token value. To fix: open Settings, clear the GitHub Token field, type the new token, and save. The `_keep_or_replace()` function in `routes.py` guards against this, but older UI versions or manual API calls can trigger it.
+Scalar secrets (GitHub token, SSH password, ntfy token, API key) are guarded by `_keep_or_replace()` — sending `"***"` back preserves the stored value. Nested secrets (host `token_secret`, per-app `api_key`, per-guest `ssh_password`) are handled by ConfigStore CRUD with `preserve_secrets=True`. Empty-string secrets are normalized to `NULL`, restoring inheritance from the parent config level.
+
+New Proxmox hosts are validated: `token_secret` must be a real value (not `None`, `""`, or `"***"`), or the save returns 422.
 
 ### Container / Docker Compose
 
