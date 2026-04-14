@@ -354,27 +354,45 @@ class ConfigStore:
             update_parts += ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
             conn.execute(f"UPDATE settings SET {update_parts} WHERE id = 1", params)
 
-            # Normalized tables -- replace-all semantics
+            # Normalized tables -- replace-all semantics.
+            # Read existing secrets BEFORE deleting so preserve_secrets can
+            # prevent masked "***" values from overwriting real secrets.
             if "proxmox_hosts" in data:
+                old_hosts = {dict(r)["id"]: dict(r) for r in conn.execute("SELECT * FROM proxmox_hosts").fetchall()}
                 conn.execute("DELETE FROM proxmox_hosts")
                 for h in (data["proxmox_hosts"] or []):
                     if isinstance(h, dict):
+                        hid = h.get("id", "")
+                        for secret in _HOST_SECRETS:
+                            val = h.get(secret)
+                            if (val is None or val == "***") and hid in old_hosts:
+                                h[secret] = old_hosts[hid].get(secret)
                         self._upsert_host_conn(conn, h)
 
             if "app_config" in data:
+                old_apps = {dict(r)["app_name"]: dict(r) for r in conn.execute("SELECT * FROM app_config").fetchall()}
                 conn.execute("DELETE FROM app_config")
                 cfg = data["app_config"]
                 if isinstance(cfg, dict):
                     for app_name, app_data in cfg.items():
                         if isinstance(app_data, dict):
+                            for secret in _CONFIG_SECRETS:
+                                val = app_data.get(secret)
+                                if (val is None or val == "***") and app_name in old_apps:
+                                    app_data[secret] = old_apps[app_name].get(secret)
                             self._upsert_app_config_conn(conn, app_name, app_data)
 
             if "guest_config" in data:
+                old_guests = {dict(r)["guest_id"]: dict(r) for r in conn.execute("SELECT * FROM guest_config").fetchall()}
                 conn.execute("DELETE FROM guest_config")
                 cfg = data["guest_config"]
                 if isinstance(cfg, dict):
                     for guest_id, guest_data in cfg.items():
                         if isinstance(guest_data, dict):
+                            for secret in _CONFIG_SECRETS:
+                                val = guest_data.get(secret)
+                                if (val is None or val == "***") and guest_id in old_guests:
+                                    guest_data[secret] = old_guests[guest_id].get(secret)
                             self._upsert_guest_config_conn(conn, guest_id, guest_data)
 
             if "custom_app_defs" in data:
@@ -384,6 +402,50 @@ class ConfigStore:
                         self._upsert_custom_app_def_conn(conn, d)
 
         logger.info("Settings saved via UI")
+
+    def save_full(
+        self,
+        scalars: dict,
+        hosts: list[dict] | None = None,
+        app_configs: dict[str, dict] | None = None,
+    ) -> None:
+        """Atomically save scalars, hosts, and app configs in one transaction.
+
+        *hosts*: if not None, replaces all hosts (deletes removed, upserts incoming).
+        *app_configs*: if not None, upserts each entry (preserves entries not in payload).
+        Secret fields ("***" / None) are preserved from existing rows.
+        """
+        params = _dict_to_params(scalars)
+        cols = list(params.keys())
+
+        with self._connect() as conn:
+            # 1) Scalar settings
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (id, updated_at) "
+                "VALUES (1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+            )
+            update_parts = ", ".join(f"{c} = :{c}" for c in cols)
+            update_parts += ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+            conn.execute(f"UPDATE settings SET {update_parts} WHERE id = 1", params)
+
+            # 2) Proxmox hosts
+            if hosts is not None:
+                incoming_ids = {h["id"] for h in hosts}
+                existing_ids = {
+                    dict(r)["id"]
+                    for r in conn.execute("SELECT id FROM proxmox_hosts").fetchall()
+                }
+                for removed_id in existing_ids - incoming_ids:
+                    conn.execute("DELETE FROM proxmox_hosts WHERE id = ?", (removed_id,))
+                for h in hosts:
+                    self._upsert_host_conn(conn, h, preserve_secrets=True)
+
+            # 3) App configs (upsert, not replace-all)
+            if app_configs is not None:
+                for app_name, app_data in app_configs.items():
+                    self._upsert_app_config_conn(conn, app_name, app_data, preserve_secrets=True)
+
+        logger.info("Settings saved via UI (atomic)")
 
     # ------------------------------------------------------------------
     # proxmox_hosts CRUD
@@ -398,12 +460,7 @@ class ConfigStore:
     @staticmethod
     def _list_hosts_conn(conn: sqlite3.Connection) -> list[dict]:
         rows = conn.execute("SELECT * FROM proxmox_hosts").fetchall()
-        result = []
-        for r in rows:
-            d = dict(r)
-            d["pct_exec_enabled"] = bool(d.get("pct_exec_enabled", 0))
-            result.append(d)
-        return result
+        return [ConfigStore._row_to_host(r) for r in rows]
 
     def list_hosts(self) -> list[dict]:
         with self._connect() as conn:
@@ -618,20 +675,7 @@ class ConfigStore:
     @staticmethod
     def _list_custom_app_defs_conn(conn: sqlite3.Connection) -> list[dict]:
         rows = conn.execute("SELECT * FROM custom_app_defs").fetchall()
-        result = []
-        for r in rows:
-            d = dict(r)
-            for f in _CUSTOM_APP_JSON_FIELDS:
-                raw = d.get(f)
-                if isinstance(raw, str):
-                    try:
-                        d[f] = json.loads(raw)
-                    except (json.JSONDecodeError, TypeError):
-                        d[f] = []
-            for f in _CUSTOM_APP_BOOL_FIELDS:
-                d[f] = bool(d.get(f, 0))
-            result.append(d)
-        return result
+        return [ConfigStore._row_to_custom_app_def(r) for r in rows]
 
     def list_custom_app_defs(self) -> list[dict]:
         with self._connect() as conn:

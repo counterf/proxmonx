@@ -473,25 +473,15 @@ async def save_settings(
     else:
         config_data["trust_proxy_headers"] = current_file.get("trust_proxy_headers", False)
 
-    # Write scalar settings (no complex fields)
-    try:
-        config_store.save(config_data)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    # Proxmox hosts: upsert each, delete removed ones
+    # Build hosts list for atomic save
+    hosts_to_save: list[dict] | None = None
     if body.proxmox_hosts is not None and len(body.proxmox_hosts) > 0:
-        incoming_ids = {entry.id for entry in body.proxmox_hosts}
-        existing_ids = {h["id"] for h in config_store.list_hosts()}
-        # Delete hosts no longer in the payload
-        for removed_id in existing_ids - incoming_ids:
-            config_store.delete_host(removed_id)
-        # Upsert each incoming host (CRUD handles secret preservation)
-        for entry in body.proxmox_hosts:
-            config_store.upsert_host(entry.model_dump())
+        hosts_to_save = [entry.model_dump() for entry in body.proxmox_hosts]
 
-    # App config: upsert each sent entry (preserves entries not in payload, e.g. custom apps)
+    # Build app config dict for atomic save
+    app_configs_to_save: dict[str, dict] | None = None
     if body.app_config is not None:
+        app_configs_to_save = {}
         for app_name, entry in body.app_config.items():
             prev = config_store.get_app_config(app_name) or {}
             merged_entry: dict[str, Any] = {}
@@ -513,12 +503,18 @@ async def save_settings(
             merged_entry["api_key"] = entry.api_key
             merged_entry["ssh_password"] = entry.ssh_password
             if merged_entry:
-                config_store.upsert_app_config(app_name, merged_entry)
+                app_configs_to_save[app_name] = merged_entry
             else:
                 config_store.delete_app_config(app_name)
         changed_apps = list(body.app_config.keys())
         if changed_apps:
             logger.info("App config updated for: %s", ", ".join(changed_apps))
+
+    # Atomic save: scalars + hosts + app configs in one transaction
+    try:
+        config_store.save_full(config_data, hosts=hosts_to_save, app_configs=app_configs_to_save)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     # Reload settings: config file values take priority over env/defaults
     new_settings = config_store.merge_into_settings(Settings())

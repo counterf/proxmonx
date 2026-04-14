@@ -165,9 +165,12 @@ async def save_guest_config(
     if body.ssh_username is not None and body.ssh_username != "":
         merged["ssh_username"] = body.ssh_username
 
+    # Regular optional fields
+    if body.ssh_key_path is not None and body.ssh_key_path != "":
+        merged["ssh_key_path"] = body.ssh_key_path
+
     # Secret fields: pass through as-is; CRUD's preserve_secrets handles "***"/None
     merged["api_key"] = body.api_key
-    merged["ssh_key_path"] = body.ssh_key_path
     merged["ssh_password"] = body.ssh_password
 
     if body.forced_detector is not None and body.forced_detector != "":
