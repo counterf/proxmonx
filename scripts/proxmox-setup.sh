@@ -21,17 +21,10 @@ PVE_TOKEN_ID="${PVE_USER}!${PVE_TOKEN_NAME}"
 SSH_USER="proxmon"
 SUDOERS_FILE="/etc/sudoers.d/proxmon"
 
-# Track changes
-CHANGES=()
-SKIPPED=()
 TOKEN_SECRET=""
 SSH_AUTH_METHOD=""
 SSH_PASSWORD=""
 SSH_PRIVATE_KEY=""
-
-log_created() { CHANGES+=("[CREATED] $1"); }
-log_updated() { CHANGES+=("[UPDATED] $1"); }
-log_skipped() { SKIPPED+=("[SKIPPED] $1"); }
 
 info()  { echo "  -> $*"; }
 error() { echo "ERROR: $*" >&2; exit 1; }
@@ -65,84 +58,210 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# -----------------------------------------------------------------------
+# DRY-RUN PHASE — detect current state, build plan (no changes made)
+# -----------------------------------------------------------------------
+
+PLAN=()
+SUDOERS_LINE="$SSH_USER ALL=(root) NOPASSWD: /usr/sbin/pct exec *"
+
+# --- API checks ---
+
+ROLE_EXISTS=false
+if pveum role list --output-format json 2>/dev/null | grep -q "\"$PVE_ROLE\""; then
+    ROLE_EXISTS=true
+fi
+
+USER_EXISTS=false
+if pveum user list --output-format json 2>/dev/null | grep -q "\"$PVE_USER\""; then
+    USER_EXISTS=true
+fi
+
+TOKEN_EXISTS=false
+if pveum user token list "$PVE_USER" --output-format json 2>/dev/null | grep -q "\"$PVE_TOKEN_NAME\""; then
+    TOKEN_EXISTS=true
+fi
+
+# --- SSH checks ---
+
+SUDO_INSTALLED=false
+if dpkg -l sudo 2>/dev/null | grep -q '^ii'; then
+    SUDO_INSTALLED=true
+fi
+
+SYSUSER_EXISTS=false
+if id "$SSH_USER" &>/dev/null; then
+    SYSUSER_EXISTS=true
+fi
+
+SUDOERS_CONFIGURED=false
+if [[ -f "$SUDOERS_FILE" ]] && grep -qF "$SUDOERS_LINE" "$SUDOERS_FILE"; then
+    SUDOERS_CONFIGURED=true
+fi
+
+# --- Build plan ---
+
+# API plan
+if $ROLE_EXISTS; then
+    PLAN+=("API|[SKIP]    PVE role '$PVE_ROLE' (already exists)")
+else
+    PLAN+=("API|[CREATE]  PVE role '$PVE_ROLE' with privs: $PVE_PRIVS")
+fi
+
+if $USER_EXISTS; then
+    PLAN+=("API|[SKIP]    PVE user '$PVE_USER' (already exists)")
+else
+    PLAN+=("API|[CREATE]  PVE user '$PVE_USER'")
+fi
+
+if $TOKEN_EXISTS; then
+    PLAN+=("API|[UPDATE]  API token '$PVE_TOKEN_ID' (remove + recreate to reveal secret)")
+else
+    PLAN+=("API|[CREATE]  API token '$PVE_TOKEN_ID'")
+fi
+
+PLAN+=("API|[UPDATE]  ACL: assign '$PVE_ROLE' to '$PVE_USER' on /")
+
+# SSH plan
+if $SUDO_INSTALLED; then
+    PLAN+=("SSH|[SKIP]    sudo package (already installed)")
+else
+    PLAN+=("SSH|[INSTALL] sudo package (required for sudoers)")
+fi
+
+if $SYSUSER_EXISTS; then
+    PLAN+=("SSH|[SKIP]    System user '$SSH_USER' (already exists)")
+else
+    PLAN+=("SSH|[CREATE]  System user '$SSH_USER'")
+fi
+
+if $SUDOERS_CONFIGURED; then
+    PLAN+=("SSH|[SKIP]    $SUDOERS_FILE (already configured)")
+else
+    PLAN+=("SSH|[CREATE]  $SUDOERS_FILE")
+fi
+
+if [[ "$MODE" == "keygen" ]]; then
+    PLAN+=("SSH|[CREATE]  Ed25519 SSH key pair for '$SSH_USER'")
+else
+    PLAN+=("SSH|[CREATE]  Random password for '$SSH_USER'")
+fi
+
+# -----------------------------------------------------------------------
+# DISPLAY PLAN
+# -----------------------------------------------------------------------
+
 echo ""
 echo "=== Proxmon Proxmox Setup ==="
 echo ""
-
-# -----------------------------------------------------------------------
-# API SETUP
-# -----------------------------------------------------------------------
+echo "The following actions will be performed:"
+echo ""
 
 echo "--- API Setup ---"
+for entry in "${PLAN[@]}"; do
+    section="${entry%%|*}"
+    action="${entry#*|}"
+    if [[ "$section" == "API" ]]; then
+        echo "  $action"
+    fi
+done
+
+echo ""
+echo "--- SSH Setup ---"
+for entry in "${PLAN[@]}"; do
+    section="${entry%%|*}"
+    action="${entry#*|}"
+    if [[ "$section" == "SSH" ]]; then
+        echo "  $action"
+    fi
+done
+
+echo ""
+
+# -----------------------------------------------------------------------
+# PROMPT FOR CONFIRMATION
+# -----------------------------------------------------------------------
+
+read -rp "Proceed with the above changes? (y/N): " CONFIRM
+if [[ "${CONFIRM,,}" != "y" ]]; then
+    echo ""
+    echo "Aborted. No changes were made."
+    exit 0
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------
+# EXECUTE — API SETUP
+# -----------------------------------------------------------------------
+
+echo "--- Applying API Setup ---"
 echo ""
 
 # 1. Role
-if pveum role list --output-format json 2>/dev/null | grep -q "\"$PVE_ROLE\""; then
-    log_skipped "PVE role '$PVE_ROLE' (already exists)"
+if $ROLE_EXISTS; then
     info "Role '$PVE_ROLE' already exists"
 else
     pveum role add "$PVE_ROLE" -privs "$PVE_PRIVS"
-    log_created "PVE role '$PVE_ROLE' with privs: $PVE_PRIVS"
     info "Created role '$PVE_ROLE'"
 fi
 
 # 2. User
-if pveum user list --output-format json 2>/dev/null | grep -q "\"$PVE_USER\""; then
-    log_skipped "PVE user '$PVE_USER' (already exists)"
+if $USER_EXISTS; then
     info "User '$PVE_USER' already exists"
 else
     pveum user add "$PVE_USER"
-    log_created "PVE user '$PVE_USER'"
     info "Created user '$PVE_USER'"
 fi
 
 # 3. API Token (always regenerate — Proxmox only reveals the secret at creation)
-if pveum user token list "$PVE_USER" --output-format json 2>/dev/null | grep -q "\"$PVE_TOKEN_NAME\""; then
+if $TOKEN_EXISTS; then
     pveum user token remove "$PVE_USER" "$PVE_TOKEN_NAME" >/dev/null 2>&1
     info "Removed existing token '$PVE_TOKEN_ID'"
 fi
 TOKEN_OUTPUT=$(pveum user token add "$PVE_USER" "$PVE_TOKEN_NAME" -privsep 0 --output-format json 2>&1)
 TOKEN_SECRET=$(echo "$TOKEN_OUTPUT" | grep -oP '"value"\s*:\s*"\K[^"]+' || echo "$TOKEN_OUTPUT")
-log_created "API token '$PVE_TOKEN_ID'"
 info "Created token '$PVE_TOKEN_ID'"
 
 # 4. ACL
 pveum acl modify / -user "$PVE_USER" -role "$PVE_ROLE"
-log_updated "ACL: $PVE_USER -> $PVE_ROLE on /"
 info "Assigned role '$PVE_ROLE' to '$PVE_USER' on /"
 
 echo ""
 
 # -----------------------------------------------------------------------
-# SSH SETUP
+# EXECUTE — SSH SETUP
 # -----------------------------------------------------------------------
 
-echo "--- SSH Setup ---"
+echo "--- Applying SSH Setup ---"
 echo ""
 
-# 1. System user
-if id "$SSH_USER" &>/dev/null; then
-    log_skipped "System user '$SSH_USER' (already exists)"
+# 1. Install sudo
+if $SUDO_INSTALLED; then
+    info "sudo already installed"
+else
+    apt-get update -qq && apt-get install -y -qq sudo
+    info "Installed sudo"
+fi
+
+# 2. System user
+if $SYSUSER_EXISTS; then
     info "System user '$SSH_USER' already exists"
 else
     useradd -r -m -s /bin/bash "$SSH_USER"
-    log_created "System user '$SSH_USER'"
     info "Created system user '$SSH_USER'"
 fi
 
-# 2. Sudoers
-SUDOERS_LINE="$SSH_USER ALL=(root) NOPASSWD: /usr/sbin/pct exec *"
-if [[ -f "$SUDOERS_FILE" ]] && grep -qF "$SUDOERS_LINE" "$SUDOERS_FILE"; then
-    log_skipped "$SUDOERS_FILE (already configured)"
+# 3. Sudoers
+if $SUDOERS_CONFIGURED; then
     info "Sudoers already configured"
 else
     echo "$SUDOERS_LINE" > "$SUDOERS_FILE"
     chmod 440 "$SUDOERS_FILE"
-    log_created "$SUDOERS_FILE"
     info "Created sudoers rule: $SUDOERS_LINE"
 fi
 
-# 3. SSH auth
+# 4. SSH auth
 SSH_DIR="$(eval echo ~"$SSH_USER")/.ssh"
 
 if [[ "$MODE" == "keygen" ]]; then
@@ -157,14 +276,12 @@ if [[ "$MODE" == "keygen" ]]; then
     chown -R "$SSH_USER:$SSH_USER" "$SSH_DIR"
     chmod 700 "$SSH_DIR"
     chmod 600 "$SSH_DIR/authorized_keys"
-    log_created "$SSH_DIR/authorized_keys (generated key pair)"
     info "Generated Ed25519 key pair and installed public key"
     SSH_AUTH_METHOD="key-based (generated)"
 
 elif [[ "$MODE" == "password" ]]; then
     SSH_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=' | head -c 20)
     echo "$SSH_USER:$SSH_PASSWORD" | chpasswd
-    log_created "Password for system user '$SSH_USER'"
     info "Set password for '$SSH_USER'"
     SSH_AUTH_METHOD="password"
 fi
@@ -172,20 +289,9 @@ fi
 echo ""
 
 # -----------------------------------------------------------------------
-# SUMMARY
+# CREDENTIALS SUMMARY
 # -----------------------------------------------------------------------
 
-echo "=============================="
-echo "  Changes Made"
-echo "=============================="
-for entry in "${CHANGES[@]+"${CHANGES[@]}"}"; do
-    echo "  $entry"
-done
-for entry in "${SKIPPED[@]+"${SKIPPED[@]}"}"; do
-    echo "  $entry"
-done
-
-echo ""
 echo "=============================="
 echo "  Proxmon Settings"
 echo "=============================="

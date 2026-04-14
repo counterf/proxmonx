@@ -88,7 +88,7 @@ _PIPE_SAFE_COMMANDS = frozenset({'awk', 'grep', 'cut', 'head', 'tail', 'sed', 't
 def _parse_pkey(key_content: str) -> paramiko.PKey:
     """Parse PEM-encoded private key content into a paramiko PKey."""
     key_file = io.StringIO(key_content)
-    for key_class in (paramiko.Ed25519Key, paramiko.RSAKey, paramiko.ECDSAKey, paramiko.DSSKey):
+    for key_class in (paramiko.Ed25519Key, paramiko.RSAKey, paramiko.ECDSAKey):
         try:
             key_file.seek(0)
             return key_class.from_private_key(key_file)
