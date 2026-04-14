@@ -26,7 +26,7 @@ Proxmox monitoring dashboard. Discovers LXC/VM guests across multiple Proxmox ho
 - `backend/app/core/notifier.py` -- NtfyNotifier (HTTP POST); AlertManager evaluates disk threshold + outdated-app alerts after each discovery cycle
 
 ### API routes
-- `backend/app/api/routes/guests.py` -- guest endpoints; snapshot name resolved here before calling `guest_action()` (auto-generates `proxmon-YYYYMMDD-HHMMSS` if not provided); `_poll_upid()` background task polls Proxmox UPID for completion; `POST /api/guests/{id}/os-update` and `/app-update` fire background tasks via `run_os_update_bg` / `run_app_update_bg`
+- `backend/app/api/routes/guests.py` -- guest endpoints; snapshot name resolved here before calling `guest_action()` (auto-generates `proxmon-YYYYMMDD-HHMMSS` if not provided); `_poll_upid()` background task polls Proxmox UPID for completion; `POST /api/guests/{id}/os-update` and `/app-update` fire background tasks via `run_os_update_bg` / `run_app_update_bg`; `_register_bg_task(request, coro)` encapsulates background task GC-prevention pattern; `_handle_proxmox_error(exc, task_store, task_id)` shared Proxmox error extraction for action/backup endpoints
 - `backend/app/api/routes/settings.py` -- settings endpoints; host/app_config/guest_config secrets handled by ConfigStore CRUD layer; preserves guest state (`scheduler._guests`) across settings save
 - `backend/app/api/routes/custom_apps.py` -- custom app definition CRUD; uses ConfigStore CRUD methods directly (list, get, upsert, delete)
 - `backend/app/api/routes/bulk_jobs.py` -- bulk os_update / app_update across multiple guests; sequential per-guest execution
@@ -48,6 +48,8 @@ Proxmox monitoring dashboard. Discovers LXC/VM guests across multiple Proxmox ho
 - `frontend/src/components/Tasks.tsx` -- task history; `InfoCell` shows "View output" toggle (unified for success + failed); `TaskStatusBadge` renders task status with pulse animation for running/pending
 - `frontend/src/utils/formatRelativeTime.ts` -- shared relative time formatter (used by GuestRow, Tasks)
 - `frontend/src/types/index.ts` -- shared types; exports `SUPPORTED_OS_TYPES` constant (used by GuestActions, BulkProgressModal)
+- `frontend/src/components/shared/SshFieldGroup.tsx` -- shared SSH form fields (username, key path, password, version command); used by AppConfigSection and InstanceSettings
+- `frontend/src/utils/guestStyles.ts` -- shared badge/style constants: `getTypeBadgeClass()`, `VERSION_SOURCE_STYLES`, `VERSION_SOURCE_SHORT_LABELS`; used by GuestRow and GuestDetail
 - `frontend/src/components/Settings.tsx` -- delegates to section components
 - `frontend/src/components/settings/AppConfigSection.tsx` -- per-app config (port, api_key, scheme, github_repo, ssh_version_cmd, ssh_username, ssh_key_path, ssh_password)
 - `frontend/src/components/settings/CustomAppsSection.tsx` -- CRUD UI for user-defined custom app definitions
@@ -128,9 +130,10 @@ docker compose build && docker compose up -d
 **Per-guest config**
 - `forced_detector` and `version_host` live on `AppConfig` (shared model) but are semantically guest-only; only the guest config save path uses them.
 - `version_host` overrides both the version probe IP **and** the clickable web URL link for a guest.
+- Non-secret fields (scheme, github_repo, ssh_version_cmd, etc.) can be cleared back to default by sending `""` (empty string) — `_field_value()` in `guests.py` maps `""` to `None` which writes NULL to the database.
 
 **Background tasks**
-- All fire-and-forget `asyncio.create_task()` calls in route handlers must store the task in `app.state.background_tasks` (a `set`) and add `task.add_done_callback(bg_tasks.discard)` + `task.add_done_callback(_log_task_exception)`. Without this, Python holds only a weak reference and the task can be GC'd before completion.
+- All fire-and-forget `asyncio.create_task()` calls in route handlers must use `_register_bg_task(request, coro)` from `guests.py`, which stores the task in `app.state.background_tasks` (a `set`) and adds `discard` + `_log_task_exception` done-callbacks. Without this, Python holds only a weak reference and the task can be GC'd before completion.
 
 **SSH**
 - SSH methods (`run_os_update`, `run_app_update`, `run_pending_updates_list`, etc.) call `_extract_ssh_host()` internally — callers should pass `host_config.host` (the raw URL) directly, not pre-extract.
