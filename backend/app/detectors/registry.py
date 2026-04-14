@@ -88,6 +88,7 @@ def load_custom_detectors(custom_defs: list[CustomAppDef]) -> None:
             auth_header=defn.auth_header,
             version_keys=tuple(defn.version_keys),
             strip_v=defn.strip_v,
+            scheme=defn.scheme,
         )
         detector = HttpJsonDetector(cfg)
         _CUSTOM_DETECTORS.append(detector)

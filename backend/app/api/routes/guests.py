@@ -137,7 +137,7 @@ class GuestConfigSaveRequest(_AppConfigBase):
     @classmethod
     def validate_forced_detector(cls, v: str | None) -> str | None:
         if v is None or v == "":
-            return None
+            return v
         if v not in DETECTOR_MAP:
             raise ValueError(f"Unknown detector: {v!r}")
         return v
@@ -217,7 +217,7 @@ async def save_guest_config(
     if merged.get("port") is None:
         merged.pop("port", None)
 
-    if merged:
+    if any(v is not None and v != "***" for v in merged.values()):
         config_store.upsert_guest_config(guest_id, merged)
     else:
         config_store.delete_guest_config(guest_id)

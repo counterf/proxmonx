@@ -64,9 +64,9 @@ class TestGuestConfigForcedDetector:
         m = GuestConfigSaveRequest(forced_detector="sonarr")
         assert m.forced_detector == "sonarr"
 
-    def test_empty_normalized_to_none(self) -> None:
+    def test_empty_preserved_for_clear(self) -> None:
         m = GuestConfigSaveRequest(forced_detector="")
-        assert m.forced_detector is None
+        assert m.forced_detector == ""
 
     def test_unknown_detector_raises(self) -> None:
         with pytest.raises(ValidationError):

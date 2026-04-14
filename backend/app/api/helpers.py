@@ -4,7 +4,7 @@ import asyncio
 import hmac
 import logging
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import APIKeyHeader
@@ -138,13 +138,22 @@ class _AppConfigBase(BaseModel):
 
     port: int | None = Field(default=None, ge=1, le=65535)
     api_key: str | None = None
-    scheme: Literal["http", "https"] | None = None
+    scheme: str | None = None
     github_repo: str | None = None
     ssh_version_cmd: str | None = Field(default=None, max_length=512)
     ssh_username: str | None = None
     ssh_key_path: str | None = None
     ssh_password: str | None = None
     version_host: str | None = None
+
+    @field_validator("scheme")
+    @classmethod
+    def validate_scheme(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return v
+        if v not in ("http", "https"):
+            raise ValueError(f"scheme must be 'http' or 'https', got {v!r}")
+        return v
 
     @field_validator("ssh_version_cmd")
     @classmethod

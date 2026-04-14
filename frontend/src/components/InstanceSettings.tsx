@@ -92,15 +92,15 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
     const trimmed = input.trim();
     const lower = trimmed.toLowerCase();
     if (!trimmed) {
-      setCfg({ ...cfg, scheme: null, version_host: null });
+      setCfg({ ...cfg, scheme: '', version_host: '' });
     } else if (lower.startsWith('https://')) {
       const host = trimmed.slice(8).replace(/\/+$/, '');
-      setCfg({ ...cfg, scheme: 'https', version_host: host || null });
+      setCfg({ ...cfg, scheme: 'https', version_host: host || '' });
     } else if (lower.startsWith('http://')) {
       const host = trimmed.slice(7).replace(/\/+$/, '');
-      setCfg({ ...cfg, scheme: null, version_host: host || null });
+      setCfg({ ...cfg, scheme: '', version_host: host || '' });
     } else {
-      setCfg({ ...cfg, scheme: null, version_host: trimmed });
+      setCfg({ ...cfg, scheme: '', version_host: trimmed });
     }
   };
 
@@ -142,7 +142,7 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
     setMessage(null);
     setMessageIsError(false);
     try {
-      const updated = { ...cfg, forced_detector: null };
+      const updated = { ...cfg, forced_detector: '' };
       await saveGuestConfig(guestId, updated);
       setCfg(updated);
       setMessage('Cleared. Refreshing...');
@@ -207,7 +207,7 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
                 <select
                   id="gc-forced-detector"
                   value={forcedDetector ?? ''}
-                  onChange={(e) => setCfg({ ...cfg, forced_detector: e.target.value || null } as typeof cfg)}
+                  onChange={(e) => setCfg({ ...cfg, forced_detector: e.target.value || '' } as typeof cfg)}
                   className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   <option value="">None -- use auto-detection only</option>
@@ -281,14 +281,14 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
                 type="text"
                 value={cfg.github_repo ?? ''}
                 placeholder={inheritedGithubRepo ? `Inherited: ${inheritedGithubRepo}` : 'owner/repo or full GitHub URL'}
-                onChange={(e) => { setCfg({ ...cfg, github_repo: e.target.value || null }); setTestResult(null); }}
+                onChange={(e) => { setCfg({ ...cfg, github_repo: e.target.value || '' }); setTestResult(null); }}
                 className="flex-1 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded font-mono text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
               {cfg.github_repo && (
                 <button
                   type="button"
                   aria-label="Clear GitHub repo override"
-                  onClick={() => { setCfg({ ...cfg, github_repo: null }); setTestResult(null); }}
+                  onClick={() => { setCfg({ ...cfg, github_repo: '' }); setTestResult(null); }}
                   className="text-gray-500 hover:text-white text-lg leading-none"
                 >x</button>
               )}
@@ -334,10 +334,10 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
                   keyPath={cfg.ssh_key_path ?? ''}
                   password={cfg.ssh_password ?? ''}
                   showPassword={showSshPassword}
-                  onVersionCmdChange={(v) => setCfg({ ...cfg, ssh_version_cmd: v || null })}
-                  onUsernameChange={(v) => setCfg({ ...cfg, ssh_username: v || null })}
-                  onKeyPathChange={(v) => setCfg({ ...cfg, ssh_key_path: v || null })}
-                  onPasswordChange={(v) => setCfg({ ...cfg, ssh_password: v || null })}
+                  onVersionCmdChange={(v) => setCfg({ ...cfg, ssh_version_cmd: v || '' })}
+                  onUsernameChange={(v) => setCfg({ ...cfg, ssh_username: v || '' })}
+                  onKeyPathChange={(v) => setCfg({ ...cfg, ssh_key_path: v || '' })}
+                  onPasswordChange={(v) => setCfg({ ...cfg, ssh_password: v })}
                   onToggleShowPassword={() => setShowSshPassword(!showSshPassword)}
                   passwordPlaceholder="masked"
                 />

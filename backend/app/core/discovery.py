@@ -379,9 +379,11 @@ class DiscoveryEngine:
         self, detector_name: str, guest_id: str,
     ) -> ResolvedConfig:
         """Resolve effective config: guest_config -> app_config -> defaults."""
+        # Layer 0: detector-level default scheme (custom apps may set https)
+        detector_obj = DETECTOR_MAP.get(detector_name)
         port: int | None = None
         api_key: str | None = None
-        scheme: str = "http"
+        scheme: str = getattr(detector_obj, "scheme", "http")
         github_repo: str | None = None
         ssh_cmd: str | None = None
         ssh_user: str | None = None

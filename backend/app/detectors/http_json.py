@@ -32,6 +32,7 @@ class DetectorConfig:
     auth_header: str | None = None
     version_keys: tuple[str, ...] = ("version",)
     strip_v: bool = False
+    scheme: str = "http"
 
 
 SIMPLE_DETECTOR_CONFIGS: list[DetectorConfig] = [
@@ -139,6 +140,7 @@ class HttpJsonDetector(BaseDetector):
         self.default_port = config.default_port
         self.docker_images = list(config.docker_images)
         self.accepts_api_key = config.accepts_api_key
+        self.scheme = config.scheme
         self._path = config.path
         self._auth_header = config.auth_header
         self._version_keys = config.version_keys
