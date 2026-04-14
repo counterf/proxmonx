@@ -248,7 +248,7 @@ class SSHClient:
             logger.warning("pct exec rejected unsafe cmd for vmid %s: %.80s", vmid, cmd)
             return None
 
-        pct_command = f"pct exec {vmid} -- {cmd}"
+        pct_command = f"sudo pct exec {vmid} -- {cmd}"
         logger.info("pct exec on %s: %s", proxmox_host, pct_command)
 
         try:
@@ -300,7 +300,7 @@ class SSHClient:
         ssh_host = _extract_ssh_host(proxmox_host)
         # Wrap in sh -c so && is interpreted inside the container, not by the Proxmox host shell
         escaped = inner_cmd.replace("'", "'\\''")
-        pct_command = f"pct exec {vmid} -- sh -c '{escaped}'"
+        pct_command = f"sudo pct exec {vmid} -- sh -c '{escaped}'"
         logger.info("OS update on %s vmid %s (ostype=%s)", ssh_host, vmid, os_type)
         try:
             stdout, stderr, exit_code = await asyncio.to_thread(
@@ -353,7 +353,7 @@ class SSHClient:
 
         ssh_host = _extract_ssh_host(proxmox_host)
         escaped = "PHS_SILENT=1 /usr/bin/update".replace("'", "'\\''")
-        pct_command = f"pct exec {vmid} -- sh -c '{escaped}'"
+        pct_command = f"sudo pct exec {vmid} -- sh -c '{escaped}'"
         logger.info("App update on %s vmid %s", ssh_host, vmid)
         try:
             stdout, stderr, exit_code = await asyncio.to_thread(
@@ -412,7 +412,7 @@ class SSHClient:
 
         ssh_host = _extract_ssh_host(proxmox_host)
         escaped = check_cmd.replace("'", "'\\''")
-        pct_command = f"pct exec {vmid} -- sh -c '{escaped}'"
+        pct_command = f"sudo pct exec {vmid} -- sh -c '{escaped}'"
         logger.debug("pending updates list on %s vmid %s (ostype=%s)", ssh_host, vmid, os_type)
         try:
             stdout, _stderr, exit_code = await asyncio.to_thread(
@@ -457,7 +457,7 @@ class SSHClient:
             return None
 
         ssh_host = _extract_ssh_host(proxmox_host)
-        pct_command = f"pct exec {vmid} -- test -f /var/run/reboot-required"
+        pct_command = f"sudo pct exec {vmid} -- test -f /var/run/reboot-required"
         logger.debug("reboot-required check on %s vmid %s", ssh_host, vmid)
         try:
             _stdout, _stderr, exit_code = await asyncio.to_thread(
@@ -502,7 +502,7 @@ class SSHClient:
             return None
 
         ssh_host = _extract_ssh_host(proxmox_host)
-        pct_command = f"pct exec {vmid} -- test -f /usr/bin/update"
+        pct_command = f"sudo pct exec {vmid} -- test -f /usr/bin/update"
         logger.debug("community-script check on %s vmid %s", ssh_host, vmid)
         try:
             _stdout, _stderr, exit_code = await asyncio.to_thread(
