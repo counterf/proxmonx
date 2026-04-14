@@ -172,124 +172,6 @@ class ConnectionTestRequest(BaseModel):
         return v.strip()
 
 
-# --- Merge helpers ---
-
-
-def _merge_proxmox_hosts(
-    body: SettingsSaveRequest, existing: dict[str, Any],
-) -> list[dict[str, Any]] | None:
-    """Merge proxmox_hosts from the request with existing persisted hosts.
-
-    Returns the merged list, or None if the payload omitted hosts
-    (caller should preserve existing data).
-    """
-    if body.proxmox_hosts is None or len(body.proxmox_hosts) == 0:
-        return None
-
-    existing_hosts: list[dict] = existing.get("proxmox_hosts", [])
-    saved_hosts = []
-    for entry in body.proxmox_hosts:
-        prev = next((h for h in existing_hosts if h.get("id") == entry.id), {})
-        saved_hosts.append({
-            "id": entry.id,
-            "label": entry.label,
-            "host": entry.host,
-            "token_id": entry.token_id,
-            "token_secret": _keep_or_replace(entry.token_secret, prev.get("token_secret")),
-            "node": entry.node,
-            "ssh_username": entry.ssh_username,
-            "ssh_password": _keep_or_replace(entry.ssh_password, prev.get("ssh_password")),
-            "ssh_key_path": entry.ssh_key_path or prev.get("ssh_key_path") or "",
-            "pct_exec_enabled": entry.pct_exec_enabled,
-            "backup_storage": entry.backup_storage or None,
-        })
-    return saved_hosts
-
-
-def _merge_app_config(
-    body: SettingsSaveRequest, existing: dict[str, Any],
-) -> dict[str, dict[str, Any]]:
-    """Merge per-app config entries, preserving secrets masked with '***'.
-
-    Returns the merged app_config dict to persist.
-    """
-    if body.app_config is None:
-        return existing.get("app_config", {})
-
-    existing_app_config: dict[str, dict[str, Any]] = existing.get("app_config", {})
-    merged_app_config: dict[str, dict[str, Any]] = dict(existing_app_config)
-
-    for app_name, entry in body.app_config.items():
-        prev = existing_app_config.get(app_name, {})
-        merged_entry: dict[str, Any] = {}
-        # Port: None means "use default" (omit)
-        if entry.port is not None:
-            merged_entry["port"] = entry.port
-        # API key: None means "keep current", "" means "clear", "***" means "keep"
-        if entry.api_key is None or entry.api_key == "***":
-            if prev.get("api_key"):
-                merged_entry["api_key"] = prev["api_key"]
-        elif entry.api_key == "":
-            pass  # Explicit clear
-        else:
-            merged_entry["api_key"] = entry.api_key
-        # Scheme: None means "keep current / use default"
-        if entry.scheme is not None:
-            merged_entry["scheme"] = entry.scheme
-        elif prev.get("scheme"):
-            merged_entry["scheme"] = prev["scheme"]
-        # GitHub repo: None means "keep current", "" means "clear", value means "set"
-        if entry.github_repo is None:
-            if prev.get("github_repo"):
-                merged_entry["github_repo"] = prev["github_repo"]
-        elif entry.github_repo == "":
-            pass  # Explicit clear
-        else:
-            merged_entry["github_repo"] = entry.github_repo
-        # ssh_version_cmd: plain value, None = keep, empty = clear
-        if entry.ssh_version_cmd is None:
-            if prev.get("ssh_version_cmd"):
-                merged_entry["ssh_version_cmd"] = prev["ssh_version_cmd"]
-        elif entry.ssh_version_cmd == "":
-            pass  # clear
-        else:
-            merged_entry["ssh_version_cmd"] = entry.ssh_version_cmd
-        # ssh_username: plain value
-        if entry.ssh_username is None:
-            if prev.get("ssh_username"):
-                merged_entry["ssh_username"] = prev["ssh_username"]
-        elif entry.ssh_username == "":
-            pass  # clear
-        else:
-            merged_entry["ssh_username"] = entry.ssh_username
-        # ssh_key_path: plain value
-        if entry.ssh_key_path is None:
-            if prev.get("ssh_key_path"):
-                merged_entry["ssh_key_path"] = prev["ssh_key_path"]
-        elif entry.ssh_key_path == "":
-            pass  # clear
-        else:
-            merged_entry["ssh_key_path"] = entry.ssh_key_path
-        # ssh_password: treat like api_key (masked)
-        if entry.ssh_password is None or entry.ssh_password == "***":
-            if prev.get("ssh_password"):
-                merged_entry["ssh_password"] = prev["ssh_password"]
-        elif entry.ssh_password == "":
-            pass  # clear
-        else:
-            merged_entry["ssh_password"] = entry.ssh_password
-        if merged_entry:
-            merged_app_config[app_name] = merged_entry
-        elif app_name in merged_app_config:
-            del merged_app_config[app_name]
-
-    changed_apps = list(body.app_config.keys())
-    if changed_apps:
-        logger.info("App config updated for: %s", ", ".join(changed_apps))
-
-    return merged_app_config
-
-
 def _apply_auth_settings(
     body: SettingsSaveRequest,
     existing: dict[str, Any],
@@ -442,9 +324,7 @@ async def list_host_backup_storages(
     from app.config import ProxmoxHostConfig
     from app.core.proxmox import ProxmoxClient
 
-    data = config_store.load()
-    hosts: list[dict] = data.get("proxmox_hosts", [])
-    host_dict = next((h for h in hosts if h.get("id") == host_id), None)
+    host_dict = config_store.get_host(host_id)
     if not host_dict:
         return {"error": f"Host {host_id!r} not found"}
 
@@ -466,8 +346,7 @@ async def test_connection(
     """Test Proxmox connectivity without saving settings."""
     token_secret = body.token_secret
     if token_secret == "***" and body.host_id is not None:
-        data = config_store.load()
-        host_dict = next((h for h in data.get("proxmox_hosts", []) if h.get("id") == body.host_id), None)
+        host_dict = config_store.get_host(body.host_id)
         if host_dict is None:
             return {"success": False, "message": "Saved host not found", "node_info": None}
         token_secret = host_dict.get("token_secret", "")
@@ -562,10 +441,10 @@ async def save_settings(
     scheduler=Depends(_get_scheduler),
 ) -> dict[str, bool | str]:
     """Save settings to config file, reload, and restart scheduler."""
-    # Read existing config once to avoid TOCTOU and preserve values
+    # Read existing scalars once to preserve values for mask-aware fields
     current_file = config_store.load()
 
-    # Build config data to persist
+    # Build scalar config data to persist
     config_data: dict[str, Any] = {
         "poll_interval_seconds": body.poll_interval_seconds,
         "pending_updates_interval_seconds": body.pending_updates_interval_seconds,
@@ -594,35 +473,52 @@ async def save_settings(
     else:
         config_data["trust_proxy_headers"] = current_file.get("trust_proxy_headers", False)
 
-    # Multi-host support
-    merged_hosts = _merge_proxmox_hosts(body, current_file)
-    if merged_hosts is not None:
-        config_data["proxmox_hosts"] = merged_hosts
-
-    # Preserve existing proxmox_hosts when payload omits them
-    if "proxmox_hosts" not in config_data:
-        existing_hosts_data = current_file.get("proxmox_hosts")
-        if existing_hosts_data:
-            config_data["proxmox_hosts"] = existing_hosts_data
-
-    # Merge app_config
-    config_data["app_config"] = _merge_app_config(body, current_file)
-
-    # Always preserve guest_config (managed via /api/guests/{id}/config)
-    existing_guest_config = current_file.get("guest_config")
-    if existing_guest_config:
-        config_data["guest_config"] = existing_guest_config
-
-    # Always preserve custom_app_defs (managed via /api/custom-apps)
-    existing_custom_apps = current_file.get("custom_app_defs")
-    if existing_custom_apps:
-        config_data["custom_app_defs"] = existing_custom_apps
-
-    # Write to config file
+    # Write scalar settings (no complex fields)
     try:
         config_store.save(config_data)
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # Proxmox hosts: upsert each, delete removed ones
+    if body.proxmox_hosts is not None and len(body.proxmox_hosts) > 0:
+        incoming_ids = {entry.id for entry in body.proxmox_hosts}
+        existing_ids = {h["id"] for h in config_store.list_hosts()}
+        # Delete hosts no longer in the payload
+        for removed_id in existing_ids - incoming_ids:
+            config_store.delete_host(removed_id)
+        # Upsert each incoming host (CRUD handles secret preservation)
+        for entry in body.proxmox_hosts:
+            config_store.upsert_host(entry.model_dump())
+
+    # App config: upsert each sent entry (preserves entries not in payload, e.g. custom apps)
+    if body.app_config is not None:
+        for app_name, entry in body.app_config.items():
+            prev = config_store.get_app_config(app_name) or {}
+            merged_entry: dict[str, Any] = {}
+            if entry.port is not None:
+                merged_entry["port"] = entry.port
+            if entry.scheme is not None:
+                merged_entry["scheme"] = entry.scheme
+            elif prev.get("scheme"):
+                merged_entry["scheme"] = prev["scheme"]
+            # Non-secret optional fields: None = keep, "" = clear
+            for field in ("github_repo", "ssh_version_cmd", "ssh_username", "ssh_key_path"):
+                val = getattr(entry, field)
+                if val is None:
+                    if prev.get(field):
+                        merged_entry[field] = prev[field]
+                elif val != "":
+                    merged_entry[field] = val
+            # Secret fields: pass through, CRUD handles "***"/None preservation
+            merged_entry["api_key"] = entry.api_key
+            merged_entry["ssh_password"] = entry.ssh_password
+            if merged_entry:
+                config_store.upsert_app_config(app_name, merged_entry)
+            else:
+                config_store.delete_app_config(app_name)
+        changed_apps = list(body.app_config.keys())
+        if changed_apps:
+            logger.info("App config updated for: %s", ", ".join(changed_apps))
 
     # Reload settings: config file values take priority over env/defaults
     new_settings = config_store.merge_into_settings(Settings())

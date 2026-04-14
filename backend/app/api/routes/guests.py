@@ -23,7 +23,6 @@ from app.api.helpers import (
     _get_scheduler,
     _get_settings,
     _get_task_store,
-    _keep_or_replace,
     _reload_settings_into_engine,
     _require_api_key,
     run_app_update_bg,
@@ -134,8 +133,7 @@ async def get_guest_config(
     config_store=Depends(_get_config_store),
 ) -> dict[str, Any]:
     """Return per-guest config overrides (API keys masked)."""
-    data = config_store.load()
-    guest_cfg = data.get("guest_config", {}).get(guest_id, {})
+    guest_cfg = config_store.get_guest_config(guest_id) or {}
     if guest_cfg.get("api_key") or guest_cfg.get("ssh_password"):
         guest_cfg = dict(guest_cfg)
         if guest_cfg.get("api_key"):
@@ -155,10 +153,6 @@ async def save_guest_config(
     """Save per-guest configuration overrides."""
     # ssh_version_cmd safety is enforced by _AppConfigBase.validate_ssh_version_cmd
 
-    data = config_store.load()
-    all_guest_cfg: dict = data.get("guest_config", {})
-    prev = all_guest_cfg.get(guest_id, {})
-
     merged: dict[str, Any] = {}
     if body.port is not None:
         merged["port"] = body.port
@@ -171,26 +165,24 @@ async def save_guest_config(
     if body.ssh_username is not None and body.ssh_username != "":
         merged["ssh_username"] = body.ssh_username
 
-    merged["api_key"] = _keep_or_replace(body.api_key, prev.get("api_key"))
-    merged["ssh_key_path"] = _keep_or_replace(body.ssh_key_path, prev.get("ssh_key_path"))
-    merged["ssh_password"] = _keep_or_replace(body.ssh_password, prev.get("ssh_password"))
+    # Secret fields: pass through as-is; CRUD's preserve_secrets handles "***"/None
+    merged["api_key"] = body.api_key
+    merged["ssh_key_path"] = body.ssh_key_path
+    merged["ssh_password"] = body.ssh_password
 
     if body.forced_detector is not None and body.forced_detector != "":
         merged["forced_detector"] = body.forced_detector
     if body.version_host is not None and body.version_host != "":
         merged["version_host"] = body.version_host
-    # None means "clear" -- not added to merged, stripped below
 
-    # Strip None values
+    # Strip None values (None means "clear" or "keep existing" — CRUD handles secrets)
     merged = {k: v for k, v in merged.items() if v is not None}
 
     if merged:
-        all_guest_cfg[guest_id] = merged
-    elif guest_id in all_guest_cfg:
-        del all_guest_cfg[guest_id]
+        config_store.upsert_guest_config(guest_id, merged)
+    else:
+        config_store.delete_guest_config(guest_id)
 
-    data["guest_config"] = all_guest_cfg
-    config_store.save(data)
     _reload_settings_into_engine(request, config_store)
     logger.info("Guest config saved for %s", guest_id)
     return {"status": "saved"}
@@ -203,12 +195,7 @@ async def delete_guest_config(
     config_store=Depends(_get_config_store),
 ) -> dict[str, str]:
     """Remove all per-guest config overrides (reset to inherit from global)."""
-    data = config_store.load()
-    all_guest_cfg: dict = data.get("guest_config", {})
-    if guest_id in all_guest_cfg:
-        del all_guest_cfg[guest_id]
-        data["guest_config"] = all_guest_cfg
-        config_store.save(data)
+    config_store.delete_guest_config(guest_id)
     _reload_settings_into_engine(request, config_store)
     logger.info("Guest config cleared for %s", guest_id)
     return {"status": "cleared"}
@@ -231,9 +218,7 @@ async def perform_guest_action(
         raise HTTPException(status_code=404, detail=f"Guest {guest_id} not found")
 
     # Find matching host config
-    data = config_store.load()
-    hosts: list[dict] = data.get("proxmox_hosts", [])
-    host_dict = next((h for h in hosts if h.get("id") == guest.host_id), None)
+    host_dict = config_store.get_host(guest.host_id)
     if not host_dict:
         raise HTTPException(status_code=404, detail=f"Host config not found for host_id={guest.host_id!r}")
 
@@ -318,9 +303,7 @@ async def os_update_guest(
     if not guest.os_type or guest.os_type not in OS_UPDATE_COMMANDS:
         raise HTTPException(status_code=400, detail=f"Unsupported OS type: {guest.os_type!r}")
 
-    data = config_store.load()
-    hosts: list[dict] = data.get("proxmox_hosts", [])
-    host_dict = next((h for h in hosts if h.get("id") == guest.host_id), None)
+    host_dict = config_store.get_host(guest.host_id)
     if not host_dict:
         raise HTTPException(status_code=404, detail=f"Host config not found for {guest.host_id!r}")
 
@@ -385,9 +368,7 @@ async def app_update_guest(
     if not guest.has_community_script:
         raise HTTPException(status_code=400, detail="/usr/bin/update not found on this container")
 
-    data = config_store.load()
-    hosts: list[dict] = data.get("proxmox_hosts", [])
-    host_dict = next((h for h in hosts if h.get("id") == guest.host_id), None)
+    host_dict = config_store.get_host(guest.host_id)
     if not host_dict:
         raise HTTPException(status_code=404, detail=f"Host config not found for {guest.host_id!r}")
 
@@ -446,9 +427,7 @@ async def backup_guest(
     if not guest:
         raise HTTPException(status_code=404, detail=f"Guest {guest_id} not found")
 
-    data = config_store.load()
-    hosts: list[dict] = data.get("proxmox_hosts", [])
-    host_dict = next((h for h in hosts if h.get("id") == guest.host_id), None)
+    host_dict = config_store.get_host(guest.host_id)
     if not host_dict:
         raise HTTPException(status_code=404, detail=f"Host config not found for {guest.host_id!r}")
 

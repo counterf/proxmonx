@@ -67,15 +67,10 @@ class CustomAppDefRequest(BaseModel):
 
 
 def _reload_custom_detectors(
-    request: Request, config_store, data: dict | None = None
+    request: Request, config_store,
 ) -> None:
-    """Reload custom detectors from the DB and seed app_config for https apps.
-
-    Pass *data* (already-loaded config dict) to avoid a redundant DB read.
-    """
-    if data is None:
-        data = config_store.load()
-    defs_raw = data.get("custom_app_defs", [])
+    """Reload custom detectors from the DB and seed app_config for https apps."""
+    defs_raw = config_store.list_custom_app_defs()
     defs = []
     for i, item in enumerate(defs_raw):
         if isinstance(item, dict):
@@ -87,22 +82,18 @@ def _reload_custom_detectors(
     load_custom_detectors(defs)
 
     # Sync app_config scheme for custom apps
-    app_config = data.get("app_config", {})
-    changed = False
+    app_configs = config_store.list_app_configs()
     for defn in defs:
-        if defn.scheme != "http" and defn.name not in app_config:
-            app_config[defn.name] = {"scheme": defn.scheme}
-            changed = True
-        elif defn.scheme == "http" and defn.name in app_config:
-            entry = app_config[defn.name]
+        if defn.scheme != "http" and defn.name not in app_configs:
+            config_store.upsert_app_config(defn.name, {"scheme": defn.scheme})
+        elif defn.scheme == "http" and defn.name in app_configs:
+            entry = app_configs[defn.name]
             if isinstance(entry, dict) and entry.get("scheme"):
                 entry.pop("scheme")
                 if not entry:
-                    del app_config[defn.name]
-                changed = True
-    if changed:
-        data["app_config"] = app_config
-        config_store.save(data)
+                    config_store.delete_app_config(defn.name)
+                else:
+                    config_store.upsert_app_config(defn.name, entry)
 
     # Reload settings into engine
     _reload_settings_into_engine(request, config_store)
@@ -116,8 +107,7 @@ async def list_custom_apps(
     config_store=Depends(_get_config_store),
 ) -> list[dict]:
     """List all custom app definitions."""
-    data = config_store.load()
-    return data.get("custom_app_defs", [])
+    return config_store.list_custom_app_defs()
 
 
 @router.post("/api/custom-apps", status_code=201, dependencies=[Depends(_require_api_key)])
@@ -127,19 +117,12 @@ async def create_custom_app(
     config_store=Depends(_get_config_store),
 ) -> dict:
     """Create a new custom app definition."""
-    data = config_store.load()
-    existing: list[dict] = data.get("custom_app_defs", [])
-
-    # Check for duplicate name
-    for item in existing:
-        if isinstance(item, dict) and item.get("name") == body.name:
-            raise HTTPException(status_code=409, detail=f"Custom app '{body.name}' already exists")
+    if config_store.get_custom_app_def(body.name) is not None:
+        raise HTTPException(status_code=409, detail=f"Custom app '{body.name}' already exists")
 
     new_def = body.model_dump()
-    existing.append(new_def)
-    data["custom_app_defs"] = existing
-    config_store.save(data)
-    _reload_custom_detectors(request, config_store, data=data)
+    config_store.upsert_custom_app_def(new_def)
+    _reload_custom_detectors(request, config_store)
     return new_def
 
 
@@ -151,20 +134,14 @@ async def update_custom_app(
     config_store=Depends(_get_config_store),
 ) -> dict:
     """Update an existing custom app definition."""
-    data = config_store.load()
-    existing: list[dict] = data.get("custom_app_defs", [])
+    if config_store.get_custom_app_def(name) is None:
+        raise HTTPException(status_code=404, detail=f"Custom app '{name}' not found")
 
-    for i, item in enumerate(existing):
-        if isinstance(item, dict) and item.get("name") == name:
-            updated = body.model_dump()
-            updated["name"] = name  # preserve original name
-            existing[i] = updated
-            data["custom_app_defs"] = existing
-            config_store.save(data)
-            _reload_custom_detectors(request, config_store, data=data)
-            return updated
-
-    raise HTTPException(status_code=404, detail=f"Custom app '{name}' not found")
+    updated = body.model_dump()
+    updated["name"] = name  # preserve original name
+    config_store.upsert_custom_app_def(updated)
+    _reload_custom_detectors(request, config_store)
+    return updated
 
 
 @router.delete("/api/custom-apps/{name}", dependencies=[Depends(_require_api_key)])
@@ -174,30 +151,20 @@ async def delete_custom_app(
     config_store=Depends(_get_config_store),
 ) -> dict[str, str]:
     """Delete a custom app definition and clear references in guest_config."""
-    data = config_store.load()
-    existing: list[dict] = data.get("custom_app_defs", [])
-
-    found = False
-    new_list = []
-    for item in existing:
-        if isinstance(item, dict) and item.get("name") == name:
-            found = True
-        else:
-            new_list.append(item)
-
-    if not found:
+    if config_store.get_custom_app_def(name) is None:
         raise HTTPException(status_code=404, detail=f"Custom app '{name}' not found")
 
-    data["custom_app_defs"] = new_list
+    config_store.delete_custom_app_def(name)
 
     # Clear forced_detector references in guest_config
-    guest_config: dict = data.get("guest_config", {})
-    for gid, gcfg in guest_config.items():
+    guest_configs = config_store.list_guest_configs()
+    for gid, gcfg in guest_configs.items():
         if isinstance(gcfg, dict) and gcfg.get("forced_detector") == name:
             gcfg.pop("forced_detector", None)
+            config_store.upsert_guest_config(gid, gcfg)
 
-    data.get("app_config", {}).pop(name, None)
+    # Remove app_config entry for the deleted custom app
+    config_store.delete_app_config(name)
 
-    config_store.save(data)
-    _reload_custom_detectors(request, config_store, data=data)
+    _reload_custom_detectors(request, config_store)
     return {"status": "deleted"}

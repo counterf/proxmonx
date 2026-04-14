@@ -117,9 +117,7 @@ async def _run_bulk_job(
             continue
 
         try:
-            settings_data = config_store.load()
-            proxmox_hosts = settings_data.get("proxmox_hosts", [])
-            host_dict = next((h for h in proxmox_hosts if h.get("id") == guest.host_id), None)
+            host_dict = config_store.get_host(guest.host_id)
             if not host_dict:
                 raise ValueError(f"Host config not found for {guest.host_id}")
             host_config = ProxmoxHostConfig(**host_dict)
