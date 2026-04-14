@@ -17,9 +17,6 @@ class BaseDetector(ABC):
     default_port: int
     docker_images: list[str]  # Docker image name patterns
 
-    def __init__(self) -> None:
-        pass
-
     def _name_matches(self, guest_name: str) -> bool:
         """Word-boundary/token matching to avoid substring false positives."""
         name_tokens = set(re.split(r'[-_.\s]+', guest_name.lower()))

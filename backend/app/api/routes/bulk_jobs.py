@@ -25,6 +25,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _log_task_exception(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        logger.error("Background task failed: %s", exc, exc_info=exc)
+
+
 class StartBulkJobRequest(BaseModel):
     action: str  # os_update | app_update
     guest_ids: list[str]
@@ -215,7 +223,7 @@ async def start_bulk_job(
         )
         task_ids[guest_id] = task_id
 
-    asyncio.create_task(
+    task = asyncio.create_task(
         _run_bulk_job(
             job_id=job_id,
             action=request_body.action,
@@ -226,6 +234,7 @@ async def start_bulk_job(
             config_store=config_store,
         )
     )
+    task.add_done_callback(_log_task_exception)
     return {"job_id": job_id, "status": "pending"}
 
 

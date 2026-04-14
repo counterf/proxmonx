@@ -132,7 +132,6 @@ class HttpJsonDetector(BaseDetector):
     """Generic detector for apps exposing version via a JSON HTTP endpoint."""
 
     def __init__(self, config: DetectorConfig) -> None:
-        super().__init__()
         self.name = config.name
         self.display_name = config.display_name
         self.github_repo = config.github_repo

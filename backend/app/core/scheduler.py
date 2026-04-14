@@ -19,6 +19,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _log_task_exception(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        logger.error("Background task failed: %s", exc, exc_info=exc)
+
+
 class Scheduler:
     """Runs the discovery/detection loop on a configurable interval."""
 
@@ -60,6 +68,7 @@ class Scheduler:
     def start(self) -> None:
         """Start the background polling loop."""
         self._task = asyncio.create_task(self._loop())
+        self._task.add_done_callback(_log_task_exception)
         logger.info("Scheduler started with %ds interval", self._interval)
 
     async def stop(self) -> None:
@@ -85,7 +94,8 @@ class Scheduler:
         if guest_id in self._in_flight_refreshes:
             return True  # already running, treat as success
         self._in_flight_refreshes.add(guest_id)
-        asyncio.create_task(self._refresh_single_guest(guest_id))
+        task = asyncio.create_task(self._refresh_single_guest(guest_id))
+        task.add_done_callback(_log_task_exception)
         return True
 
     async def _refresh_single_guest(self, guest_id: str) -> None:

@@ -47,35 +47,42 @@ async def _poll_upid(
     scheduler=None,
 ) -> None:
     """Background task: poll Proxmox for UPID completion and update the task record."""
-    for _ in range(60):  # poll every 10s up to 10 min
-        await asyncio.sleep(10)
-        safe_client = http_client if (http_client and not http_client.is_closed) else None
-        client = ProxmoxClient(host_config, http_client=safe_client)
+    try:
+        for _ in range(60):  # poll every 10s up to 10 min
+            await asyncio.sleep(10)
+            safe_client = http_client if (http_client and not http_client.is_closed) else None
+            client = ProxmoxClient(host_config, http_client=safe_client)
+            try:
+                data = await client.get_task_status(upid)
+            except Exception:
+                continue
+            if data.get("status") == "stopped":
+                exitstatus = str(data.get("exitstatus", ""))
+                succeeded = exitstatus == "OK"
+                task_store.update(
+                    task_id,
+                    status="success" if succeeded else "failed",
+                    detail=success_detail if succeeded else (exitstatus or upid),
+                    finished_at=_now_iso(),
+                )
+                if succeeded and guest_id and scheduler:
+                    scheduler.trigger_guest_refresh(guest_id)
+                return
+        # Timed out without completion — mark as failed
+        task_store.update(
+            task_id,
+            status="failed",
+            detail=f"{upid} (poll timed out after 10 min)",
+            finished_at=_now_iso(),
+        )
+        if guest_id and scheduler:
+            scheduler.trigger_guest_refresh(guest_id)
+    except Exception:
+        logger.exception("_poll_upid crashed for task %s", task_id)
         try:
-            data = await client.get_task_status(upid)
+            task_store.update(task_id, status="failed", detail="internal polling error", finished_at=_now_iso())
         except Exception:
-            continue
-        if data.get("status") == "stopped":
-            exitstatus = str(data.get("exitstatus", ""))
-            succeeded = exitstatus == "OK"
-            task_store.update(
-                task_id,
-                status="success" if succeeded else "failed",
-                detail=success_detail if succeeded else (exitstatus or upid),
-                finished_at=_now_iso(),
-            )
-            if succeeded and guest_id and scheduler:
-                scheduler.trigger_guest_refresh(guest_id)
-            return
-    # Timed out without completion — mark as failed
-    task_store.update(
-        task_id,
-        status="failed",
-        detail=f"{upid} (poll timed out after 10 min)",
-        finished_at=_now_iso(),
-    )
-    if guest_id and scheduler:
-        scheduler.trigger_guest_refresh(guest_id)
+            logger.warning("Failed to mark task %s as failed after _poll_upid crash", task_id, exc_info=True)
 
 
 # --- Request/Response models ---
