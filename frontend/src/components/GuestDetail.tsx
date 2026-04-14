@@ -400,7 +400,6 @@ export default function GuestDetail() {
   const [guest, setGuest] = useState<GuestDetailType | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [rawExpanded, setRawExpanded] = useState(false);
   const [backupEnabled, setBackupEnabled] = useState(false);
 
   const loadGuest = useCallback((guestId: string) => {
@@ -538,43 +537,108 @@ export default function GuestDetail() {
       {/* Instance Settings (per-guest overrides) */}
       <InstanceSettings guestId={guest.id} appName={guest.app_name || guest.name} detectorUsed={guest.detector_used} />
 
-      {/* Version Status panel */}
-      <div className="p-4 rounded bg-surface border border-gray-800">
-        <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Version Status</h2>
-        <div className="space-y-1 text-sm">
-          <div>
-            <span className="text-gray-500">Installed:</span>{' '}
-            <span className="text-base sm:text-lg font-mono text-gray-200">{guest.installed_version || '\u2014'}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-gray-500">Latest:</span>{' '}
-            <span className={`text-base sm:text-lg font-mono ${guest.update_status === 'outdated' ? 'text-green-400' : 'text-gray-200'}`}>
-              {guest.latest_version || '\u2014'}
-            </span>
-            {releaseUrl && (
-              <a
-                href={releaseUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-blue-400 hover:text-blue-300"
-                aria-label={`View release notes for ${guest.app_name} ${guest.latest_version} (opens in new tab)`}
-              >
-                View release notes &rarr;
-              </a>
-            )}
-          </div>
-          <div>
-            <span className="text-gray-500">Checked:</span>{' '}
-            <span className="text-gray-300">{guest.last_checked ? new Date(guest.last_checked).toLocaleString() : '\u2014'}</span>
-          </div>
-          {guest.ip && (
-            <div>
-              <span className="text-gray-500">IP:</span>{' '}
-              <span className="text-gray-300 font-mono">{guest.ip}</span>
+      {/* Version Info panel */}
+      {(() => {
+        const method = guest.app_name ? guest.version_detection_method : null;
+        const repoQueried = guest.app_name ? (guest.github_repo_queried || githubRepo || null) : null;
+        const lookupStatus = guest.app_name ? guest.github_lookup_status : null;
+
+        const methodConfig: Record<string, { label: string; bg: string; text: string }> = {
+          http: { label: 'HTTP API', bg: 'bg-blue-900/40', text: 'text-blue-300' },
+          ssh: { label: 'SSH command', bg: 'bg-yellow-900/40', text: 'text-yellow-300' },
+          pct_exec: { label: 'Container exec (pct)', bg: 'bg-purple-900/40', text: 'text-purple-300' },
+        };
+        const fallback = guest.installed_version
+          ? { label: 'Unknown', bg: 'bg-gray-800', text: 'text-gray-500' }
+          : { label: 'Not detected', bg: 'bg-gray-800', text: 'text-gray-500' };
+        const badge = method ? (methodConfig[method] || fallback) : fallback;
+
+        return (
+          <div className="p-4 rounded bg-surface border border-gray-800">
+            <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Version Info</h2>
+            <div className="space-y-1 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500">Installed:</span>{' '}
+                <span className="text-base sm:text-lg font-mono text-gray-200">{guest.installed_version || '\u2014'}</span>
+                {guest.app_name && (
+                  <span
+                    className={`font-mono text-xs px-1.5 py-0.5 rounded ${badge.bg} ${badge.text}`}
+                    aria-label={`Installed version source: ${badge.label}`}
+                  >
+                    {badge.label}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500">Latest:</span>{' '}
+                <span className={`text-base sm:text-lg font-mono ${guest.update_status === 'outdated' ? 'text-green-400' : 'text-gray-200'}`}>
+                  {guest.latest_version || '\u2014'}
+                </span>
+                {releaseUrl && (
+                  <a
+                    href={releaseUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-400 hover:text-blue-300"
+                    aria-label={`View release notes for ${guest.app_name} ${guest.latest_version} (opens in new tab)`}
+                  >
+                    View release notes &rarr;
+                  </a>
+                )}
+                {guest.app_name && (
+                  <span className="text-xs text-gray-500">
+                    via {guest.latest_version_source === 'custom' ? 'App repository' : 'GitHub'}
+                  </span>
+                )}
+              </div>
+              {guest.app_name && (lookupStatus === 'failed' || lookupStatus === 'no_repo') && (
+                <div>
+                  <span className="text-gray-500">Lookup status:</span>{' '}
+                  <span className={lookupStatus === 'failed' ? 'text-red-400' : 'text-gray-500'}>
+                    {lookupStatus === 'no_repo' ? 'No repo configured' : lookupStatus}
+                  </span>
+                </div>
+              )}
+              {repoQueried && (
+                <div>
+                  <span className="text-gray-500">Repository:</span>{' '}
+                  <a
+                    href={`https://github.com/${repoQueried}/releases`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-400 hover:text-blue-300"
+                    aria-label={`GitHub releases for ${repoQueried} (opens in new tab)`}
+                  >
+                    {repoQueried}
+                  </a>
+                </div>
+              )}
+              <div>
+                <span className="text-gray-500">Checked:</span>{' '}
+                <span className="text-gray-300">{guest.last_checked ? new Date(guest.last_checked).toLocaleString() : '\u2014'}</span>
+              </div>
+              {guest.app_name && guest.probe_error && (
+                <div>
+                  <span className="text-gray-500">Probe error:</span>{' '}
+                  <span className="text-amber-400 text-xs">{guest.probe_error}</span>
+                </div>
+              )}
+              {guest.app_name && guest.probe_url && (
+                <div>
+                  <span className="text-gray-500">Probe URL:</span>{' '}
+                  <span className="text-gray-300 font-mono text-xs break-all">{guest.probe_url}</span>
+                </div>
+              )}
+              {guest.ip && (
+                <div>
+                  <span className="text-gray-500">IP:</span>{' '}
+                  <span className="text-gray-300 font-mono">{guest.ip}</span>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      </div>
+          </div>
+        );
+      })()}
 
       {/* OS Updates panel — only shown when data is available (LXC + SSH enabled) */}
       {(guest.pending_updates != null || guest.reboot_required != null) && (
@@ -629,92 +693,6 @@ export default function GuestDetail() {
         </div>
       )}
 
-      {/* Version Detection panel */}
-      {guest.app_name && (() => {
-        const method = guest.version_detection_method;
-        const installedVersion = guest.installed_version;
-        const repoQueried = guest.github_repo_queried || githubRepo || null;
-        const lookupStatus = guest.github_lookup_status;
-
-        const methodConfig: Record<string, { label: string; bg: string; text: string }> = {
-          http: { label: 'HTTP API', bg: 'bg-blue-900/40', text: 'text-blue-300' },
-          ssh: { label: 'SSH command', bg: 'bg-yellow-900/40', text: 'text-yellow-300' },
-          pct_exec: { label: 'Container exec (pct)', bg: 'bg-purple-900/40', text: 'text-purple-300' },
-        };
-        const fallback = installedVersion
-          ? { label: 'Unknown', bg: 'bg-gray-800', text: 'text-gray-500' }
-          : { label: 'Not detected', bg: 'bg-gray-800', text: 'text-gray-500' };
-        const badge = method ? (methodConfig[method] || fallback) : fallback;
-
-        const statusColors: Record<string, string> = {
-          success: 'text-green-400',
-          failed: 'text-red-400',
-          no_repo: 'text-gray-500',
-        };
-
-        return (
-          <div className="p-4 rounded bg-surface border border-gray-800">
-            <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Version Detection</h2>
-            <div className="space-y-1 text-sm">
-              <div>
-                <span className="text-gray-500">Installed version source:</span>{' '}
-                <span
-                  className={`font-mono text-xs px-1.5 py-0.5 rounded ${badge.bg} ${badge.text}`}
-                  aria-label={`Installed version source: ${badge.label}`}
-                >
-                  {badge.label}
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-500">Latest version source:</span>{' '}
-                <span className="text-gray-200">
-                  {guest.latest_version_source === 'custom'
-                    ? 'App repository'
-                    : 'GitHub Releases'}
-                  {!guest.latest_version && <span className="text-gray-500"> (not found)</span>}
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-500">Repository:</span>{' '}
-                {repoQueried ? (
-                  <a
-                    href={`https://github.com/${repoQueried}/releases`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-blue-400 hover:text-blue-300"
-                    aria-label={`GitHub releases for ${repoQueried} (opens in new tab)`}
-                  >
-                    {repoQueried}
-                  </a>
-                ) : (
-                  <span className="text-gray-500">{'\u2014'}</span>
-                )}
-              </div>
-              {lookupStatus && (
-                <div>
-                  <span className="text-gray-500">Lookup status:</span>{' '}
-                  <span className={statusColors[lookupStatus] || 'text-gray-500'}>
-                    {lookupStatus === 'no_repo' ? 'No repo configured' : lookupStatus}
-                  </span>
-                </div>
-              )}
-              {guest.probe_url && (
-                <div>
-                  <span className="text-gray-500">Probe URL:</span>{' '}
-                  <span className="text-gray-300 font-mono text-xs break-all">{guest.probe_url}</span>
-                </div>
-              )}
-              {guest.probe_error && (
-                <div>
-                  <span className="text-gray-500">Probe error:</span>{' '}
-                  <span className="text-amber-400 text-xs">{guest.probe_error}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })()}
-
       {/* Version History */}
       {guest.version_history.length > 0 && (
         <div className="p-4 rounded bg-surface border border-gray-800">
@@ -746,28 +724,6 @@ export default function GuestDetail() {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
-
-      {/* Raw Detection Output */}
-      {guest.raw_detection_output && (
-        <div className="p-4 rounded bg-surface border border-gray-800">
-          <button
-            onClick={() => setRawExpanded(!rawExpanded)}
-            aria-expanded={rawExpanded}
-            aria-controls="raw-output"
-            className="text-xs font-medium text-gray-500 uppercase tracking-wider hover:text-gray-300"
-          >
-            {rawExpanded ? 'Hide raw output' : 'Show raw output'}
-          </button>
-          {rawExpanded && (
-            <pre
-              id="raw-output"
-              className="mt-3 p-3 rounded bg-gray-900 text-xs text-gray-400 overflow-y-auto max-h-[200px] sm:max-h-[300px] font-mono"
-            >
-              {JSON.stringify(guest.raw_detection_output, null, 2)}
-            </pre>
-          )}
         </div>
       )}
 
