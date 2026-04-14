@@ -331,12 +331,12 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
                   idPrefix="gc"
                   versionCmd={cfg.ssh_version_cmd ?? ''}
                   username={cfg.ssh_username ?? ''}
-                  keyPath={cfg.ssh_key_path ?? ''}
+                  sshKey={cfg.ssh_key ?? ''}
                   password={cfg.ssh_password ?? ''}
                   showPassword={showSshPassword}
                   onVersionCmdChange={(v) => setCfg({ ...cfg, ssh_version_cmd: v || '' })}
                   onUsernameChange={(v) => setCfg({ ...cfg, ssh_username: v || '' })}
-                  onKeyPathChange={(v) => setCfg({ ...cfg, ssh_key_path: v || '' })}
+                  onSshKeyChange={(v) => setCfg({ ...cfg, ssh_key: v || '' })}
                   onPasswordChange={(v) => setCfg({ ...cfg, ssh_password: v })}
                   onToggleShowPassword={() => setShowSshPassword(!showSshPassword)}
                   passwordPlaceholder="masked"

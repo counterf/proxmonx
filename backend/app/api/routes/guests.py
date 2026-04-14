@@ -171,12 +171,14 @@ async def get_guest_config(
 ) -> dict[str, Any]:
     """Return per-guest config overrides (API keys masked)."""
     guest_cfg = config_store.get_guest_config(guest_id) or {}
-    if guest_cfg.get("api_key") or guest_cfg.get("ssh_password"):
+    if guest_cfg.get("api_key") or guest_cfg.get("ssh_password") or guest_cfg.get("ssh_key"):
         guest_cfg = dict(guest_cfg)
         if guest_cfg.get("api_key"):
             guest_cfg["api_key"] = "***"
         if guest_cfg.get("ssh_password"):
             guest_cfg["ssh_password"] = "***"
+        if guest_cfg.get("ssh_key"):
+            guest_cfg["ssh_key"] = "***"
     return guest_cfg
 
 
@@ -204,7 +206,7 @@ async def save_guest_config(
         # 0 is the clear sentinel — port 0 is never valid for an app
         merged["port"] = body.port if body.port != 0 else None
     for field_name in ("scheme", "github_repo", "ssh_version_cmd", "ssh_username",
-                       "ssh_key_path", "forced_detector", "version_host"):
+                       "forced_detector", "version_host"):
         include, value = _field_value(getattr(body, field_name))
         if include:
             merged[field_name] = value
@@ -212,19 +214,21 @@ async def save_guest_config(
     # Secret fields: pass through as-is; CRUD's preserve_secrets handles "***"/None
     merged["api_key"] = body.api_key
     merged["ssh_password"] = body.ssh_password
+    merged["ssh_key"] = body.ssh_key
 
     # Check for meaningful content: ignore secret placeholders,
     # but consult prev DB row to avoid deleting rows with real secrets
     prev = config_store.get_guest_config(guest_id) or {}
+    _secret_names = ("api_key", "ssh_password", "ssh_key")
     has_content = any(
         v is not None for k, v in merged.items()
-        if k not in ("api_key", "ssh_password")
+        if k not in _secret_names
     ) or any(
         merged.get(s) not in (None, "***", "")
-        for s in ("api_key", "ssh_password")
+        for s in _secret_names
     ) or any(
         prev.get(s) not in (None, "", "***") and merged.get(s) not in ("",)
-        for s in ("api_key", "ssh_password")
+        for s in _secret_names
     )
     if has_content:
         config_store.upsert_guest_config(guest_id, merged)

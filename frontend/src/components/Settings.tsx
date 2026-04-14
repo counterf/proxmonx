@@ -30,7 +30,7 @@ interface FormData {
   discover_vms: boolean;
   ssh_enabled: boolean;
   ssh_username: string;
-  ssh_key_path: string;
+  ssh_key: string;
   ssh_password: string;
   github_token: string;
   log_level: string;
@@ -59,7 +59,7 @@ function settingsToFormData(s: FullSettings): FormData {
     discover_vms: s.discover_vms,
     ssh_enabled: s.ssh_enabled,
     ssh_username: s.ssh_username,
-    ssh_key_path: s.ssh_key_path || '',
+    ssh_key: (s.ssh_key && s.ssh_key !== '***') ? s.ssh_key : '',
     ssh_password: (s.ssh_password && s.ssh_password !== '***') ? s.ssh_password : '',
     github_token: (s.github_token && s.github_token !== '***') ? s.github_token : '',
     log_level: s.log_level,
@@ -91,7 +91,7 @@ function initHostsFromSettings(s: FullSettings): ProxmoxHost[] {
     node: '',
     ssh_username: 'root',
     ssh_password: null,
-    ssh_key_path: null,
+    ssh_key: null,
     pct_exec_enabled: false,
     backup_storage: null,
   }];
@@ -112,6 +112,7 @@ export default function Settings() {
   const apiKeyChanged = useRef(false);
   const githubTokenChanged = useRef(false);
   const sshPasswordChanged = useRef(false);
+  const sshKeyChanged = useRef(false);
   // Per-app configuration
   const [appConfigs, setAppConfigs] = useState<Record<string, AppConfigEntry>>({});
   const [savedAppConfigs, setSavedAppConfigs] = useState<Record<string, AppConfigEntry>>({});
@@ -148,7 +149,7 @@ export default function Settings() {
         setProxmoxHosts(hosts);
         setSavedProxmoxHosts(hosts);
         // Detect auth method from loaded data
-        if (s.ssh_password && s.ssh_password !== '***') {
+        if (s.ssh_password && !s.ssh_key) {
           setAuthMethod('password');
         }
         setDetectors(defaults);
@@ -271,7 +272,7 @@ export default function Settings() {
         }
         // String fields: send "" (clear sentinel) when user cleared a previously-set value.
         // Omit when never set (undefined → Pydantic None → backend keeps existing).
-        for (const field of ['scheme', 'github_repo', 'ssh_version_cmd', 'ssh_username', 'ssh_key_path'] as const) {
+        for (const field of ['scheme', 'github_repo', 'ssh_version_cmd', 'ssh_username'] as const) {
           if (cfg[field]) {
             entry[field] = cfg[field];
           } else if (prev?.[field]) {
@@ -283,10 +284,11 @@ export default function Settings() {
         if (changedApiKeys.current.has(name)) {
           entry.api_key = cfg.api_key ?? '';
           entry.ssh_password = cfg.ssh_password ?? '';
+          entry.ssh_key = cfg.ssh_key ?? '';
         }
         // Include this app if at least one field is set (use != null since "" is a clear sentinel)
         const hasContent = entry.port != null || entry.scheme != null || entry.github_repo != null ||
-          entry.ssh_version_cmd != null || entry.ssh_username != null || entry.ssh_key_path != null ||
+          entry.ssh_version_cmd != null || entry.ssh_username != null ||
           changedApiKeys.current.has(name);
         if (hasContent) {
           appConfigPayload[name] = entry;
@@ -300,14 +302,12 @@ export default function Settings() {
 
       // Build proxmox_hosts payload -- mask secrets that haven't changed
       const hostsPayload: ProxmoxHost[] = proxmoxHosts.map((h) => {
-        const saved = savedProxmoxHosts.find((s) => s.id === h.id);
         return {
           ...h,
           // If token_secret is still the masked sentinel, send null to keep backend value
           token_secret: h.token_secret === '***' ? null : h.token_secret,
           ssh_password: h.ssh_password === '***' ? null : h.ssh_password,
-          // Preserve ssh_key_path
-          ssh_key_path: h.ssh_key_path || saved?.ssh_key_path || null,
+          ssh_key: h.ssh_key === '***' ? null : h.ssh_key,
         };
       });
 
@@ -317,7 +317,7 @@ export default function Settings() {
         discover_vms: form.discover_vms,
         ssh_enabled: form.ssh_enabled,
         ssh_username: form.ssh_username,
-        ssh_key_path: form.ssh_key_path || null,
+        ssh_key: sshKeyChanged.current ? form.ssh_key : null,
         ssh_password: sshPasswordChanged.current ? form.ssh_password : null,
         github_token: githubTokenChanged.current ? form.github_token : null,
         log_level: form.log_level,
@@ -350,6 +350,7 @@ export default function Settings() {
       apiKeyChanged.current = false;
       githubTokenChanged.current = false;
       sshPasswordChanged.current = false;
+      sshKeyChanged.current = false;
       changedApiKeys.current = new Set();
       setPendingTab(null);
       setToast('Settings saved. Discovery restarting...');
@@ -498,12 +499,12 @@ export default function Settings() {
             <SSHSection
               sshEnabled={form.ssh_enabled}
               sshUsername={form.ssh_username}
-              sshKeyPath={form.ssh_key_path}
+              sshKey={form.ssh_key}
               sshPassword={form.ssh_password}
               authMethod={authMethod}
               onSshEnabledChange={(v) => setField('ssh_enabled', v)}
               onSshUsernameChange={(v) => setField('ssh_username', v)}
-              onSshKeyPathChange={(v) => setField('ssh_key_path', v)}
+              onSshKeyChange={(v) => { sshKeyChanged.current = true; setField('ssh_key', v); }}
               onSshPasswordChange={(v) => { sshPasswordChanged.current = true; setField('ssh_password', v); }}
               onAuthMethodChange={setAuthMethod}
               disabled={saving}

@@ -102,7 +102,7 @@ export interface AppConfigEntry {
   github_repo?: string | null;
   ssh_version_cmd?: string | null;
   ssh_username?: string | null;
-  ssh_key_path?: string | null;
+  ssh_key?: string | null;
   ssh_password?: string | null;
   version_host?: string | null;
 }
@@ -124,7 +124,7 @@ export interface ProxmoxHost {
   node: string;
   ssh_username: string;
   ssh_password: string | null;
-  ssh_key_path: string | null;
+  ssh_key: string | null;
   pct_exec_enabled: boolean;
   backup_storage: string | null;
 }
@@ -135,7 +135,7 @@ export interface FullSettings {
   discover_vms: boolean;
   ssh_enabled: boolean;
   ssh_username: string;
-  ssh_key_path: string | null;
+  ssh_key: string | null;
   ssh_password: string | null;
   github_token: string | null;
   log_level: string;
@@ -162,7 +162,7 @@ export interface SettingsSaveRequest {
   discover_vms: boolean;
   ssh_enabled: boolean;
   ssh_username: string;
-  ssh_key_path: string | null;
+  ssh_key: string | null;
   ssh_password: string | null;
   github_token: string | null;
   log_level: string;

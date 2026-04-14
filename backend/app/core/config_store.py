@@ -22,7 +22,7 @@ _HOST_REQUIRED_KEYS = ("host", "token_id", "token_secret", "node")
 # ---------------------------------------------------------------------------
 
 _SCALAR_STR_FIELDS: frozenset[str] = frozenset({
-    "ssh_username", "ssh_key_path", "ssh_password", "ssh_known_hosts_path",
+    "ssh_username", "ssh_key", "ssh_password", "ssh_known_hosts_path",
     "github_token", "log_level", "version_detect_method",
     "auth_mode", "auth_username", "auth_password_hash",
     "ntfy_url", "ntfy_token", "proxmon_api_key",
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS settings (
     discover_vms                 INTEGER  DEFAULT 0,
     ssh_enabled                  INTEGER  DEFAULT 1,
     ssh_username                 TEXT     DEFAULT 'root',
-    ssh_key_path                 TEXT,
+    ssh_key                      TEXT,
     ssh_password                 TEXT,
     ssh_known_hosts_path         TEXT     DEFAULT '',
     github_token                 TEXT,
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS proxmox_hosts (
     node            TEXT NOT NULL DEFAULT '',
     ssh_username    TEXT NOT NULL DEFAULT 'root',
     ssh_password    TEXT,
-    ssh_key_path    TEXT,
+    ssh_key         TEXT,
     pct_exec_enabled INTEGER NOT NULL DEFAULT 0,
     backup_storage  TEXT
 )
@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS app_config (
     github_repo     TEXT,
     ssh_version_cmd TEXT,
     ssh_username    TEXT,
-    ssh_key_path    TEXT,
+    ssh_key         TEXT,
     ssh_password    TEXT
 )
 """
@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS guest_config (
     github_repo     TEXT,
     ssh_version_cmd TEXT,
     ssh_username    TEXT,
-    ssh_key_path    TEXT,
+    ssh_key         TEXT,
     ssh_password    TEXT,
     forced_detector TEXT,
     version_host    TEXT
@@ -213,8 +213,8 @@ def _dict_to_params(data: dict) -> dict:
 
 
 # Secret fields per table that should be preserved when "***" is sent.
-_HOST_SECRETS = ("token_secret", "ssh_password")
-_CONFIG_SECRETS = ("api_key", "ssh_password")
+_HOST_SECRETS = ("token_secret", "ssh_password", "ssh_key")
+_CONFIG_SECRETS = ("api_key", "ssh_password", "ssh_key")
 
 # Custom app defs: JSON list fields that need ser/deser.
 _CUSTOM_APP_JSON_FIELDS = ("aliases", "docker_images", "version_keys")
@@ -424,7 +424,7 @@ class ConfigStore:
         conn.execute(
             "INSERT OR REPLACE INTO proxmox_hosts "
             "(id, label, host, token_id, token_secret, node, ssh_username, "
-            "ssh_password, ssh_key_path, pct_exec_enabled, backup_storage) "
+            "ssh_password, ssh_key, pct_exec_enabled, backup_storage) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 data.get("id", ""),
@@ -435,7 +435,7 @@ class ConfigStore:
                 data.get("node", ""),
                 data.get("ssh_username", "root"),
                 data.get("ssh_password"),
-                data.get("ssh_key_path"),
+                data.get("ssh_key"),
                 int(bool(data.get("pct_exec_enabled", False))),
                 data.get("backup_storage"),
             ),
@@ -507,7 +507,7 @@ class ConfigStore:
         conn.execute(
             "INSERT OR REPLACE INTO app_config "
             "(app_name, port, api_key, scheme, github_repo, ssh_version_cmd, "
-            "ssh_username, ssh_key_path, ssh_password) "
+            "ssh_username, ssh_key, ssh_password) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 app_name,
@@ -517,7 +517,7 @@ class ConfigStore:
                 data.get("github_repo"),
                 data.get("ssh_version_cmd"),
                 data.get("ssh_username"),
-                data.get("ssh_key_path"),
+                data.get("ssh_key"),
                 data.get("ssh_password"),
             ),
         )
@@ -587,7 +587,7 @@ class ConfigStore:
         conn.execute(
             "INSERT OR REPLACE INTO guest_config "
             "(guest_id, port, api_key, scheme, github_repo, ssh_version_cmd, "
-            "ssh_username, ssh_key_path, ssh_password, forced_detector, version_host) "
+            "ssh_username, ssh_key, ssh_password, forced_detector, version_host) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 guest_id,
@@ -597,7 +597,7 @@ class ConfigStore:
                 data.get("github_repo"),
                 data.get("ssh_version_cmd"),
                 data.get("ssh_username"),
-                data.get("ssh_key_path"),
+                data.get("ssh_key"),
                 data.get("ssh_password"),
                 data.get("forced_detector"),
                 data.get("version_host"),

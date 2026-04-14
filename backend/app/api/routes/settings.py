@@ -48,7 +48,7 @@ class ProxmoxHostSaveEntry(BaseModel):
     node: str
     ssh_username: str = "root"
     ssh_password: str | None = None
-    ssh_key_path: str | None = None
+    ssh_key: str | None = None
     pct_exec_enabled: bool = False
     backup_storage: str | None = None
 
@@ -96,7 +96,7 @@ class SettingsSaveRequest(BaseModel):
     discover_vms: bool = False
     ssh_enabled: bool = True
     ssh_username: str = "root"
-    ssh_key_path: str | None = None
+    ssh_key: str | None = None
     ssh_password: str | None = None
     github_token: str | None = None
     log_level: Literal["debug", "info", "warning", "error", "critical"] = "info"
@@ -457,7 +457,7 @@ async def save_settings(
         "discover_vms": body.discover_vms,
         "ssh_enabled": body.ssh_enabled,
         "ssh_username": body.ssh_username,
-        "ssh_key_path": body.ssh_key_path,
+        "ssh_key": _keep_or_replace(body.ssh_key, current_file.get("ssh_key")),
         "ssh_password": _keep_or_replace(body.ssh_password, current_file.get("ssh_password")),
         "github_token": _keep_or_replace(body.github_token, current_file.get("github_token")),
         "log_level": body.log_level,
@@ -504,7 +504,7 @@ async def save_settings(
                 # 0 is the clear sentinel — maps to NULL in DB
                 merged_entry["port"] = entry.port if entry.port != 0 else None
             # Non-secret optional fields: None = keep, "" = clear to NULL
-            for field in ("scheme", "github_repo", "ssh_version_cmd", "ssh_username", "ssh_key_path"):
+            for field in ("scheme", "github_repo", "ssh_version_cmd", "ssh_username"):
                 val = getattr(entry, field)
                 if val is None:
                     if prev.get(field) is not None:
@@ -516,17 +516,19 @@ async def save_settings(
             # Secret fields: pass through, CRUD handles "***"/None preservation
             merged_entry["api_key"] = entry.api_key
             merged_entry["ssh_password"] = entry.ssh_password
+            merged_entry["ssh_key"] = entry.ssh_key
             # Check for meaningful content: ignore None-valued secret placeholders,
             # but also check prev for existing secrets to avoid silent deletion
+            _secret_names = ("api_key", "ssh_password", "ssh_key")
             has_content = any(
                 v is not None for k, v in merged_entry.items()
-                if k not in ("api_key", "ssh_password")
+                if k not in _secret_names
             ) or any(
                 merged_entry.get(s) not in (None, "***", "")
-                for s in ("api_key", "ssh_password")
+                for s in _secret_names
             ) or any(
                 prev.get(s) not in (None, "", "***") and merged_entry.get(s) not in ("",)
-                for s in ("api_key", "ssh_password")
+                for s in _secret_names
             )
             if has_content:
                 app_configs_to_save[app_name] = merged_entry

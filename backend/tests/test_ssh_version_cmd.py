@@ -11,7 +11,7 @@ from app.core.ssh import SSHClient
 def settings() -> Settings:
     return Settings(
         ssh_username="root",
-        ssh_key_path="/fake/key",
+        ssh_key="-----BEGIN OPENSSH PRIVATE KEY-----\nfake-test-key\n-----END OPENSSH PRIVATE KEY-----",
         ssh_password=None,
         ssh_enabled=True,
         ssh_known_hosts_path="",
@@ -100,7 +100,7 @@ class TestExecuteVersionCmd:
                 "10.0.0.1",
                 "app --version",
                 username="admin",
-                key_path="/custom/key",
+                ssh_key="-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----",
                 password="secret",
             )
             mock_exec.assert_called_once_with(
@@ -108,7 +108,7 @@ class TestExecuteVersionCmd:
                 "app --version",
                 10,
                 username="admin",
-                key_path="/custom/key",
+                ssh_key="-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----",
                 password="secret",
             )
 

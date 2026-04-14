@@ -48,10 +48,10 @@ Proxmox monitoring dashboard. Discovers LXC/VM guests across multiple Proxmox ho
 - `frontend/src/components/Tasks.tsx` -- task history; `InfoCell` shows "View output" toggle (unified for success + failed); `TaskStatusBadge` renders task status with pulse animation for running/pending
 - `frontend/src/utils/formatRelativeTime.ts` -- shared relative time formatter (used by GuestRow, Tasks)
 - `frontend/src/types/index.ts` -- shared types; exports `SUPPORTED_OS_TYPES` constant (used by GuestActions, BulkProgressModal)
-- `frontend/src/components/shared/SshFieldGroup.tsx` -- shared SSH form fields (username, key path, password, version command); used by AppConfigSection and InstanceSettings
+- `frontend/src/components/shared/SshFieldGroup.tsx` -- shared SSH form fields (username, private key, password, version command); used by AppConfigSection and InstanceSettings
 - `frontend/src/utils/guestStyles.ts` -- shared badge/style constants: `getTypeBadgeClass()`, `VERSION_SOURCE_STYLES`, `VERSION_SOURCE_SHORT_LABELS`; used by GuestRow and GuestDetail
 - `frontend/src/components/Settings.tsx` -- delegates to section components
-- `frontend/src/components/settings/AppConfigSection.tsx` -- per-app config (port, api_key, scheme, github_repo, ssh_version_cmd, ssh_username, ssh_key_path, ssh_password)
+- `frontend/src/components/settings/AppConfigSection.tsx` -- per-app config (port, api_key, scheme, github_repo, ssh_version_cmd, ssh_username, ssh_key, ssh_password)
 - `frontend/src/components/settings/CustomAppsSection.tsx` -- CRUD UI for user-defined custom app definitions
 
 ---

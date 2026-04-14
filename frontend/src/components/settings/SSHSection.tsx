@@ -7,12 +7,12 @@ type AuthMethod = 'key' | 'password';
 interface SSHSectionProps {
   sshEnabled: boolean;
   sshUsername: string;
-  sshKeyPath: string;
+  sshKey: string;
   sshPassword: string;
   authMethod: AuthMethod;
   onSshEnabledChange: (v: boolean) => void;
   onSshUsernameChange: (v: string) => void;
-  onSshKeyPathChange: (v: string) => void;
+  onSshKeyChange: (v: string) => void;
   onSshPasswordChange: (v: string) => void;
   onAuthMethodChange: (v: AuthMethod) => void;
   disabled?: boolean;
@@ -24,12 +24,12 @@ const inputClass =
 export default function SSHSection({
   sshEnabled,
   sshUsername,
-  sshKeyPath,
+  sshKey,
   sshPassword,
   authMethod,
   onSshEnabledChange,
   onSshUsernameChange,
-  onSshKeyPathChange,
+  onSshKeyChange,
   onSshPasswordChange,
   onAuthMethodChange,
   disabled,
@@ -76,7 +76,7 @@ export default function SSHSection({
                     disabled={disabled}
                     className="accent-blue-500"
                   />
-                  Key file
+                  SSH Key
                 </label>
                 <label className="flex items-center gap-1.5 text-sm text-gray-300 cursor-pointer">
                   <input
@@ -93,15 +93,15 @@ export default function SSHSection({
             </div>
 
             {authMethod === 'key' && (
-              <FormField label="Private Key Path" htmlFor="s_ssh_key_path" hint="Absolute path to the SSH private key inside the proxmon container">
-                <input
-                  id="s_ssh_key_path"
-                  type="text"
-                  value={sshKeyPath}
-                  onChange={(e) => onSshKeyPathChange(e.target.value)}
-                  placeholder="/root/.ssh/id_ed25519"
+              <FormField label="SSH Private Key" htmlFor="s_ssh_key" hint="Paste your SSH private key (PEM format)">
+                <textarea
+                  id="s_ssh_key"
+                  rows={4}
+                  value={sshKey}
+                  onChange={(e) => onSshKeyChange(e.target.value)}
+                  placeholder={'-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----'}
                   disabled={disabled}
-                  className={inputClass}
+                  className={`${inputClass} resize-y font-mono text-xs`}
                 />
               </FormField>
             )}

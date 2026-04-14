@@ -59,7 +59,7 @@ class AppConfig(BaseModel):
     github_repo: str | None = None
     ssh_version_cmd: str | None = None
     ssh_username: str | None = None
-    ssh_key_path: str | None = None
+    ssh_key: str | None = None
     ssh_password: str | None = None
     forced_detector: str | None = None  # guest config only: override auto-detection
     version_host: str | None = None  # guest config only: override IP/hostname for version probe
@@ -76,7 +76,7 @@ class ProxmoxHostConfig(BaseModel):
     node: str = ""
     ssh_username: str = "root"
     ssh_password: str | None = None
-    ssh_key_path: str | None = None
+    ssh_key: str | None = None
     pct_exec_enabled: bool = False
     backup_storage: str | None = None  # Proxmox storage ID for vzdump backups
 
@@ -94,7 +94,7 @@ class Settings(BaseSettings):
 
     # SSH
     ssh_username: str = "root"
-    ssh_key_path: str | None = None
+    ssh_key: str | None = None
     ssh_password: str | None = None
 
     # GitHub

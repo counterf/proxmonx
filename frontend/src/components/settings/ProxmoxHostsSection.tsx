@@ -22,7 +22,7 @@ function emptyHost(): ProxmoxHost {
     node: '',
     ssh_username: 'root',
     ssh_password: null,
-    ssh_key_path: null,
+    ssh_key: null,
     pct_exec_enabled: false,
     backup_storage: null,
   };
@@ -280,17 +280,17 @@ export default function ProxmoxHostsSection({ hosts, onChange, disabled = false 
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label htmlFor={`host-ssh-key-${host.id}`} className="block text-xs text-gray-400 mb-1">SSH Key Path</label>
-                      <input
+                      <label htmlFor={`host-ssh-key-${host.id}`} className="block text-xs text-gray-400 mb-1">SSH Private Key</label>
+                      <textarea
                         id={`host-ssh-key-${host.id}`}
-                        type="text"
-                        value={host.ssh_key_path || ''}
-                        onChange={(e) => updateHost(host.id, { ssh_key_path: e.target.value || null })}
-                        placeholder="/root/.ssh/id_ed25519"
+                        rows={4}
+                        value={host.ssh_key || ''}
+                        onChange={(e) => updateHost(host.id, { ssh_key: e.target.value || null })}
+                        placeholder={'-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----'}
                         disabled={disabled}
-                        className={inputClass}
+                        className={`${inputClass} resize-y font-mono text-xs`}
                       />
-                      <p className="text-xs text-gray-600 mt-0.5">Path to private key file inside the proxmon container</p>
+                      <p className="text-xs text-gray-600 mt-0.5">Paste your SSH private key (PEM format)</p>
                     </div>
                     <div>
                       <label htmlFor={`host-ssh-pass-${host.id}`} className="block text-xs text-gray-400 mb-1">SSH Password</label>

@@ -343,20 +343,9 @@ Only two environment variables are recognized (both optional):
 
 All other settings (Proxmox hosts, SSH, GitHub token, notifications, API key, etc.) are configured through the **Settings UI** and persisted in the SQLite database.
 
-### SSH key mount example
+### SSH key authentication
 
-If using key-based SSH authentication, mount the key into the container and set the path in Settings → SSH:
-
-```yaml
-# docker-compose.override.yml
-services:
-  proxmon:
-    volumes:
-      - ./data:/app/data
-      - ~/.ssh/id_ed25519:/app/ssh/id_ed25519:ro
-```
-
-Then set **SSH Key Path** to `/app/ssh/id_ed25519` in the Settings UI.
+For key-based SSH authentication, paste your private key content directly into Settings → SSH → **SSH Private Key**. The key is stored encrypted in the database — no file mounts required.
 
 ### Per-app configuration
 
@@ -370,7 +359,7 @@ Per-app overrides are configured in the Settings UI under the **App Configuratio
 | `github_repo` | `string` | Detector default | Override the GitHub `owner/repo` for latest version lookup |
 | `ssh_version_cmd` | `string` | — | Custom SSH command for CLI-based version detection |
 | `ssh_username` | `string` | Global default | Override SSH username for this app |
-| `ssh_key_path` | `string` | — | Override SSH private key path for this app |
+| `ssh_key` | `string` | — | Override SSH private key (PEM content) for this app |
 | `ssh_password` | `string` | — | Override SSH password for this app |
 
 ### Per-guest configuration
@@ -385,7 +374,7 @@ When multiple instances of the same app exist, per-guest overrides take preceden
 | `github_repo` | `string` | Detector default | Override the GitHub `owner/repo` for latest version lookup |
 | `ssh_version_cmd` | `string` | — | Custom SSH command for CLI-based version detection |
 | `ssh_username` | `string` | Global default | Override SSH username for this guest |
-| `ssh_key_path` | `string` | — | Override SSH private key path for this guest |
+| `ssh_key` | `string` | — | Override SSH private key (PEM content) for this guest |
 | `ssh_password` | `string` | — | Override SSH password for this guest |
 | `version_host` | `string` | Auto-detected IP | Override the hostname/IP used for version probing and the web URL link. Useful when the Proxmox-resolved IP is not reachable (e.g. different VLAN). |
 | `forced_detector` | `string` | — | Force a specific detector (overrides auto-detection) |
@@ -414,8 +403,8 @@ Step 2 — Discovery
 Step 3 — SSH
   • Enable SSH        (toggle; collapses rest of section if off)
   • SSH Username      (default: root)
-  • Auth method       (radio: key file / password)
-  • Key path or password field (conditional)
+  • Auth method       (radio: SSH Key / password)
+  • Private key textarea or password field (conditional)
 
 Step 4 — GitHub Token
   • Personal access token (optional, masked input)
@@ -673,7 +662,7 @@ ssh-keyscan 192.168.1.100 192.168.1.101 ... >> ./data/known_hosts
 
 ### Authentication
 
-Key file (recommended): Set **SSH Key Path** to `/app/ssh/id_ed25519` and **SSH Username** to `root` in Settings → SSH.
+SSH Key (recommended): Paste your private key content into **SSH Private Key** and set **SSH Username** to `root` in Settings → SSH.
 
 Password (fallback): Set **SSH Password** and **SSH Username** in Settings → SSH.
 
@@ -910,7 +899,7 @@ Returns all settings for pre-populating the settings form. Secrets shown as `"**
       "node": "pve",
       "ssh_username": "root",
       "ssh_password": null,
-      "ssh_key_path": null,
+      "ssh_key": null,
       "pct_exec_enabled": true
     }
   ],
@@ -918,7 +907,7 @@ Returns all settings for pre-populating the settings form. Secrets shown as `"**
   "discover_vms": false,
   "ssh_enabled": true,
   "ssh_username": "root",
-  "ssh_key_path": "/app/ssh/id_rsa",
+  "ssh_key": null,
   "ssh_password": null,
   "github_token": "***",
   "version_detect_method": "pct_first",
@@ -990,7 +979,7 @@ Request body (all fields):
   "discover_vms": false,
   "ssh_enabled": true,
   "ssh_username": "root",
-  "ssh_key_path": null,
+  "ssh_key": null,
   "github_token": null,
   "log_level": "info"
 }

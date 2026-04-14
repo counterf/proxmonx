@@ -6,20 +6,20 @@ interface SshFieldGroupProps {
   /** Current field values. */
   versionCmd: string;
   username: string;
-  keyPath: string;
+  sshKey: string;
   password: string;
   /** Whether to show the password in plain text. */
   showPassword: boolean;
   /** Callbacks. */
   onVersionCmdChange: (v: string) => void;
   onUsernameChange: (v: string) => void;
-  onKeyPathChange: (v: string) => void;
+  onSshKeyChange: (v: string) => void;
   onPasswordChange: (v: string) => void;
   onToggleShowPassword: () => void;
   /** Optional per-field placeholder overrides. */
   versionCmdPlaceholder?: string;
   usernamePlaceholder?: string;
-  keyPathPlaceholder?: string;
+  sshKeyPlaceholder?: string;
   passwordPlaceholder?: string;
   /** Optional aria-label suffix for context (e.g. "for Sonarr"). */
   ariaContext?: string;
@@ -33,17 +33,17 @@ export default function SshFieldGroup({
   idPrefix,
   versionCmd,
   username,
-  keyPath,
+  sshKey,
   password,
   showPassword,
   onVersionCmdChange,
   onUsernameChange,
-  onKeyPathChange,
+  onSshKeyChange,
   onPasswordChange,
   onToggleShowPassword,
   versionCmdPlaceholder = 'e.g. myapp --version | head -1',
   usernamePlaceholder = 'root (uses global default)',
-  keyPathPlaceholder = '/path/to/key (uses global default)',
+  sshKeyPlaceholder = '-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----',
   passwordPlaceholder = 'leave blank to keep',
   ariaContext,
   disabled,
@@ -83,17 +83,17 @@ export default function SshFieldGroup({
       </div>
       <div>
         <label htmlFor={`${idPrefix}-ssh-key`} className="text-xs text-gray-500">
-          SSH Key Path
+          SSH Private Key
         </label>
-        <input
+        <textarea
           id={`${idPrefix}-ssh-key`}
-          type="text"
-          value={keyPath}
-          placeholder={keyPathPlaceholder}
-          onChange={(e) => onKeyPathChange(e.target.value)}
+          rows={4}
+          value={sshKey}
+          placeholder={sshKeyPlaceholder}
+          onChange={(e) => onSshKeyChange(e.target.value)}
           disabled={disabled}
-          aria-label={`SSH key path${suffix}`}
-          className={inputClass}
+          aria-label={`SSH private key${suffix}`}
+          className={`${inputClass} resize-y text-xs`}
         />
       </div>
       <div>

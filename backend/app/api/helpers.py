@@ -93,10 +93,10 @@ async def _require_api_key(
 # --- Secret masking ---
 
 _TOP_SECRET_FIELDS = frozenset({
-    "github_token", "ssh_password",
+    "github_token", "ssh_password", "ssh_key",
     "ntfy_token", "proxmon_api_key",
 })
-_NESTED_SECRET_FIELDS = frozenset({"api_key", "ssh_password", "token_secret"})
+_NESTED_SECRET_FIELDS = frozenset({"api_key", "ssh_password", "ssh_key", "token_secret"})
 _EXCLUDED_FIELDS = frozenset({"config_db_path", "ssh_known_hosts_path"})
 
 
@@ -142,7 +142,7 @@ class _AppConfigBase(BaseModel):
     github_repo: str | None = None
     ssh_version_cmd: str | None = Field(default=None, max_length=512)
     ssh_username: str | None = None
-    ssh_key_path: str | None = None
+    ssh_key: str | None = None
     ssh_password: str | None = None
     version_host: str | None = None
 
@@ -194,7 +194,7 @@ async def run_os_update_bg(
         success, output = await ssh.run_os_update(
             host_config.host, vmid, os_type,
             ssh_username=host_config.ssh_username,
-            ssh_key_path=host_config.ssh_key_path,
+            ssh_key=host_config.ssh_key,
             ssh_password=host_config.ssh_password,
         )
         task_store.update(
@@ -237,7 +237,7 @@ async def run_app_update_bg(
         success, output = await ssh.run_app_update(
             host_config.host, vmid,
             ssh_username=host_config.ssh_username,
-            ssh_key_path=host_config.ssh_key_path,
+            ssh_key=host_config.ssh_key,
             ssh_password=host_config.ssh_password,
         )
         task_store.update(

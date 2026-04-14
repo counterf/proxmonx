@@ -38,7 +38,7 @@ class ResolvedConfig(NamedTuple):
     github_repo: str | None
     ssh_version_cmd: str | None
     ssh_username: str | None
-    ssh_key_path: str | None
+    ssh_key: str | None
     ssh_password: str | None
     version_host: str | None
 
@@ -402,7 +402,7 @@ class DiscoveryEngine:
                 github_repo = app_cfg.github_repo
                 ssh_cmd = app_cfg.ssh_version_cmd
                 ssh_user = app_cfg.ssh_username
-                ssh_key = app_cfg.ssh_key_path
+                ssh_key = app_cfg.ssh_key
                 ssh_pass = app_cfg.ssh_password
 
         # Layer 2: guest-level overrides (non-null fields win)
@@ -421,8 +421,8 @@ class DiscoveryEngine:
                     ssh_cmd = guest_cfg.ssh_version_cmd
                 if guest_cfg.ssh_username is not None:
                     ssh_user = guest_cfg.ssh_username
-                if guest_cfg.ssh_key_path is not None:
-                    ssh_key = guest_cfg.ssh_key_path
+                if guest_cfg.ssh_key is not None:
+                    ssh_key = guest_cfg.ssh_key
                 if guest_cfg.ssh_password is not None:
                     ssh_pass = guest_cfg.ssh_password
                 if guest_cfg.version_host is not None:
@@ -472,7 +472,7 @@ class DiscoveryEngine:
             proxmox_host=host_config.host,
             vmid=vmid,
             ssh_username=host_config.ssh_username,
-            ssh_key_path=host_config.ssh_key_path,
+            ssh_key=host_config.ssh_key,
             ssh_password=host_config.ssh_password,
         )
 
@@ -511,7 +511,7 @@ class DiscoveryEngine:
             proxmox_host=host_config.host,
             vmid=vmid,
             ssh_username=host_config.ssh_username,
-            ssh_key_path=host_config.ssh_key_path,
+            ssh_key=host_config.ssh_key,
             ssh_password=host_config.ssh_password,
         )
         if result is not None:
@@ -589,12 +589,12 @@ class DiscoveryEngine:
             if detect_method == "pct_first":
                 await self._try_pct_then_ssh(
                     guest, host_config, cfg.ssh_version_cmd,
-                    cfg.ssh_username, cfg.ssh_key_path, cfg.ssh_password,
+                    cfg.ssh_username, cfg.ssh_key, cfg.ssh_password,
                 )
             elif detect_method == "ssh_first":
                 await self._try_ssh_then_pct(
                     guest, host_config, cfg.ssh_version_cmd,
-                    cfg.ssh_username, cfg.ssh_key_path, cfg.ssh_password,
+                    cfg.ssh_username, cfg.ssh_key, cfg.ssh_password,
                 )
             elif detect_method == "pct_only":
                 await self._try_pct_exec(
@@ -603,7 +603,7 @@ class DiscoveryEngine:
             elif detect_method == "ssh_only":
                 await self._try_ssh(
                     guest, cfg.ssh_version_cmd,
-                    cfg.ssh_username, cfg.ssh_key_path, cfg.ssh_password,
+                    cfg.ssh_username, cfg.ssh_key, cfg.ssh_password,
                 )
 
         # Get latest version: use TrueNAS probe result if available, then custom, then GitHub
@@ -671,7 +671,7 @@ class DiscoveryEngine:
                 raw_vmid,
                 ssh_version_cmd,
                 ssh_username=host_config.ssh_username,
-                ssh_key_path=host_config.ssh_key_path,
+                ssh_key=host_config.ssh_key,
                 ssh_password=host_config.ssh_password,
             )
             if pct_output:
@@ -690,7 +690,7 @@ class DiscoveryEngine:
         guest: GuestInfo,
         ssh_version_cmd: str,
         ssh_username: str | None,
-        ssh_key_path: str | None,
+        ssh_key: str | None,
         ssh_password: str | None,
     ) -> bool:
         """Attempt SSH version command; return True if version was obtained."""
@@ -701,7 +701,7 @@ class DiscoveryEngine:
                 guest.ip,
                 ssh_version_cmd,
                 username=ssh_username,
-                key_path=ssh_key_path,
+                ssh_key=ssh_key,
                 password=ssh_password,
             )
             if ssh_output:
@@ -721,12 +721,12 @@ class DiscoveryEngine:
         host_config: ProxmoxHostConfig | None,
         ssh_version_cmd: str,
         ssh_username: str | None,
-        ssh_key_path: str | None,
+        ssh_key: str | None,
         ssh_password: str | None,
     ) -> None:
         """Try pct exec first, fall back to SSH."""
         if not await self._try_pct_exec(guest, host_config, ssh_version_cmd):
-            await self._try_ssh(guest, ssh_version_cmd, ssh_username, ssh_key_path, ssh_password)
+            await self._try_ssh(guest, ssh_version_cmd, ssh_username, ssh_key, ssh_password)
 
     async def _try_ssh_then_pct(
         self,
@@ -734,11 +734,11 @@ class DiscoveryEngine:
         host_config: ProxmoxHostConfig | None,
         ssh_version_cmd: str,
         ssh_username: str | None,
-        ssh_key_path: str | None,
+        ssh_key: str | None,
         ssh_password: str | None,
     ) -> None:
         """Try SSH first, fall back to pct exec."""
-        if not await self._try_ssh(guest, ssh_version_cmd, ssh_username, ssh_key_path, ssh_password):
+        if not await self._try_ssh(guest, ssh_version_cmd, ssh_username, ssh_key, ssh_password):
             await self._try_pct_exec(guest, host_config, ssh_version_cmd)
 
 

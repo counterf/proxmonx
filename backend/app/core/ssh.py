@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import re
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import paramiko
@@ -83,12 +85,28 @@ _VERSION_CMD_DANGEROUS = re.compile(r'[;`]|\$\(|&&|\|\|')
 _PIPE_SAFE_COMMANDS = frozenset({'awk', 'grep', 'cut', 'head', 'tail', 'sed', 'tr', 'xargs'})
 
 
+def _parse_pkey(key_content: str) -> paramiko.PKey:
+    """Parse PEM-encoded private key content into a paramiko PKey."""
+    key_file = io.StringIO(key_content)
+    for key_class in (paramiko.Ed25519Key, paramiko.RSAKey, paramiko.ECDSAKey, paramiko.DSSKey):
+        try:
+            key_file.seek(0)
+            return key_class.from_private_key(key_file)
+        except paramiko.PasswordRequiredException:
+            raise paramiko.SSHException(
+                "SSH key is passphrase-protected; proxmon requires an unencrypted key"
+            )
+        except (paramiko.SSHException, ValueError):
+            continue
+    raise paramiko.SSHException("Unable to parse SSH key: unsupported or invalid key format")
+
+
 class SSHClient:
     """Execute read-only commands on Proxmox guests via SSH."""
 
     def __init__(self, settings: Settings) -> None:
         self._username = settings.ssh_username
-        self._key_path = settings.ssh_key_path
+        self._key = settings.ssh_key
         self._password = settings.ssh_password
         self._enabled = settings.ssh_enabled
         self._known_hosts_path = settings.ssh_known_hosts_path
@@ -98,7 +116,7 @@ class SSHClient:
         """Create an SSHClient from a ProxmoxHostConfig (avoids building a full Settings)."""
         instance = cls.__new__(cls)
         instance._username = host_config.ssh_username or "root"
-        instance._key_path = host_config.ssh_key_path or ""
+        instance._key = host_config.ssh_key or ""
         instance._password = host_config.ssh_password or ""
         instance._enabled = True
         instance._known_hosts_path = ""
@@ -168,7 +186,7 @@ class SSHClient:
         host: str,
         command: str,
         username: str | None = None,
-        key_path: str | None = None,
+        ssh_key: str | None = None,
         password: str | None = None,
         timeout: int = 10,
     ) -> str | None:
@@ -188,9 +206,9 @@ class SSHClient:
             return None
 
         effective_username = username or self._username
-        effective_key_path = key_path or self._key_path
+        effective_key = ssh_key or self._key
         effective_password = password or self._password
-        if not effective_key_path and not effective_password:
+        if not effective_key and not effective_password:
             logger.warning(
                 "SSH version cmd skipped for %s: no credentials configured "
                 "(set SSH key/password in global Settings or per-app SSH fields)",
@@ -205,7 +223,7 @@ class SSHClient:
                 command,
                 timeout,
                 username=username,
-                key_path=key_path,
+                ssh_key=ssh_key,
                 password=password,
             )
             if out:
@@ -226,7 +244,7 @@ class SSHClient:
         vmid: str,
         cmd: str,
         ssh_username: str | None = None,
-        ssh_key_path: str | None = None,
+        ssh_key: str | None = None,
         ssh_password: str | None = None,
         timeout: int = 15,
     ) -> str | None:
@@ -258,7 +276,7 @@ class SSHClient:
                 pct_command,
                 timeout,
                 username=ssh_username,
-                key_path=ssh_key_path,
+                ssh_key=ssh_key,
                 password=ssh_password,
             )
             if stdout:
@@ -279,7 +297,7 @@ class SSHClient:
         vmid: str,
         os_type: str,
         ssh_username: str | None = None,
-        ssh_key_path: str | None = None,
+        ssh_key: str | None = None,
         ssh_password: str | None = None,
         timeout: int = 300,
     ) -> tuple[bool, str]:
@@ -309,7 +327,7 @@ class SSHClient:
                 pct_command,
                 timeout,
                 username=ssh_username,
-                key_path=ssh_key_path,
+                ssh_key=ssh_key,
                 password=ssh_password,
                 capture_exit_code=True,
             )
@@ -338,7 +356,7 @@ class SSHClient:
         proxmox_host: str,
         vmid: str,
         ssh_username: str | None = None,
-        ssh_key_path: str | None = None,
+        ssh_key: str | None = None,
         ssh_password: str | None = None,
         timeout: int = 300,
     ) -> tuple[bool, str]:
@@ -362,7 +380,7 @@ class SSHClient:
                 pct_command,
                 timeout,
                 username=ssh_username,
-                key_path=ssh_key_path,
+                ssh_key=ssh_key,
                 password=ssh_password,
                 capture_exit_code=True,
             )
@@ -391,7 +409,7 @@ class SSHClient:
         vmid: str,
         os_type: str,
         ssh_username: str | None = None,
-        ssh_key_path: str | None = None,
+        ssh_key: str | None = None,
         ssh_password: str | None = None,
         timeout: int = 90,
     ) -> list[str] | None:
@@ -421,7 +439,7 @@ class SSHClient:
                 pct_command,
                 timeout,
                 username=ssh_username,
-                key_path=ssh_key_path,
+                ssh_key=ssh_key,
                 password=ssh_password,
                 capture_exit_code=True,
             )
@@ -442,7 +460,7 @@ class SSHClient:
         proxmox_host: str,
         vmid: str,
         ssh_username: str | None = None,
-        ssh_key_path: str | None = None,
+        ssh_key: str | None = None,
         ssh_password: str | None = None,
         timeout: int = 10,
     ) -> bool | None:
@@ -466,7 +484,7 @@ class SSHClient:
                 pct_command,
                 timeout,
                 username=ssh_username,
-                key_path=ssh_key_path,
+                ssh_key=ssh_key,
                 password=ssh_password,
                 capture_exit_code=True,
             )
@@ -488,7 +506,7 @@ class SSHClient:
         proxmox_host: str,
         vmid: str,
         ssh_username: str | None = None,
-        ssh_key_path: str | None = None,
+        ssh_key: str | None = None,
         ssh_password: str | None = None,
         timeout: int = 10,
     ) -> bool | None:
@@ -511,7 +529,7 @@ class SSHClient:
                 pct_command,
                 timeout,
                 username=ssh_username,
-                key_path=ssh_key_path,
+                ssh_key=ssh_key,
                 password=ssh_password,
                 capture_exit_code=True,
             )
@@ -534,7 +552,7 @@ class SSHClient:
         command: str,
         timeout: int,
         username: str | None = None,
-        key_path: str | None = None,
+        ssh_key: str | None = None,
         password: str | None = None,
         capture_exit_code: bool = False,
     ) -> tuple[str, str] | tuple[str, str, int]:
@@ -545,7 +563,7 @@ class SSHClient:
         exit_code is -1 if the connection could not be established.
         """
         effective_username = username or self._username
-        effective_key_path = key_path or self._key_path
+        effective_key = ssh_key or self._key
         effective_password = password or self._password
 
         client = paramiko.SSHClient()
@@ -555,13 +573,13 @@ class SSHClient:
         else:
             client.set_missing_host_key_policy(paramiko.WarningPolicy())
         try:
-            connect_kwargs: dict[str, str | int | Path | None] = {
+            connect_kwargs: dict[str, Any] = {
                 "hostname": host,
                 "username": effective_username,
                 "timeout": timeout,
             }
-            if effective_key_path:
-                connect_kwargs["key_filename"] = effective_key_path
+            if effective_key:
+                connect_kwargs["pkey"] = _parse_pkey(effective_key)
             elif effective_password:
                 connect_kwargs["password"] = effective_password
             else:

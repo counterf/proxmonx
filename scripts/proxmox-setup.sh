@@ -14,7 +14,7 @@
 set -euo pipefail
 
 PVE_ROLE="ProxmonRole"
-PVE_PRIVS="VM.Audit,VM.PowerMgmt,VM.Snapshot,VM.Backup,VM.Monitor,Datastore.Audit,Sys.Audit"
+PVE_PRIVS="VM.Audit,VM.PowerMgmt,VM.Snapshot,VM.Backup,Datastore.Audit,Sys.Audit"
 PVE_USER="proxmon@pve"
 PVE_TOKEN_NAME="monitoring"
 PVE_TOKEN_ID="${PVE_USER}!${PVE_TOKEN_NAME}"

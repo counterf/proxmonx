@@ -11,7 +11,7 @@ interface AppConfigSectionProps {
   disabled?: boolean;
 }
 
-type AppField = 'port' | 'api_key' | 'scheme' | 'github_repo' | 'ssh_version_cmd' | 'ssh_username' | 'ssh_key_path' | 'ssh_password';
+type AppField = 'port' | 'api_key' | 'scheme' | 'github_repo' | 'ssh_version_cmd' | 'ssh_username' | 'ssh_key' | 'ssh_password';
 
 export default function AppConfigSection({
   appConfigs,
@@ -43,8 +43,9 @@ export default function AppConfigSection({
       updated.ssh_version_cmd = value;
     } else if (field === 'ssh_username') {
       updated.ssh_username = value;
-    } else if (field === 'ssh_key_path') {
-      updated.ssh_key_path = value;
+    } else if (field === 'ssh_key') {
+      updated.ssh_key = value;
+      changedKeys.current.add(name);
     } else if (field === 'ssh_password') {
       updated.ssh_password = value;
       changedKeys.current.add(name);
@@ -88,12 +89,12 @@ export default function AppConfigSection({
               idPrefix={`${prefix}-${app.name}`}
               versionCmd={cfg.ssh_version_cmd ?? ''}
               username={cfg.ssh_username ?? ''}
-              keyPath={cfg.ssh_key_path ?? ''}
+              sshKey={cfg.ssh_key ?? ''}
               password={cfg.ssh_password ?? ''}
               showPassword={showSshPassword[app.name] ?? false}
               onVersionCmdChange={(v) => updateApp(app.name, 'ssh_version_cmd', v)}
               onUsernameChange={(v) => updateApp(app.name, 'ssh_username', v)}
-              onKeyPathChange={(v) => updateApp(app.name, 'ssh_key_path', v)}
+              onSshKeyChange={(v) => updateApp(app.name, 'ssh_key', v)}
               onPasswordChange={(v) => updateApp(app.name, 'ssh_password', v)}
               onToggleShowPassword={() => toggleSshPasswordVisibility(app.name)}
               ariaContext={`for ${app.display_name}`}
