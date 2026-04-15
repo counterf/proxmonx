@@ -349,7 +349,7 @@ class ConfigStore:
         """Atomically save scalars, hosts, and app configs in one transaction.
 
         *hosts*: if not None, replaces all hosts (deletes removed, upserts incoming).
-        *app_configs*: if not None, upserts each entry (preserves entries not in payload).
+        *app_configs*: if not None, replaces all entries (deletes removed, upserts incoming).
         Secret fields ("***" / None) are preserved from existing rows.
         """
         params = _dict_to_params(scalars)
@@ -377,8 +377,15 @@ class ConfigStore:
                 for h in hosts:
                     self._upsert_host_conn(conn, h, preserve_secrets=True)
 
-            # 3) App configs (upsert, not replace-all)
+            # 3) App configs (replace-all: upsert incoming, delete removed)
             if app_configs is not None:
+                incoming_app_names = set(app_configs.keys())
+                existing_app_names = {
+                    dict(r)["app_name"]
+                    for r in conn.execute("SELECT app_name FROM app_config").fetchall()
+                }
+                for removed_name in existing_app_names - incoming_app_names:
+                    conn.execute("DELETE FROM app_config WHERE app_name = ?", (removed_name,))
                 for app_name, app_data in app_configs.items():
                     self._upsert_app_config_conn(conn, app_name, app_data, preserve_secrets=True)
 

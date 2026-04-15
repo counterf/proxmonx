@@ -76,7 +76,7 @@ export function useGuests(): UseGuestsResult {
         if (!mountedRef.current) return;
         try {
           const health = await fetchHealth();
-          if (!snapshot_at || (health.last_poll && health.last_poll > snapshot_at)) break;
+          if (health.last_poll && (!snapshot_at || health.last_poll > snapshot_at)) break;
         } catch (err) {
           if (err instanceof HttpError && err.status === 401) return;
           // ignore other transient health check errors

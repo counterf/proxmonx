@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS task_history (
 _PRUNE = """
 DELETE FROM task_history WHERE id NOT IN (
     SELECT id FROM task_history ORDER BY started_at DESC LIMIT 500
-)
+) AND status NOT IN ('pending', 'running')
 """
 
 

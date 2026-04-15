@@ -4,7 +4,7 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config import CustomAppDef, _CUSTOM_APP_NAME_RE
 from app.core.github import parse_github_repo
@@ -51,6 +51,19 @@ class CustomAppDefRequest(BaseModel):
         if v in _BUILTIN_NAMES:
             raise ValueError(f"'{v}' conflicts with a built-in app name")
         return v
+
+    @field_validator("version_path")
+    @classmethod
+    def validate_version_path(cls, v: str | None) -> str | None:
+        if v is not None and v != "" and not v.startswith("/"):
+            raise ValueError("version_path must start with /")
+        return v
+
+    @model_validator(mode="after")
+    def validate_api_key_requires_header(self) -> "CustomAppDefRequest":
+        if self.accepts_api_key and not (self.auth_header and self.auth_header.strip()):
+            raise ValueError("auth_header is required when accepts_api_key is true")
+        return self
 
     @field_validator("github_repo")
     @classmethod

@@ -29,6 +29,7 @@ class TrueNASDetector(BaseDetector):
     default_port = 443
     docker_images: list[str] = []
     accepts_api_key = True
+    scheme = "https"
 
     async def get_installed_version(
         self,

@@ -67,8 +67,12 @@ def _check_rate_limit(ip: str) -> bool:
             del _login_attempts[k]
     if len(attempts) >= _RATE_LIMIT_MAX:
         return False
-    _login_attempts.setdefault(ip, []).append(now)
     return True
+
+
+def _record_failed_attempt(ip: str) -> None:
+    """Record a failed login attempt for rate limiting."""
+    _login_attempts.setdefault(ip, []).append(time.monotonic())
 
 
 class LoginRequest(BaseModel):
@@ -101,6 +105,7 @@ async def login(body: LoginRequest, request: Request):
     password_ok = verify_password(body.password, hash_to_check)
 
     if not username_ok or not password_ok:
+        _record_failed_attempt(client_ip)
         return JSONResponse({"detail": "Invalid credentials"}, status_code=401)
 
     token = session_store.create()
@@ -173,6 +178,7 @@ async def change_password(body: ChangePasswordRequest, request: Request):
     # Allow recovery from an empty-hash state (e.g. migration/older config); in that
     # case the active authenticated session may set a first password directly.
     if stored_hash and not verify_password(body.current_password, stored_hash):
+        _record_failed_attempt(client_ip)
         return JSONResponse({"detail": "Current password is incorrect"}, status_code=400)
 
     config_store.update_scalar("auth_password_hash", hash_password(body.new_password))

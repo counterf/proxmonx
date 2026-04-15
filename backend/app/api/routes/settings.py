@@ -491,6 +491,8 @@ async def save_settings(
                     status_code=422,
                     detail=f"token_secret is required for new host '{entry.id}'",
                 )
+            if not is_new and entry.token_secret == "":
+                entry.token_secret = None  # preserve existing secret via CRUD layer
         hosts_to_save = [entry.model_dump() for entry in body.proxmox_hosts]
 
     # Build app config dict for atomic save
@@ -532,8 +534,7 @@ async def save_settings(
             )
             if has_content:
                 app_configs_to_save[app_name] = merged_entry
-            else:
-                config_store.delete_app_config(app_name)
+            # Omitted apps are deleted by save_full()'s replace-all semantics
         changed_apps = list(body.app_config.keys())
         if changed_apps:
             logger.info("App config updated for: %s", ", ".join(changed_apps))

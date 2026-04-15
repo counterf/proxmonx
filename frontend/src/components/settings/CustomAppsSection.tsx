@@ -349,7 +349,7 @@ export default function CustomAppsSection({ onCustomAppsChange }: { onCustomApps
 
             <div>
               <label htmlFor="cad-aliases" className="text-xs text-gray-500">
-                Auto-detect if guest name contains
+                Auto-detect by name token
               </label>
               <input
                 id="cad-aliases"
@@ -361,7 +361,7 @@ export default function CustomAppsSection({ onCustomAppsChange }: { onCustomApps
                 className="w-full mt-0.5 px-3 py-1.5 text-sm bg-surface border border-gray-800 rounded text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
               <p className="text-xs text-gray-600 mt-0.5">
-                Matched against LXC/VM names and Docker container tags. Leave blank to assign manually from the guest detail page.
+                Matches against name parts split on -, _, ., and spaces. Also matched against Docker container tags. Leave blank to assign manually from the guest detail page.
               </p>
             </div>
 

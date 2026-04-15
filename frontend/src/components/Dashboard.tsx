@@ -15,6 +15,11 @@ import { useColumnVisibility, COLUMN_DEFS, type ColumnKey } from '../hooks/useCo
 type SortColumn = ColumnKey;
 type SortDirection = 'asc' | 'desc';
 
+const VALID_STATUSES: readonly string[] = ['up-to-date', 'outdated', 'unknown', 'all'];
+const VALID_TYPES: readonly string[] = ['lxc', 'vm', 'all'];
+const VALID_SORT_COLUMNS: readonly string[] = ['name', 'type', 'host_label', 'app_name', 'installed_version', 'latest_version', 'update_status', 'disk', 'version_detection_method', 'os_type', 'pending_updates', 'last_checked'];
+const VALID_SORT_DIRS: readonly string[] = ['asc', 'desc'];
+
 export function compareSemver(a: string, b: string): number {
   const pa = a.replace(/^v/i, '').split('.').map(Number);
   const pb = b.replace(/^v/i, '').split('.').map(Number);
@@ -107,21 +112,28 @@ export default function Dashboard({ configured }: { configured: boolean }) {
   const { guests, loading, error, refreshing, isDiscovering, lastRefreshed, refresh } = useGuests();
   const [searchParams, setSearchParams] = useSearchParams();
 
+  const rawStatus = searchParams.get('status');
+  const rawType = searchParams.get('type');
+  const rawSort = searchParams.get('sort');
+  const rawDir = searchParams.get('dir');
+
   const [search, setSearch] = useState(searchParams.get('q') || '');
   const [statusFilter, setStatusFilter] = useState<UpdateStatus | 'all'>(
-    (searchParams.get('status') as UpdateStatus | 'all') || 'all'
+    VALID_STATUSES.includes(rawStatus ?? '') ? rawStatus as UpdateStatus | 'all' : 'all'
   );
   const [typeFilter, setTypeFilter] = useState<GuestType | 'all'>(
-    (searchParams.get('type') as GuestType | 'all') || 'all'
+    VALID_TYPES.includes(rawType ?? '') ? rawType as GuestType | 'all' : 'all'
   );
   const [hostFilter, setHostFilter] = useState<string>(
     searchParams.get('host') || 'all'
   );
 
-  const initSort = searchParams.get('sort') as SortColumn | null;
-  const initDir = searchParams.get('dir') as SortDirection | null;
-  const [sortColumn, setSortColumn] = useState<SortColumn | null>(initSort);
-  const [sortDirection, setSortDirection] = useState<SortDirection>(initDir || 'asc');
+  const [sortColumn, setSortColumn] = useState<SortColumn | null>(
+    rawSort && VALID_SORT_COLUMNS.includes(rawSort) ? rawSort as SortColumn : null
+  );
+  const [sortDirection, setSortDirection] = useState<SortDirection>(
+    rawDir && VALID_SORT_DIRS.includes(rawDir) ? rawDir as SortDirection : 'asc'
+  );
 
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());

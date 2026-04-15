@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import type { Guest as GuestDetailType } from '../types';
 import { fetchGuest, fetchFullSettings } from '../api/client';
@@ -26,19 +26,17 @@ export default function GuestDetail() {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
   }, [id]);
 
-  const loadGuest = useCallback((guestId: string) => {
-    setError(null);
-    setLoading(true);
-    fetchGuest(guestId)
-      .then(setGuest)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load guest'))
-      .finally(() => setLoading(false));
-  }, []);
-
   useEffect(() => {
     if (!id) return;
-    loadGuest(id);
-  }, [id, loadGuest]);
+    let stale = false;
+    setError(null);
+    setLoading(true);
+    fetchGuest(id)
+      .then((data) => { if (!stale) setGuest(data); })
+      .catch((err) => { if (!stale) setError(err instanceof Error ? err.message : 'Failed to load guest'); })
+      .finally(() => { if (!stale) setLoading(false); });
+    return () => { stale = true; };
+  }, [id]);
 
   // B3: Depend on `id` so backup-enabled re-evaluates when navigating between guests
   useEffect(() => {
