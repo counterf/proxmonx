@@ -8,12 +8,15 @@ from typing import TYPE_CHECKING
 from app.detectors.base import BaseDetector
 from app.detectors.caddy import CaddyDetector
 from app.detectors.docker_generic import DockerGenericDetector
+from app.detectors.homepage import HomepageDetector
 from app.detectors.http_json import DetectorConfig, HttpJsonDetector, make_detector
 from app.detectors.jackett import JackettDetector
 from app.detectors.librespeed_rust import LibreSpeedRustDetector
+from app.detectors.pbs import PBSDetector
 from app.detectors.plex import PlexDetector
 from app.detectors.qbittorrent import QBittorrentDetector
 from app.detectors.sabnzbd import SABnzbdDetector
+from app.detectors.tautulli import TautulliDetector
 from app.detectors.truenas import TrueNASDetector
 
 if TYPE_CHECKING:
@@ -42,6 +45,10 @@ ALL_DETECTORS: list[BaseDetector] = [
     make_detector("traefik"),
     CaddyDetector(),
     make_detector("ntfy"),
+    make_detector("homeassistant"),
+    PBSDetector(),
+    TautulliDetector(),
+    HomepageDetector(),
     TrueNASDetector(),
 ]
 

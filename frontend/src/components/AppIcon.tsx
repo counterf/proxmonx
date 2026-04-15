@@ -6,6 +6,8 @@ const ICON_BASE = 'https://cdn.jsdelivr.net/gh/selfhst/icons/png';
 const DETECTOR_ICON_ALIASES: Record<string, string> = {
   'librespeed-rust': 'librespeed',
   'truenas': 'truenas-core',
+  'homeassistant': 'home-assistant',
+  'pbs': 'proxmox',
 };
 
 interface AppIconProps {

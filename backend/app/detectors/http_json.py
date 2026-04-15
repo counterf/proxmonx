@@ -119,6 +119,15 @@ SIMPLE_DETECTOR_CONFIGS: list[DetectorConfig] = [
         docker_images=["ntfy", "binwiederhier/ntfy"],
         strip_v=True,
     ),
+    DetectorConfig(
+        name="homeassistant", display_name="Home Assistant",
+        github_repo="home-assistant/core",
+        default_port=8123, path="/api/config",
+        docker_images=["homeassistant/home-assistant", "linuxserver/homeassistant"],
+        aliases=["home-assistant", "hass"],
+        accepts_api_key=True, auth_header="Authorization",
+        strip_v=True,
+    ),
 ]
 
 _CONFIG_MAP: dict[str, DetectorConfig] = {c.name: c for c in SIMPLE_DETECTOR_CONFIGS}
