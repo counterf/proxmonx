@@ -13,6 +13,9 @@ from app.detectors.utils import normalize_version
 
 logger = logging.getLogger(__name__)
 
+# Hardcoded to 'trixie' (Debian 13 / PBS 4.x / Proxmox 9).  For older
+# installations on bookworm the reported latest version may be newer
+# than what is available in the user's configured repository.
 _PBS_PACKAGES_URL = (
     "http://download.proxmox.com/debian/pbs/dists/trixie/"
     "pbs-no-subscription/binary-amd64/Packages.gz"
@@ -35,7 +38,7 @@ class PBSDetector(BaseDetector):
             return True
         if "proxmox" in tokens and "backup" in tokens:
             return True
-        return False
+        return super()._name_matches(guest_name)
 
     async def get_latest_version(
         self,
@@ -60,13 +63,16 @@ class PBSDetector(BaseDetector):
                     in_pbs = line.split(":", 1)[1].strip() == "proxmox-backup-server"
                 elif in_pbs and line.startswith("Version:"):
                     raw = line.split(":", 1)[1].strip()
+                    # Strip Debian revision suffix (-2, -1+trixie1) so the
+                    # version matches the bare semver from the PBS JSON API.
+                    clean = re.sub(r"-\d+(\+.*)?$", "", raw)
                     try:
-                        parsed = Version(normalize_version(raw))
+                        parsed = Version(normalize_version(clean))
                     except InvalidVersion:
                         continue
                     if best is None or parsed > best:
                         best = parsed
-                        best_raw = raw
+                        best_raw = clean
             if best_raw:
                 return normalize_version(best_raw)
         except Exception:

@@ -5,6 +5,7 @@ import logging
 import httpx
 
 from app.detectors.base import BaseDetector
+from app.detectors.http_json import ProbeError
 from app.detectors.utils import normalize_version
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,11 @@ class TautulliDetector(BaseDetector):
                 )
                 if version:
                     return normalize_version(version, strip_v=True)
-        except Exception:
-            logger.debug("Failed to get Tautulli version from %s:%d", host, port)
-        return None
+                raise ProbeError("Version key not found in response")
+            if resp.status_code == 401:
+                raise ProbeError("HTTP 401 -- check API key")
+            raise ProbeError(f"HTTP {resp.status_code}")
+        except ProbeError:
+            raise
+        except Exception as exc:
+            raise ProbeError(f"Connection failed: {exc}") from exc

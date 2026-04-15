@@ -119,6 +119,8 @@ SIMPLE_DETECTOR_CONFIGS: list[DetectorConfig] = [
         docker_images=["ntfy", "binwiederhier/ntfy"],
         strip_v=True,
     ),
+    # Home Assistant REST API requires "Authorization: Bearer <LLAT>".
+    # User must enter "Bearer <long-lived-access-token>" as the API key.
     DetectorConfig(
         name="homeassistant", display_name="Home Assistant",
         github_repo="home-assistant/core",
