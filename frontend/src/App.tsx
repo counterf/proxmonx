@@ -31,7 +31,8 @@ function App() {
       }
     } catch {
       setCheckError(true);
-      setConfigured(false);
+      // Don't set configured=false on network errors — leave it null so
+      // the dashboard shows an error state instead of the setup wizard.
     }
   }, [navigate]);
 
@@ -87,6 +88,24 @@ function App() {
     return (
       <div className="min-h-screen bg-background text-gray-100 flex items-center justify-center">
         <LoadingSpinner text="Connecting to proxmon..." />
+      </div>
+    );
+  }
+
+  // Backend unreachable — show error, not setup wizard
+  if (checkError && configured === null) {
+    return (
+      <div className="min-h-screen bg-background text-gray-100 flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <p className="text-red-400 font-medium">Unable to connect to the proxmon backend.</p>
+          <p className="text-sm text-gray-500">The server may be starting up or unreachable.</p>
+          <button
+            onClick={checkSetup}
+            className="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }

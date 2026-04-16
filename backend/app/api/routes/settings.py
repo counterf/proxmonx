@@ -548,31 +548,49 @@ async def save_settings(
     # Reload settings: config file values take priority over env/defaults
     new_settings = config_store.merge_into_settings(Settings())
 
+    is_configured = config_store.is_configured()
+
     # Stop existing scheduler if running
     if scheduler is not None:
         await scheduler.stop()
 
     old_client: httpx.AsyncClient | None = getattr(request.app.state, "http_client", None)
 
+    if not is_configured:
+        # Unconfigured: install null scheduler, don't transfer guest cache
+        request.app.state.http_client = None
+        request.app.state.scheduler = None
+        request.app.dependency_overrides[_get_scheduler] = lambda: None
+        request.app.dependency_overrides[_get_settings] = lambda: new_settings
+        request.app.state.settings = new_settings
+        if old_client is not None:
+            await old_client.aclose()
+        return {"success": True, "message": "Settings saved"}
+
     from app.main import build_runtime
     new_client, new_scheduler = build_runtime(new_settings)
     # Transfer cached guest state so the dashboard doesn't go blank after save
-    if scheduler is not None and config_store.is_configured():
+    if scheduler is not None:
         new_scheduler._guests = scheduler._guests
     try:
-        if config_store.is_configured():
-            new_scheduler.start()
+        new_scheduler.start()
+        # Swap succeeded — install new runtime and close old client
         request.app.state.http_client = new_client
         request.app.state.scheduler = new_scheduler
         request.app.dependency_overrides[_get_scheduler] = lambda: new_scheduler
         request.app.dependency_overrides[_get_settings] = lambda: new_settings
         request.app.state.settings = new_settings
-    except Exception as exc:
-        await new_client.aclose()
-        raise HTTPException(status_code=500, detail=f"Failed to start scheduler: {exc}") from exc
-    finally:
         if old_client is not None:
             await old_client.aclose()
+    except Exception as exc:
+        await new_client.aclose()
+        # Attempt to restart the old scheduler so the app isn't left dead
+        if scheduler is not None and old_client is not None and not old_client.is_closed:
+            try:
+                scheduler.start()
+            except Exception:
+                logger.warning("Failed to restart old scheduler after new scheduler failed", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to start scheduler: {exc}") from exc
 
     return {"success": True, "message": "Settings saved"}
 

@@ -46,7 +46,7 @@ def build_runtime(settings: Settings) -> tuple[httpx.AsyncClient, Scheduler]:
     Used by both lifespan() and save_settings() to avoid duplicating wiring.
     """
     http_client = httpx.AsyncClient(timeout=10.0, verify=False, follow_redirects=True)
-    github = GitHubClient(settings)
+    github = GitHubClient(settings, http_client=http_client)
     ssh = SSHClient(settings)
     engine = DiscoveryEngine(github, ssh, http_client=http_client, settings=settings)
 

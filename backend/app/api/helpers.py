@@ -219,22 +219,33 @@ async def run_os_update_bg(
 _APP_UPDATE_PROBE_INTERVAL = 5  # seconds between version probes (initial + retries)
 _APP_UPDATE_RETRY_BUDGET = 60   # max seconds to keep retrying after first probe
 
-_OUTPUT_MAX_BYTES = 262144  # 256 KiB
+_OUTPUT_MAX_BYTES = 65536  # 64 KiB
+_OUTPUT_HEAD_BYTES = 8192  # 8 KiB kept from the start
 
 
 def _truncate_output(output: str, max_bytes: int = _OUTPUT_MAX_BYTES) -> str:
-    """Keep the last max_bytes of output, prepending a truncation marker if trimmed."""
+    """Keep the first 8KB and last (max_bytes - 8KB) of output when it exceeds max_bytes."""
     encoded = output.encode("utf-8", errors="replace")
     if len(encoded) <= max_bytes:
         return output
-    marker = "[... truncated ...]\n"
+    marker = "\n[... truncated ...]\n"
     marker_bytes = len(marker.encode("utf-8"))
-    tail = encoded[-(max_bytes - marker_bytes):]
-    # Skip past any incomplete UTF-8 leading bytes (continuation bytes: 0x80-0xBF)
+    head_bytes = min(_OUTPUT_HEAD_BYTES, max_bytes // 4)
+    tail_bytes = max_bytes - head_bytes - marker_bytes
+
+    head = encoded[:head_bytes]
+    tail = encoded[-tail_bytes:]
+
+    # Trim head to last complete UTF-8 character
+    while head and (head[-1] & 0xC0) == 0x80:
+        head = head[:-1]
+    # Trim tail past any incomplete UTF-8 leading bytes
     i = 0
     while i < len(tail) and (tail[i] & 0xC0) == 0x80:
         i += 1
-    return marker + tail[i:].decode("utf-8", errors="replace")
+    tail = tail[i:]
+
+    return head.decode("utf-8", errors="replace") + marker + tail.decode("utf-8", errors="replace")
 
 
 def _last_lines(text: str, n: int = 3) -> str:

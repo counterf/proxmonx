@@ -4,6 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import NamedTuple
+from urllib.parse import urlparse
 import httpx
 
 from app.config import ProxmoxHostConfig, Settings  # Settings kept for DiscoveryEngine type hint
@@ -77,7 +78,14 @@ class DiscoveryEngine:
             return dict(existing_guests)
 
         if len(hosts) == 1:
-            return await self._run_host_cycle(hosts[0], existing_guests, is_manual=is_manual)
+            try:
+                return await self._run_host_cycle(hosts[0], existing_guests, is_manual=is_manual)
+            except Exception:
+                logger.error(
+                    "Discovery failed for host %s — preserving existing guests",
+                    hosts[0].label, exc_info=True,
+                )
+                return dict(existing_guests)
 
         logger.info("Starting multi-host discovery across %d hosts", len(hosts))
         start = datetime.now(timezone.utc)
@@ -438,6 +446,20 @@ class DiscoveryEngine:
                     ssh_pass = guest_cfg.ssh_password
                 if guest_cfg.version_host is not None:
                     version_host = guest_cfg.version_host
+
+        # Sanitise version_host: extract bare hostname/IP if a full URL was stored
+        if version_host:
+            vh = version_host.strip()
+            if "://" in vh:
+                parsed = urlparse(vh)
+                version_host = parsed.hostname or vh
+            else:
+                # Strip any trailing path/port (e.g. "host/foo", "host:8006")
+                # but preserve bare IPv6 addresses (contain multiple colons)
+                bare = vh.split("/")[0]
+                if bare.count(":") <= 1:
+                    bare = bare.split(":")[0]
+                version_host = bare
 
         logger.debug(
             "Resolved config for %s (guest %s): port=%s, api_key=%s, scheme=%s, version_host=%s",

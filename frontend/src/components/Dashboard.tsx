@@ -112,28 +112,25 @@ export default function Dashboard({ configured }: { configured: boolean }) {
   const { guests, loading, error, refreshing, isDiscovering, lastRefreshed, refresh } = useGuests();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const rawStatus = searchParams.get('status');
-  const rawType = searchParams.get('type');
-  const rawSort = searchParams.get('sort');
-  const rawDir = searchParams.get('dir');
+  const search = useMemo(() => searchParams.get('q') || '', [searchParams]);
+  const statusFilter = useMemo<UpdateStatus | 'all'>(() => {
+    const raw = searchParams.get('status');
+    return VALID_STATUSES.includes(raw ?? '') ? raw as UpdateStatus | 'all' : 'all';
+  }, [searchParams]);
+  const typeFilter = useMemo<GuestType | 'all'>(() => {
+    const raw = searchParams.get('type');
+    return VALID_TYPES.includes(raw ?? '') ? raw as GuestType | 'all' : 'all';
+  }, [searchParams]);
+  const hostFilter = useMemo(() => searchParams.get('host') || 'all', [searchParams]);
 
-  const [search, setSearch] = useState(searchParams.get('q') || '');
-  const [statusFilter, setStatusFilter] = useState<UpdateStatus | 'all'>(
-    VALID_STATUSES.includes(rawStatus ?? '') ? rawStatus as UpdateStatus | 'all' : 'all'
-  );
-  const [typeFilter, setTypeFilter] = useState<GuestType | 'all'>(
-    VALID_TYPES.includes(rawType ?? '') ? rawType as GuestType | 'all' : 'all'
-  );
-  const [hostFilter, setHostFilter] = useState<string>(
-    searchParams.get('host') || 'all'
-  );
-
-  const [sortColumn, setSortColumn] = useState<SortColumn | null>(
-    rawSort && VALID_SORT_COLUMNS.includes(rawSort) ? rawSort as SortColumn : null
-  );
-  const [sortDirection, setSortDirection] = useState<SortDirection>(
-    rawDir && VALID_SORT_DIRS.includes(rawDir) ? rawDir as SortDirection : 'asc'
-  );
+  const sortColumn = useMemo<SortColumn | null>(() => {
+    const raw = searchParams.get('sort');
+    return raw && VALID_SORT_COLUMNS.includes(raw) ? raw as SortColumn : null;
+  }, [searchParams]);
+  const sortDirection = useMemo<SortDirection>(() => {
+    const raw = searchParams.get('dir');
+    return raw && VALID_SORT_DIRS.includes(raw) ? raw as SortDirection : 'asc';
+  }, [searchParams]);
 
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -186,44 +183,37 @@ export default function Dashboard({ configured }: { configured: boolean }) {
   }, [setSearchParams]);
 
   const handleSearchChange = (value: string) => {
-    setSearch(value);
     updateFilter('q', value);
   };
   const handleStatusChange = (value: UpdateStatus | 'all') => {
-    setStatusFilter(value);
     updateFilter('status', value);
   };
   const handleTypeChange = (value: GuestType | 'all') => {
-    setTypeFilter(value);
     updateFilter('type', value);
   };
   const handleHostChange = (value: string) => {
-    setHostFilter(value);
     updateFilter('host', value);
   };
 
   const handleSort = useCallback((col: SortColumn) => {
-    if (sortColumn === col) {
-      if (sortDirection === 'asc') {
-        setSortDirection('desc');
-        updateFilter('dir', 'desc');
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      if (sortColumn === col) {
+        if (sortDirection === 'asc') {
+          params.set('sort', col);
+          params.set('dir', 'desc');
+        } else {
+          // Third click: clear sort
+          params.delete('sort');
+          params.delete('dir');
+        }
       } else {
-        // Third click: clear sort
-        setSortColumn(null);
-        setSortDirection('asc');
-        updateFilter('sort', '');
-        updateFilter('dir', '');
-        return;
+        params.set('sort', col);
+        params.set('dir', 'asc');
       }
-    } else {
-      setSortColumn(col);
-      setSortDirection('asc');
-      updateFilter('sort', col);
-      updateFilter('dir', 'asc');
-      return;
-    }
-    updateFilter('sort', col);
-  }, [sortColumn, sortDirection, updateFilter]);
+      return params;
+    }, { replace: true });
+  }, [sortColumn, sortDirection, setSearchParams]);
 
   // Unique host IDs for filter dropdown
   const uniqueHosts = useMemo(() => {

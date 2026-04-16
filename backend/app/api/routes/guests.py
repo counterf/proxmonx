@@ -33,7 +33,9 @@ from app.api.helpers import (
 
 logger = logging.getLogger(__name__)
 
-_POLL_MAX_ITERATIONS = 180  # 180 × 10s = 30 min
+_POLL_MAX_ITERATIONS = 180        # 180 × 10s = 30 min (default)
+_BACKUP_POLL_MAX_ITERATIONS = 360  # 360 × 10s = 60 min (vzdump backups)
+_MAX_CONSECUTIVE_POLL_FAILURES = 5
 
 router = APIRouter()
 
@@ -77,11 +79,13 @@ async def _poll_upid(
     http_client: httpx.AsyncClient | None = None,
     guest_id: str | None = None,
     scheduler=None,
+    max_iterations: int = _POLL_MAX_ITERATIONS,
 ) -> None:
     """Background task: poll Proxmox for UPID completion and update the task record."""
     own_client: httpx.AsyncClient | None = None
+    consecutive_failures = 0
     try:
-        for _ in range(_POLL_MAX_ITERATIONS):  # poll every 10s up to 30 min
+        for _ in range(max_iterations):  # poll every 10s
             await asyncio.sleep(10)
             safe_client = http_client if (http_client and not http_client.is_closed) else None
             if safe_client is None and own_client is None:
@@ -89,7 +93,21 @@ async def _poll_upid(
             client = ProxmoxClient(host_config, http_client=safe_client or own_client)
             try:
                 data = await client.get_task_status(upid)
-            except Exception:
+                consecutive_failures = 0
+            except Exception as poll_exc:
+                consecutive_failures += 1
+                logger.warning(
+                    "Poll failed for task %s (attempt %d/%d): %s",
+                    task_id, consecutive_failures, _MAX_CONSECUTIVE_POLL_FAILURES, poll_exc,
+                )
+                if consecutive_failures >= _MAX_CONSECUTIVE_POLL_FAILURES:
+                    task_store.update(
+                        task_id,
+                        status="failed",
+                        detail=f"Lost connectivity to Proxmox after {consecutive_failures} consecutive poll failures",
+                        finished_at=_now_iso(),
+                    )
+                    return
                 continue
             if data.get("status") == "stopped":
                 exitstatus = str(data.get("exitstatus", ""))
@@ -107,7 +125,7 @@ async def _poll_upid(
         task_store.update(
             task_id,
             status="failed",
-            detail=f"{upid} (poll timed out after {_POLL_MAX_ITERATIONS * 10 // 60} min)",
+            detail=f"{upid} (poll timed out after {max_iterations * 10 // 60} min)",
             finished_at=_now_iso(),
         )
         if guest_id and scheduler:
@@ -480,7 +498,7 @@ async def backup_guest(
         logger.info("Backup queued for guest %s -> %s", guest_id, upid)
         task_store.update(task_id, status="running", detail=upid)
         http_client = getattr(request.app.state, "http_client", None)
-        _register_bg_task(request, _poll_upid(task_store, host_config, task_id, upid, f"Backed up to {host_config.backup_storage}", http_client=http_client, guest_id=guest_id, scheduler=scheduler))
+        _register_bg_task(request, _poll_upid(task_store, host_config, task_id, upid, f"Backed up to {host_config.backup_storage}", http_client=http_client, guest_id=guest_id, scheduler=scheduler, max_iterations=_BACKUP_POLL_MAX_ITERATIONS))
         return {"status": "ok", "task": upid}
     except httpx.HTTPStatusError as exc:
         raise _handle_proxmox_error(exc, task_store, task_id)

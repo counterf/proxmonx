@@ -164,4 +164,4 @@ class TaskStore:
 
     def clear(self) -> None:
         with self._connect() as conn:
-            conn.execute("DELETE FROM task_history")
+            conn.execute("DELETE FROM task_history WHERE status NOT IN ('pending', 'running')")
