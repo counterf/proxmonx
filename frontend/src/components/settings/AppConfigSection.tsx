@@ -33,7 +33,7 @@ export default function AppConfigSection({
       const num = parseInt(value, 10);
       updated.port = value === '' || isNaN(num) ? null : num;
     } else if (field === 'scheme') {
-      updated.scheme = value === 'http' ? null : value;
+      updated.scheme = value || null;
     } else if (field === 'github_repo') {
       updated.github_repo = value;
     } else if (field === 'api_key') {

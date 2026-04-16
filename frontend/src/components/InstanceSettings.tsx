@@ -98,7 +98,7 @@ export default function InstanceSettings({ guestId, appName, detectorUsed }: { g
       setCfg({ ...cfg, scheme: 'https', version_host: host || '' });
     } else if (lower.startsWith('http://')) {
       const host = trimmed.slice(7).replace(/\/+$/, '');
-      setCfg({ ...cfg, scheme: '', version_host: host || '' });
+      setCfg({ ...cfg, scheme: 'http', version_host: host || '' });
     } else {
       setCfg({ ...cfg, scheme: '', version_host: trimmed });
     }

@@ -492,7 +492,7 @@ curl -H "X-Api-Key: my-secret-api-key" http://localhost:3000/api/guests
 
 ### Rate limiting
 
-Login attempts are rate-limited to **10 requests per 60 seconds per IP** to prevent brute-force attacks. Exceeded limits return `HTTP 429`.
+Failed login attempts are rate-limited to **10 per 60 seconds per IP** to prevent brute-force attacks. Successful logins do not count toward the limit. Exceeded limits return `HTTP 429`.
 
 ---
 

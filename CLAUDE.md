@@ -20,25 +20,25 @@ Proxmox monitoring dashboard. Discovers LXC/VM guests across multiple Proxmox ho
 - `backend/app/core/proxmox.py` -- ProxmoxClient: `list_guests()`, `guest_action()`, `get_task_status()`, `create_backup()`, `list_backup_storages()`, `get_guest_network()`
 - `backend/app/core/ssh.py` -- SSHClient; `from_host_config(host_config)` classmethod builds an SSHClient from a `ProxmoxHostConfig`; `OS_UPDATE_COMMANDS` dict maps Proxmox ostype → package manager command; `run_os_update()`, `run_app_update()`, `run_pending_updates_list()`, `run_reboot_required_check()`, `run_community_script_check()`; `_strip_ansi()` strips ANSI escape codes from command output; `_extract_ssh_host()` strips scheme/port from Proxmox host URL before SSH
 - `backend/app/core/github.py` -- GitHub releases API client with 1h TTL cache; `parse_github_repo()` normalizes URLs; `test_repo()` for UI validation
-- `backend/app/core/task_store.py` -- TaskRecord (id, guest_id, guest_name, host_id, action, status, started_at, finished_at, output, detail, batch_id); retains last 500 records; auto-reconciles stale running tasks on restart
+- `backend/app/core/task_store.py` -- TaskRecord (id, guest_id, guest_name, host_id, action, status, started_at, finished_at, output, detail, batch_id); retains last 500 records; pruning exempts `pending`/`running` tasks; auto-reconciles stale running tasks on restart
 - `backend/app/core/session_store.py` -- SQLite-backed session management (24h TTL)
-- `backend/app/core/auth.py` -- password hashing (scrypt) and verification; login rate limiting (10 attempts / 60s / IP)
+- `backend/app/core/auth.py` -- password hashing (scrypt) and verification
 - `backend/app/core/notifier.py` -- NtfyNotifier (HTTP POST); AlertManager evaluates disk threshold + outdated-app alerts after each discovery cycle
 
 ### API routes
 - `backend/app/api/routes/guests.py` -- guest endpoints; snapshot name resolved here before calling `guest_action()` (auto-generates `proxmon-YYYYMMDD-HHMMSS` if not provided); `_poll_upid()` background task polls Proxmox UPID for completion; `POST /api/guests/{id}/os-update` and `/app-update` fire background tasks via `run_os_update_bg` / `run_app_update_bg`; `_register_bg_task(request, coro)` encapsulates background task GC-prevention pattern; `_handle_proxmox_error(exc, task_store, task_id)` shared Proxmox error extraction for action/backup endpoints
 - `backend/app/api/routes/settings.py` -- settings endpoints; host/app_config/guest_config secrets handled by ConfigStore CRUD layer; preserves guest state (`scheduler._guests`) across settings save
-- `backend/app/api/routes/custom_apps.py` -- custom app definition CRUD; uses ConfigStore CRUD methods directly (list, get, upsert, delete)
+- `backend/app/api/routes/custom_apps.py` -- custom app definition CRUD; uses ConfigStore CRUD methods directly (list, get, upsert, delete); `CustomAppDefRequest` validates `version_path` starts with `/` and requires `auth_header` when `accepts_api_key=True`
 - `backend/app/api/routes/bulk_jobs.py` -- bulk os_update / app_update across multiple guests; sequential per-guest execution
 - `backend/app/api/routes/tasks.py` -- task history endpoints (list, get, clear)
-- `backend/app/api/auth_routes.py` -- login/logout/status/change-password endpoints
+- `backend/app/api/auth_routes.py` -- login/logout/status/change-password endpoints; `_check_rate_limit(ip)` checks quota (10 failed attempts / 60s / IP); `_record_failed_attempt(ip)` records failures only — successful logins do not consume quota
 - `backend/app/api/helpers.py` -- `run_os_update_bg()`, `run_app_update_bg()`; `_keep_or_replace()` handles scalar secrets (github_token, ssh_password, ntfy_token, proxmon_api_key); `_require_api_key` honours `request.state.setup_exempt` flag from auth middleware; `_log_task_exception()` done-callback for fire-and-forget tasks; `_last_lines(text, n=3)` extracts last N non-empty lines for task detail; `_APP_UPDATE_PROBE_INTERVAL=5`, `_APP_UPDATE_RETRY_BUDGET=60` control post-update version probe retry
 - `backend/app/middleware/auth_middleware.py` -- session cookie + API key auth; exempts /health, /api/auth/*, /api/setup/status; loopback-only setup endpoints; sets `request.state.setup_exempt = True` for setup-flow requests (consumed by `_require_api_key`)
 
 ### Detectors
 - `backend/app/detectors/http_json.py` -- config-driven `DetectorConfig` entries for 13 apps (Sonarr, Radarr, Bazarr, Prowlarr, Lidarr, Readarr, Whisparr, Immich, Overseerr, Seerr, Gitea, Traefik, ntfy); add new simple apps here
 - `backend/app/detectors/registry.py` -- `ALL_DETECTORS` list, `DETECTOR_MAP`; `load_custom_detectors()` for runtime injection of user-defined apps; called at startup and after every custom-app CRUD save
-- `backend/app/detectors/truenas.py` -- TrueNAS; JSON-RPC 2.0 over WebSocket (`wss://{host}/api/current`); auth via `auth.login_with_api_key`; installed from `system.info`, latest from `update.status`; returns `(installed, cached_latest)` tuple — `get_latest_version()` returns None
+- `backend/app/detectors/truenas.py` -- TrueNAS; JSON-RPC 2.0 over WebSocket (`wss://{host}/api/current`); auth via `auth.login_with_api_key`; installed from `system.info`, latest from `update.status`; returns `(installed, cached_latest)` tuple — `get_latest_version()` returns None; has `scheme = "https"` class attribute (discovery.py uses `getattr` default `"http"`, so this is required for correct `wss://` URIs)
 - Specialized: `plex.py`, `caddy.py`, `qbittorrent.py`, `sabnzbd.py`, `jackett.py`, `librespeed_rust.py`, `docker_generic.py`
 
 ### Frontend
@@ -119,10 +119,10 @@ docker compose build && docker compose up -d
 **Secrets & masking**
 - Scalar secrets (github_token, ssh_password, ntfy_token, proxmon_api_key) use `_keep_or_replace()` in the settings route to prevent `"***"` mask from overwriting real values.
 - Nested secrets inside hosts, app_config, and guest_config (token_secret, ssh_password, api_key) are handled by ConfigStore CRUD methods via `preserve_secrets=True` — the CRUD layer reads the existing row and keeps `"***"` or `None` values unchanged. Empty-string secrets (`""`) are normalized to `NULL` in `upsert_app_config` / `upsert_guest_config`, restoring inheritance from the parent config level.
-- New hosts must supply a real `token_secret` — `None`, `""`, or `"***"` are rejected with 422 by the settings route.
+- New hosts must supply a real `token_secret` — `None`, `""`, or `"***"` are rejected with 422 by the settings route. For existing hosts, `""` is normalized to `None` so the CRUD layer preserves the existing secret.
 
 **Detectors**
-- All detectors default to `http://`; use per-app `scheme=https` for HTTPS-only apps.
+- All detectors default to `http://` via `getattr(detector_obj, "scheme", "http")` in `_resolve_config`; use per-app `scheme=https` for HTTPS-only apps. TrueNAS has `scheme = "https"` as a class attribute.
 - `HttpJsonDetector.get_installed_version` raises `ProbeError` on HTTP/connection failures; `_check_version` in discovery.py catches it and stores the message in `guest.probe_error`; surfaced in guest detail UI.
 - Custom app detectors are injected into `ALL_DETECTORS`/`DETECTOR_MAP` at runtime via `load_custom_detectors()`; called at startup (main.py lifespan) and after every CRUD save.
 - User-defined app names must not collide with built-in detector names; collisions are logged and skipped.
@@ -163,11 +163,12 @@ docker compose build && docker compose up -d
 - `detail` field = short human summary; `output` field = full raw stdout/stderr.
 - For `app_update`, `detail` is set to the last 3 non-empty output lines via `_last_lines()` for both success and failure.
 - Tasks marked `running` for `os_update` or `app_update` are reconciled to `failed` on app restart (stale guard).
+- Task pruning (`_PRUNE` SQL in `create()`) keeps up to 500 records but exempts `pending`/`running` tasks from deletion — prevents active bulk jobs from being pruned during batch creation.
 
 **Settings payload**
 - `Settings.tsx` AppConfig payload builder uses clear sentinels: `""` for string fields cleared by the user (backend maps to NULL), `0` for port clears; fields never set are omitted (Pydantic `None` → backend keeps existing). The `hasContent` guard uses `!= null` (not falsy) since `""` is a valid clear sentinel.
 - `Settings.tsx` AppConfig payload builder must include ALL per-app fields when posting — easy to miss new fields when adding them.
-- `save_full()` uses per-host `upsert_host()` calls — each host is upserted individually with `preserve_secrets=True`, so partial saves are safe. Hosts not in the payload are deleted (full replacement semantics at the list level).
+- `save_full()` uses replace-all semantics for both hosts and app configs: incoming entries are upserted with `preserve_secrets=True`, entries not in the payload are deleted. This ensures stale rows are cleaned up atomically.
 
 **Shell metacharacters**
 - `SHELL_METACHARACTERS` regex blocks: `; & | \` $ < > ( ) ! \n \\ #`
