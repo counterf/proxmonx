@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 # Cache TTL: 1 hour
 CACHE_TTL_SECONDS = 3600
+# Negative cache TTL: 5 minutes (avoids retrying failed lookups every cycle)
+NEGATIVE_CACHE_TTL_SECONDS = 300
 
 
 def parse_github_repo(value: str) -> str:
@@ -54,7 +56,7 @@ class GitHubClient:
 
     def __init__(self, settings: Settings, http_client: httpx.AsyncClient | None = None) -> None:
         self._token = settings.github_token
-        self._cache: dict[str, tuple[str, float]] = {}  # repo -> (version, timestamp)
+        self._cache: dict[str, tuple[str | None, float]] = {}  # repo -> (version, timestamp)
         self._http_client = http_client
 
     async def get_latest_version(self, repo: str, bypass_cache: bool = False) -> str | None:
@@ -74,17 +76,18 @@ class GitHubClient:
             cached = self._cache.get(repo)
             if cached:
                 version, cached_at = cached
-                if time.time() - cached_at < CACHE_TTL_SECONDS:
+                ttl = CACHE_TTL_SECONDS if version is not None else NEGATIVE_CACHE_TTL_SECONDS
+                if time.time() - cached_at < ttl:
                     logger.debug("Cache hit for %s: %s", repo, version)
                     return version
 
         try:
             version, _source, _reason = await self._fetch_with_detail(repo)
-            if version:
-                self._cache[repo] = (version, time.time())
+            self._cache[repo] = (version, time.time())
             return version
         except Exception:
             logger.warning("Failed to fetch latest version for %s", repo)
+            self._cache[repo] = (None, time.time())
             return None
 
     async def test_repo(self, raw_input: str) -> GitHubTestResult:

@@ -8,7 +8,7 @@ import httpx
 
 from app.config import ProxmoxHostConfig, Settings  # Settings kept for DiscoveryEngine type hint
 from app.core.github import GitHubClient
-from app.core.proxmox import ProxmoxClient
+from app.core.proxmox import DiscoveryError, ProxmoxClient
 from app.core.ssh import SSHClient, _extract_ssh_host
 from app.detectors.base import BaseDetector
 from app.detectors.registry import ALL_DETECTORS, DETECTOR_MAP, DOCKER_DETECTOR
@@ -74,7 +74,7 @@ class DiscoveryEngine:
 
         if not hosts:
             logger.warning("No Proxmox hosts configured -- skipping discovery")
-            return {}
+            return dict(existing_guests)
 
         if len(hosts) == 1:
             return await self._run_host_cycle(hosts[0], existing_guests, is_manual=is_manual)
@@ -96,6 +96,10 @@ class DiscoveryEngine:
                 logger.error(
                     "Discovery failed for host %s: %s", hosts[i].label, result,
                 )
+                # Preserve existing guests for the failed host
+                for gid, g in existing_guests.items():
+                    if g.host_id == hosts[i].id:
+                        merged[gid] = g
 
         elapsed = (datetime.now(timezone.utc) - start).total_seconds()
         logger.info(
@@ -127,7 +131,14 @@ class DiscoveryEngine:
                 http_client=host_client,
             )
 
-            guests = await proxmox.list_guests()
+            try:
+                guests = await proxmox.list_guests()
+            except DiscoveryError:
+                logger.error(
+                    "Discovery failed for host %s — preserving existing guests",
+                    host_config.label,
+                )
+                return {gid: g for gid, g in existing_guests.items() if g.host_id == host_config.id}
             logger.info("Host %s: discovered %d guests", host_config.label, len(guests))
 
             for guest in guests:

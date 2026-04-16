@@ -10,6 +10,10 @@ from app.models.guest import GuestInfo
 logger = logging.getLogger(__name__)
 
 
+class DiscoveryError(Exception):
+    """Raised when guest discovery fails completely (no data from any endpoint)."""
+
+
 class ProxmoxClient:
     """Read-only async client for the Proxmox VE API."""
 
@@ -78,6 +82,7 @@ class ProxmoxClient:
     async def list_guests(self) -> list[GuestInfo]:
         """Discover all LXC containers and optionally VMs."""
         guests: list[GuestInfo] = []
+        any_success = False
 
         # LXC containers
         try:
@@ -88,6 +93,7 @@ class ProxmoxClient:
                     guest = self._parse_guest(ct, "lxc")
                     if guest:
                         guests.append(guest)
+            any_success = True
             logger.info("Discovered %d LXC containers", len(guests))
         except Exception:
             logger.exception("Failed to list LXC containers")
@@ -104,9 +110,15 @@ class ProxmoxClient:
                         if guest:
                             guests.append(guest)
                             vm_count += 1
+                any_success = True
                 logger.info("Discovered %d VMs", vm_count)
             except Exception:
                 logger.exception("Failed to list VMs")
+
+        if not any_success:
+            raise DiscoveryError(
+                f"Failed to discover any guests from {self._node}"
+            )
 
         return guests
 

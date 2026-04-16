@@ -1,6 +1,7 @@
 """Tests for discovery orchestration."""
 
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import httpx
@@ -10,7 +11,7 @@ from app.config import AppConfig, ProxmoxHostConfig, Settings
 from app.core.discovery import DiscoveryEngine
 from app.models.guest import GuestInfo
 from app.core.github import GitHubClient
-from app.core.proxmox import ProxmoxClient
+from app.core.proxmox import DiscoveryError, ProxmoxClient
 from app.core.ssh import SSHClient
 
 
@@ -401,3 +402,72 @@ class TestGithubRepoOverride:
         assert "default:100" in guests
         assert guests["default:100"].latest_version == "4.0.15.3012"
         assert default_route.called
+
+
+class TestDiscoveryErrorResilience:
+    """Tests for Finding 4: transient discovery failures preserve host state."""
+
+    @pytest.mark.asyncio
+    async def test_discovery_error_preserves_existing_guests(self) -> None:
+        """When list_guests raises DiscoveryError, existing guests for that host are preserved."""
+        existing_guest = GuestInfo(
+            id="default:100", name="sonarr", type="lxc", status="running",
+            host_id="default", host_label="Default", ip="10.0.0.100",
+            app_name="Sonarr", detector_used="sonarr",
+        )
+        existing_guests = {"default:100": existing_guest}
+
+        settings = _make_settings()
+        engine = DiscoveryEngine(
+            GitHubClient(settings), SSHClient(settings), settings=settings,
+        )
+
+        with patch.object(ProxmoxClient, "list_guests", side_effect=DiscoveryError("test")):
+            result = await engine.run_full_cycle(existing_guests)
+
+        assert "default:100" in result
+        assert result["default:100"].name == "sonarr"
+
+    @pytest.mark.asyncio
+    async def test_multihost_preserves_failed_host_updates_successful(self) -> None:
+        """Multi-host: failed host preserves guests, successful host updates."""
+        host_a = _make_host_config(id="host-a", label="Host A")
+        host_b = _make_host_config(id="host-b", label="Host B")
+
+        existing_guests = {
+            "host-a:100": GuestInfo(
+                id="host-a:100", name="sonarr", type="lxc", status="running",
+                host_id="host-a", host_label="Host A",
+            ),
+            "host-b:200": GuestInfo(
+                id="host-b:200", name="radarr", type="lxc", status="running",
+                host_id="host-b", host_label="Host B",
+            ),
+        }
+
+        settings = _make_settings(proxmox_hosts=[host_a, host_b])
+        engine = DiscoveryEngine(
+            GitHubClient(settings), SSHClient(settings), settings=settings,
+        )
+
+        # host-a succeeds with new guest, host-b fails
+        async def mock_run_host_cycle(host_config, existing, is_manual=False):
+            if host_config.id == "host-a":
+                return {
+                    "host-a:101": GuestInfo(
+                        id="host-a:101", name="prowlarr", type="lxc", status="running",
+                        host_id="host-a", host_label="Host A",
+                    ),
+                }
+            raise DiscoveryError("host-b unreachable")
+
+        with patch.object(engine, "_run_host_cycle", side_effect=mock_run_host_cycle):
+            result = await engine.run_full_cycle(existing_guests)
+
+        # host-a got new data
+        assert "host-a:101" in result
+        # host-b's existing guest is preserved
+        assert "host-b:200" in result
+        assert result["host-b:200"].name == "radarr"
+        # host-a's old guest is replaced (not present in new data)
+        assert "host-a:100" not in result

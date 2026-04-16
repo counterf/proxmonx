@@ -197,6 +197,8 @@ async def run_os_update_bg(
             ssh_key=host_config.ssh_key,
             ssh_password=host_config.ssh_password,
         )
+        if output:
+            output = _truncate_output(output)
         task_store.update(
             task_id,
             status="success" if success else "failed",
@@ -216,6 +218,23 @@ async def run_os_update_bg(
 
 _APP_UPDATE_PROBE_INTERVAL = 5  # seconds between version probes (initial + retries)
 _APP_UPDATE_RETRY_BUDGET = 60   # max seconds to keep retrying after first probe
+
+_OUTPUT_MAX_BYTES = 262144  # 256 KiB
+
+
+def _truncate_output(output: str, max_bytes: int = _OUTPUT_MAX_BYTES) -> str:
+    """Keep the last max_bytes of output, prepending a truncation marker if trimmed."""
+    encoded = output.encode("utf-8", errors="replace")
+    if len(encoded) <= max_bytes:
+        return output
+    marker = "[... truncated ...]\n"
+    marker_bytes = len(marker.encode("utf-8"))
+    tail = encoded[-(max_bytes - marker_bytes):]
+    # Skip past any incomplete UTF-8 leading bytes (continuation bytes: 0x80-0xBF)
+    i = 0
+    while i < len(tail) and (tail[i] & 0xC0) == 0x80:
+        i += 1
+    return marker + tail[i:].decode("utf-8", errors="replace")
 
 
 def _last_lines(text: str, n: int = 3) -> str:
@@ -240,6 +259,8 @@ async def run_app_update_bg(
             ssh_key=host_config.ssh_key,
             ssh_password=host_config.ssh_password,
         )
+        if output:
+            output = _truncate_output(output)
         task_store.update(
             task_id,
             status="success" if success else "failed",

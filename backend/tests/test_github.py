@@ -1,10 +1,12 @@
 """Tests for GitHub client."""
 
+import time
+
 import pytest
 import httpx
 import respx
 
-from app.core.github import GitHubClient, parse_github_repo
+from app.core.github import GitHubClient, NEGATIVE_CACHE_TTL_SECONDS, parse_github_repo
 from app.config import Settings
 
 
@@ -272,3 +274,83 @@ class TestGitHubClientTestRepo:
         assert route.call_count == 1
         await client.get_latest_version("test/bypass", bypass_cache=True)
         assert route.call_count == 2
+
+
+class TestNegativeCache:
+    """Tests for Finding 6: failed GitHub lookups are cached with short TTL."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_failed_lookup_not_retried_within_ttl(self) -> None:
+        """After a failed lookup, the same repo should NOT be queried again within 300s."""
+        route = respx.get("https://api.github.com/repos/fail/repo/releases/latest").mock(
+            return_value=httpx.Response(404)
+        )
+        respx.get("https://api.github.com/repos/fail/repo/releases?per_page=1").mock(
+            return_value=httpx.Response(404)
+        )
+        respx.get("https://api.github.com/repos/fail/repo/tags?per_page=1").mock(
+            return_value=httpx.Response(404)
+        )
+        client = GitHubClient(_make_settings())
+
+        # First call hits API
+        v1 = await client.get_latest_version("fail/repo")
+        assert v1 is None
+        assert route.call_count == 1
+
+        # Second call should use negative cache — no new API request
+        v2 = await client.get_latest_version("fail/repo")
+        assert v2 is None
+        assert route.call_count == 1  # no additional call
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_failed_lookup_retried_after_ttl_expires(self) -> None:
+        """After NEGATIVE_CACHE_TTL_SECONDS elapses, a failed repo IS retried."""
+        route = respx.get("https://api.github.com/repos/fail/retry/releases/latest").mock(
+            return_value=httpx.Response(404)
+        )
+        respx.get("https://api.github.com/repos/fail/retry/releases?per_page=1").mock(
+            return_value=httpx.Response(404)
+        )
+        respx.get("https://api.github.com/repos/fail/retry/tags?per_page=1").mock(
+            return_value=httpx.Response(404)
+        )
+        client = GitHubClient(_make_settings())
+
+        v1 = await client.get_latest_version("fail/retry")
+        assert v1 is None
+        assert route.call_count == 1
+
+        # Simulate TTL expiry by manipulating the cache timestamp
+        repo_key = "fail/retry"
+        cached_version, _ = client._cache[repo_key]
+        client._cache[repo_key] = (cached_version, time.time() - NEGATIVE_CACHE_TTL_SECONDS - 1)
+
+        # Should retry now
+        v2 = await client.get_latest_version("fail/retry")
+        assert v2 is None
+        assert route.call_count == 2  # new API call made
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_none_version_cached_from_fetch(self) -> None:
+        """When _fetch_with_detail returns None version, it is cached."""
+        respx.get("https://api.github.com/repos/empty/tags/releases/latest").mock(
+            return_value=httpx.Response(404)
+        )
+        respx.get("https://api.github.com/repos/empty/tags/releases?per_page=1").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.get("https://api.github.com/repos/empty/tags/tags?per_page=1").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        client = GitHubClient(_make_settings())
+
+        v = await client.get_latest_version("empty/tags")
+        assert v is None
+        # Verify it was cached
+        assert "empty/tags" in client._cache
+        cached_version, _ = client._cache["empty/tags"]
+        assert cached_version is None

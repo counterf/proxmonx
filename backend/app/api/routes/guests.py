@@ -33,6 +33,8 @@ from app.api.helpers import (
 
 logger = logging.getLogger(__name__)
 
+_POLL_MAX_ITERATIONS = 180  # 180 × 10s = 30 min
+
 router = APIRouter()
 
 
@@ -79,7 +81,7 @@ async def _poll_upid(
     """Background task: poll Proxmox for UPID completion and update the task record."""
     own_client: httpx.AsyncClient | None = None
     try:
-        for _ in range(60):  # poll every 10s up to 10 min
+        for _ in range(_POLL_MAX_ITERATIONS):  # poll every 10s up to 30 min
             await asyncio.sleep(10)
             safe_client = http_client if (http_client and not http_client.is_closed) else None
             if safe_client is None and own_client is None:
@@ -105,7 +107,7 @@ async def _poll_upid(
         task_store.update(
             task_id,
             status="failed",
-            detail=f"{upid} (poll timed out after 10 min)",
+            detail=f"{upid} (poll timed out after {_POLL_MAX_ITERATIONS * 10 // 60} min)",
             finished_at=_now_iso(),
         )
         if guest_id and scheduler:

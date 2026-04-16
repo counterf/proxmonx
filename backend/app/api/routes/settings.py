@@ -557,7 +557,7 @@ async def save_settings(
     from app.main import build_runtime
     new_client, new_scheduler = build_runtime(new_settings)
     # Transfer cached guest state so the dashboard doesn't go blank after save
-    if scheduler is not None:
+    if scheduler is not None and config_store.is_configured():
         new_scheduler._guests = scheduler._guests
     try:
         if config_store.is_configured():
