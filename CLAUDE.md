@@ -1,12 +1,42 @@
-# proxmon -- Claude Code Context
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What this is
 Proxmox monitoring dashboard. Discovers LXC/VM guests across multiple Proxmox hosts, detects the app running inside each guest, compares installed vs latest GitHub release version, and supports remote actions (OS update, app update, snapshot, backup, start/stop/restart).
 
 ## Stack
-- Backend: Python 3, FastAPI, httpx, sqlite3 (stdlib), uv
-- Frontend: React 18, TypeScript, Vite, Tailwind CSS
+- Backend: Python 3.12+, FastAPI, httpx, paramiko, websockets, sqlite3 (stdlib), uv
+- Frontend: React 18, TypeScript, Vite, Tailwind CSS, Vitest
 - Infra: Docker Compose, GitHub Actions (ghcr.io)
+
+---
+
+## Commands
+
+**Backend (from `backend/`):**
+```bash
+uv run pytest tests/                      # full suite (~290 tests)
+uv run pytest tests/test_discovery.py     # single file
+uv run pytest tests/test_discovery.py::test_name -x   # single test, stop on first fail
+uv run pytest -k "snapshot"               # filter by name
+uv run uvicorn app.main:app --reload      # dev server (assumes /app/data writable, see CONFIG_DB_PATH)
+```
+
+**Frontend (from `frontend/`):**
+```bash
+npm run dev      # Vite dev server
+npm run build    # tsc + vite build (production bundle)
+npm test         # vitest run (CI)
+npm run test:watch
+```
+
+**Full stack (Docker):**
+```bash
+docker compose build && docker compose up -d   # rebuild + restart after any code change
+```
+
+CI auto-builds to `ghcr.io/counterf/proxmon:latest` on push to main.
 
 ---
 
@@ -23,7 +53,8 @@ Proxmox monitoring dashboard. Discovers LXC/VM guests across multiple Proxmox ho
 - `backend/app/core/task_store.py` -- TaskRecord (id, guest_id, guest_name, host_id, action, status, started_at, finished_at, output, detail, batch_id); retains last 500 records; pruning exempts `pending`/`running` tasks; auto-reconciles stale running tasks on restart
 - `backend/app/core/session_store.py` -- SQLite-backed session management (24h TTL)
 - `backend/app/core/auth.py` -- password hashing (scrypt) and verification
-- `backend/app/core/notifier.py` -- NtfyNotifier (HTTP POST); AlertManager evaluates disk threshold + outdated-app alerts after each discovery cycle
+- `backend/app/core/notifier.py` -- NtfyNotifier (HTTP POST) only
+- `backend/app/core/alerting.py` -- AlertManager evaluates disk threshold + outdated-app alerts after each discovery cycle; uses NtfyNotifier for delivery
 
 ### API routes
 - `backend/app/api/routes/guests.py` -- guest endpoints; snapshot name resolved here before calling `guest_action()` (auto-generates `proxmon-YYYYMMDD-HHMMSS` if not provided); `_poll_upid()` background task polls Proxmox UPID for completion; `POST /api/guests/{id}/os-update` and `/app-update` fire background tasks via `run_os_update_bg` / `run_app_update_bg`; `_register_bg_task(request, coro)` encapsulates background task GC-prevention pattern; `_handle_proxmox_error(exc, task_store, task_id)` shared Proxmox error extraction for action/backup endpoints
@@ -36,10 +67,10 @@ Proxmox monitoring dashboard. Discovers LXC/VM guests across multiple Proxmox ho
 - `backend/app/middleware/auth_middleware.py` -- session cookie + API key auth; exempts /health, /api/auth/*, /api/setup/status; loopback-only setup endpoints; sets `request.state.setup_exempt = True` for setup-flow requests (consumed by `_require_api_key`)
 
 ### Detectors
-- `backend/app/detectors/http_json.py` -- config-driven `DetectorConfig` entries for 13 apps (Sonarr, Radarr, Bazarr, Prowlarr, Lidarr, Readarr, Whisparr, Immich, Overseerr, Seerr, Gitea, Traefik, ntfy); add new simple apps here
-- `backend/app/detectors/registry.py` -- `ALL_DETECTORS` list, `DETECTOR_MAP`; `load_custom_detectors()` for runtime injection of user-defined apps; called at startup and after every custom-app CRUD save
+- `backend/app/detectors/http_json.py` -- config-driven `DetectorConfig` entries for 14 apps (Sonarr, Radarr, Bazarr, Prowlarr, Lidarr, Readarr, Whisparr, Immich, Overseerr, Seerr, Gitea, Traefik, ntfy, Home Assistant); add new simple apps here
+- `backend/app/detectors/registry.py` -- `ALL_DETECTORS` list (24 built-in detectors), `DETECTOR_MAP`, `DOCKER_DETECTOR` fallback; `load_custom_detectors()` for runtime injection of user-defined apps; called at startup and after every custom-app CRUD save; `_BUILTIN_NAMES` frozen at import time guards against custom-app name collisions
 - `backend/app/detectors/truenas.py` -- TrueNAS; JSON-RPC 2.0 over WebSocket (`wss://{host}/api/current`); auth via `auth.login_with_api_key`; installed from `system.info`, latest from `update.status`; returns `(installed, cached_latest)` tuple — `get_latest_version()` returns None; has `scheme = "https"` class attribute (discovery.py uses `getattr` default `"http"`, so this is required for correct `wss://` URIs)
-- Specialized: `plex.py`, `caddy.py`, `qbittorrent.py`, `sabnzbd.py`, `jackett.py`, `librespeed_rust.py`, `docker_generic.py`
+- Specialized: `plex.py`, `caddy.py`, `qbittorrent.py`, `sabnzbd.py`, `jackett.py`, `librespeed_rust.py`, `pbs.py`, `tautulli.py`, `homepage.py`, `docker_generic.py`
 
 ### Frontend
 - `frontend/src/components/GuestActions.tsx` -- guest action dropdown; handles start/stop/shutdown/restart/snapshot/refresh/os_update/app_update/backup; confirm dialogs use shared `ConfirmDialog` sub-component; snapshot has optional name input
@@ -96,21 +127,12 @@ Note: `rocky` and `alma` containers are configured as `centos` in Proxmox — th
 ---
 
 ## Tests
-`cd backend && pytest tests/` -- 285 tests across test_alerting.py, test_auth.py, test_auth_routes.py, test_config_store.py, test_custom_app_defs.py, test_detectors.py, test_discovery.py, test_github.py, test_normalize_version.py, test_notifier.py, test_require_api_key.py, test_routes_helpers.py, test_ssh_version_cmd.py, test_update_task_locking.py
+`cd backend && uv run pytest tests/` -- ~290 tests across test_alerting.py, test_auth.py, test_auth_routes.py, test_config_store.py, test_custom_app_defs.py, test_detectors.py, test_discovery.py, test_github.py, test_normalize_version.py, test_notifier.py, test_require_api_key.py, test_routes_helpers.py, test_ssh_version_cmd.py, test_update_task_locking.py. Frontend: `cd frontend && npm test` (Vitest).
 
 ---
 
 ## Deploy
-Single container serves both API and frontend on port 3000.
-```bash
-docker compose build && docker compose up -d
-```
-CI auto-builds to `ghcr.io/counterf/proxmon:latest` on push to main.
-
-**After any code changes, always rebuild and restart Docker:**
-```bash
-docker compose build && docker compose up -d
-```
+Single container serves both API and built React SPA on port 3000 (Uvicorn). Persistent state lives in the SQLite DB at `/app/data/proxmon.db` (mounted volume).
 
 ---
 
